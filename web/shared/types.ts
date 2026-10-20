@@ -15,9 +15,11 @@ export interface BootstrapData {
 export interface SessionCollections {
   active: SessionSummary[];
   archived: SessionSummary[];
+  trash: SessionSummary[];
 }
 
 export type SessionAction =
   | { type: "archive"; sessionPath: string }
   | { type: "restore"; sessionPath: string }
+  | { type: "restore_deleted"; sessionPath: string }
   | { type: "delete"; sessionPath: string; collection: "active" | "archived" };

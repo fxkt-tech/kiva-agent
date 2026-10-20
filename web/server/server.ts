@@ -125,13 +125,17 @@ function normalizeCommand(command: RuntimeCommand): RuntimeCommand {
 
 function isSessionAction(value: unknown): value is SessionAction {
   if (typeof value !== "object" || value === null || !("type" in value) || !("sessionPath" in value) || typeof value.sessionPath !== "string") return false;
-  if (value.type === "archive" || value.type === "restore") return true;
+  if (value.type === "archive" || value.type === "restore" || value.type === "restore_deleted") return true;
   return value.type === "delete" && "collection" in value && (value.collection === "active" || value.collection === "archived");
 }
 
 async function executeSessionAction(action: SessionAction) {
   if (action.type === "restore") {
     sessions.restore(action.sessionPath);
+    return;
+  }
+  if (action.type === "restore_deleted") {
+    sessions.restoreDeleted(action.sessionPath);
     return;
   }
   const collection: SessionCollection = action.type === "archive" ? "active" : action.collection;
@@ -147,7 +151,7 @@ async function executeSessionAction(action: SessionAction) {
 }
 
 function sessionCollections() {
-  return { active: sessions.list("active"), archived: sessions.list("archived") };
+  return { active: sessions.list("active"), archived: sessions.list("archived"), trash: sessions.list("trash") };
 }
 
 function isAllowedOrigin(request: IncomingMessage) {

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync 
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import type { SessionSummary } from "../shared/types";
 
-export type SessionCollection = "active" | "archived";
+export type SessionCollection = "active" | "archived" | "trash";
 
 export class SessionCatalog {
   private readonly sessionRoot: string;
@@ -16,7 +16,7 @@ export class SessionCatalog {
   }
 
   list(collection: SessionCollection): SessionSummary[] {
-    const root = collection === "active" ? this.sessionRoot : this.archiveRoot;
+    const root = this.collectionRoot(collection);
     if (!existsSync(root)) return [];
     return listSessionFiles(root, collection === "active")
       .map((path) => readSession(path, root))
@@ -32,6 +32,15 @@ export class SessionCatalog {
     return this.move(sessionPath, this.archiveRoot, this.sessionRoot);
   }
 
+  restoreDeleted(sessionPath: string) {
+    const [collection, ...parts] = sessionPath.split(/[\\/]/);
+    if ((collection !== "active" && collection !== "archived") || parts.length === 0) {
+      throw new Error("Invalid trashed session path");
+    }
+    const targetRoot = collection === "active" ? this.sessionRoot : this.archiveRoot;
+    return this.move(sessionPath, this.trashRoot, targetRoot, parts.join("/"));
+  }
+
   trash(sessionPath: string, collection: SessionCollection) {
     const sourceRoot = collection === "active" ? this.sessionRoot : this.archiveRoot;
     const source = managedPath(sourceRoot, sessionPath);
@@ -42,15 +51,22 @@ export class SessionCatalog {
   }
 
   absolutePath(sessionPath: string, collection: SessionCollection = "active") {
-    return managedPath(collection === "active" ? this.sessionRoot : this.archiveRoot, sessionPath);
+    return managedPath(this.collectionRoot(collection), sessionPath);
   }
 
-  private move(sessionPath: string, sourceRoot: string, destinationRoot: string) {
+  private move(sessionPath: string, sourceRoot: string, destinationRoot: string, destinationPath = sessionPath) {
     const source = managedPath(sourceRoot, sessionPath);
-    const destination = uniquePath(managedPath(destinationRoot, sessionPath));
+    const destination = managedPath(destinationRoot, destinationPath);
+    if (existsSync(destination)) throw new Error("Session destination already exists");
     mkdirSync(dirname(destination), { recursive: true });
     renameSync(source, destination);
     return destination;
+  }
+
+  private collectionRoot(collection: SessionCollection) {
+    if (collection === "active") return this.sessionRoot;
+    if (collection === "archived") return this.archiveRoot;
+    return this.trashRoot;
   }
 }
 

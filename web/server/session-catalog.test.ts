@@ -47,8 +47,13 @@ describe("SessionCatalog", () => {
     const trashPath = catalog.trash("project/one.jsonl", "active");
 
     assert.equal(catalog.list("active").length, 0);
+    assert.equal(catalog.list("trash")[0].path, "active/project/one.jsonl");
     assert.match(trashPath, /\.kiva\/sessions\/\.trash\/active\/project\/one\.jsonl/);
     assert.match(readFileSync(trashPath, "utf8"), /Hello catalog/);
+
+    catalog.restoreDeleted("active/project/one.jsonl");
+    assert.equal(catalog.list("trash").length, 0);
+    assert.equal(catalog.list("active")[0].id, "one");
   });
 
   it("rejects paths outside its managed roots", () => {

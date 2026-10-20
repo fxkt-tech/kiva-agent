@@ -47,17 +47,22 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [draft, setDraft] = useState("");
   const [sessions, setSessions] = useState(data.sessions);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
-  const [sessionView, setSessionView] = useState<"active" | "archived">("active");
+  const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
+  const [sessionView, setSessionView] = useState<"active" | "archived" | "trash">("active");
   const [sessionMenu, setSessionMenu] = useState<string>();
   const messageEnd = useRef<HTMLDivElement>(null);
   const runtime = useRuntime();
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId), [sessions, selectedId]);
-  const visibleSessions = sessionView === "active" ? sessions : archivedSessions;
+  const visibleSessions = sessionView === "active" ? sessions : sessionView === "archived" ? archivedSessions : deletedSessions;
   const running = runtime.status === "running";
   const runtimeLabel = !runtime.connected ? "连接中" : running ? "运行中" : runtime.status === "error" ? "异常" : "已就绪";
 
   useEffect(() => { void refreshSessions(); }, [runtime.sessionsVersion]);
   useEffect(() => { messageEnd.current?.scrollIntoView({ block: "end", behavior: running ? "smooth" : "auto" }); }, [runtime.messages, running]);
+  useEffect(() => {
+    const active = sessions.find((session) => session.id === runtime.snapshot?.session.id);
+    setSelectedId(active?.id);
+  }, [runtime.snapshot?.session.id, sessions]);
 
   async function refreshSessions() {
     try {
@@ -66,6 +71,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
       const collections = await response.json() as SessionCollections;
       setSessions(collections.active);
       setArchivedSessions(collections.archived);
+      setDeletedSessions(collections.trash);
     } catch {
       // The runtime connection indicator already communicates server availability.
     }
@@ -88,12 +94,8 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   }
 
   async function selectSession(session: SessionSummary) {
-    try {
-      await runtime.switchSession(session.path);
-      setSelectedId(session.id);
-    } catch {
-      // Runtime state exposes the actionable error beside the conversation.
-    }
+    await runtime.switchSession(session.path);
+    setSelectedId(session.id);
   }
 
   async function createSession() {
@@ -114,6 +116,8 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
       if (selectedId !== session.id) await selectSession(session);
       await runtime.renameSession(name);
       await refreshSessions();
+    } catch {
+      // Switching or renaming errors are already exposed by the runtime hook.
     } finally {
       setSessionMenu(undefined);
     }
@@ -129,6 +133,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
     if (!response.ok) throw new Error(result.error ?? "会话操作失败");
     setSessions(result.active);
     setArchivedSessions(result.archived);
+    setDeletedSessions(result.trash);
     setSessionMenu(undefined);
   }
 
@@ -164,28 +169,29 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
           <button className="nav-item"><FileCode2 size={16} />文件</button>
           <button className="nav-item"><GitBranch size={16} />代码变更<Badge className="ml-auto">{data.project.dirtyFiles}</Badge></button>
           <button className={cn("nav-item", sessionView === "archived" && "active")} onClick={() => setSessionView("archived")}><Archive size={16} />归档<Badge className="ml-auto">{archivedSessions.length}</Badge></button>
+          <button className={cn("nav-item", sessionView === "trash" && "active")} onClick={() => setSessionView("trash")}><Trash2 size={16} />回收站<Badge className="ml-auto">{deletedSessions.length}</Badge></button>
         </nav>
 
-        <div className="section-label"><span>{sessionView === "active" ? "最近会话" : "已归档"}</span><Search size={13} /></div>
+        <div className="section-label"><span>{sessionView === "active" ? "最近会话" : sessionView === "archived" ? "已归档" : "最近删除"}</span><Search size={13} /></div>
         <ScrollArea className="session-scroll">
           <div className="space-y-1 px-2 pb-4">
             {visibleSessions.length ? visibleSessions.map((session) => (
-              <div className="session-item-wrap" key={session.id}>
-                <button onClick={() => sessionView === "active" && void selectSession(session)} className={cn("session-item", selectedId === session.id && "selected")}>
+              <div className="session-item-wrap" key={`${sessionView}:${session.path}`}>
+                <button onClick={() => sessionView === "active" && void selectSession(session).catch(() => {})} className={cn("session-item", selectedId === session.id && "selected")}>
                   <span className="truncate pr-6 text-sm font-medium">{session.name}</span>
                   <span className="line-clamp-2 text-left text-xs leading-5 text-muted-foreground">{session.preview}</span>
                   <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt)}</span>
                 </button>
-                <button className="session-more" aria-label="会话操作" onClick={() => setSessionMenu((value) => value === session.id ? undefined : session.id)}><MoreHorizontal size={14} /></button>
-                {sessionMenu === session.id && <div className="session-menu">
+                <button className="session-more" aria-label="会话操作" onClick={() => setSessionMenu((value) => value === session.path ? undefined : session.path)}><MoreHorizontal size={14} /></button>
+                {sessionMenu === session.path && <div className="session-menu">
                   {sessionView === "active" ? <>
                     <button onClick={() => void renameSession(session)}><Pencil size={12} />重命名</button>
-                    <button onClick={() => void mutateSession({ type: "archive", sessionPath: session.path }).then(() => selectedId === session.id && setSelectedId(undefined))}><Archive size={12} />归档</button>
-                  </> : <button onClick={() => void mutateSession({ type: "restore", sessionPath: session.path })}><RotateCcw size={12} />恢复</button>}
-                  <button className="danger" onClick={() => void deleteSession(session, sessionView)}><Trash2 size={12} />删除</button>
+                    <button onClick={() => void mutateSession({ type: "archive", sessionPath: session.path }).then(() => selectedId === session.id && setSelectedId(undefined)).catch(() => refreshSessions())}><Archive size={12} />归档</button>
+                  </> : sessionView === "archived" ? <button onClick={() => void mutateSession({ type: "restore", sessionPath: session.path }).catch(() => refreshSessions())}><RotateCcw size={12} />恢复</button> : <button onClick={() => void mutateSession({ type: "restore_deleted", sessionPath: session.path }).catch(() => refreshSessions())}><RotateCcw size={12} />恢复删除</button>}
+                  {sessionView !== "trash" && <button className="danger" onClick={() => void deleteSession(session, sessionView)}><Trash2 size={12} />删除</button>}
                 </div>}
               </div>
-            )) : <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{sessionView === "active" ? <>还没有会话。<br />创建一个开始工作。</> : "还没有归档会话。"}</p>}
+            )) : <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{sessionView === "active" ? <>还没有会话。<br />创建一个开始工作。</> : sessionView === "archived" ? "还没有归档会话。" : "回收站是空的。"}</p>}
           </div>
         </ScrollArea>
 
@@ -197,7 +203,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
 
       <section className="conversation">
         <header className="conversation-header">
-          <div className="min-w-0"><h1>{selected?.name ?? "新的开始"}</h1><p>{data.project.name} · {data.project.branch}</p></div>
+          <div className="min-w-0"><h1>{selected?.name ?? runtime.snapshot?.session.name ?? "新的开始"}</h1><p>{data.project.name} · {data.project.branch}</p></div>
           <div className="header-actions"><Badge className="hidden sm:inline-flex"><CircleDot size={10} className={cn("mr-1", runtime.status === "error" ? "text-red-400" : running ? "text-amber-300" : "text-emerald-400")} />{runtimeLabel}</Badge><Button variant="ghost" size="icon"><MoreHorizontal size={18} /></Button><Button variant="ghost" size="icon" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={18} /></Button></div>
         </header>
 
