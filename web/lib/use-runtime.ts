@@ -28,6 +28,7 @@ interface RuntimeViewState {
 type Action =
   | { type: "connected"; value: boolean }
   | { type: "user"; message: ChatMessage }
+  | { type: "session_switched" }
   | { type: "event"; event: RuntimeEvent }
   | { type: "error"; message: string };
 
@@ -85,12 +86,23 @@ export function useRuntime() {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
   }, [execute]);
 
-  return { ...state, sendPrompt, abort };
+  const switchSession = useCallback(async (sessionPath: string) => {
+    try {
+      await execute({ type: "switch_session", sessionPath });
+      dispatch({ type: "session_switched" });
+    } catch (error) {
+      dispatch({ type: "error", message: errorMessage(error) });
+      throw error;
+    }
+  }, [execute]);
+
+  return { ...state, sendPrompt, abort, switchSession };
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
   if (action.type === "connected") return { ...state, connected: action.value, error: action.value ? undefined : state.error };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
+  if (action.type === "session_switched") return { ...state, messages: [], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };
   const event = action.event;
   if (event.type === "error") return { ...state, status: "error", error: event.message };

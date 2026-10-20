@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { BootstrapData, SessionSummary } from "@/shared/types";
 
@@ -17,7 +17,7 @@ function listSessionFiles(root: string): string[] {
   });
 }
 
-function readSession(path: string): SessionSummary {
+function readSession(path: string, root: string): SessionSummary {
   const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
   let name = "未命名会话";
   let preview = "尚无消息预览";
@@ -36,13 +36,14 @@ function readSession(path: string): SessionSummary {
       // A partially-written trailing line should not hide the session.
     }
   }
-  return { id, name, preview, updatedAt: statSync(path).mtime.toISOString() };
+  return { id, path: relative(root, path), name, preview, updatedAt: statSync(path).mtime.toISOString() };
 }
 
 export function getBootstrapData(): BootstrapData {
   const status = git(["status", "--porcelain"]);
-  const sessions = listSessionFiles(join(repoRoot, ".kiva", "sessions"))
-    .map(readSession)
+  const sessionRoot = join(repoRoot, ".kiva", "sessions");
+  const sessions = listSessionFiles(sessionRoot)
+    .map((path) => readSession(path, sessionRoot))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 30);
   const modelConfigFound = existsSync(join(repoRoot, ".kiva", "agent", "models.json"));

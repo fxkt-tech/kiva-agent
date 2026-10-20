@@ -16,6 +16,7 @@ export interface RuntimeAdapter {
   getState(): Promise<RuntimeAdapterState>;
   prompt(message: string): Promise<unknown>;
   abort(): Promise<void>;
+  switchSession(path: string): Promise<unknown>;
 }
 
 export type RuntimeAdapterFactory = () => RuntimeAdapter;
@@ -52,8 +53,10 @@ export class RuntimeHub {
       const message = command.message.trim();
       if (!message) throw new Error("Prompt cannot be empty");
       await adapter.prompt(message);
-    } else {
+    } else if (command.type === "abort") {
       await adapter.abort();
+    } else {
+      await adapter.switchSession(command.sessionPath);
     }
     await this.publishSnapshot();
     return { accepted: true };

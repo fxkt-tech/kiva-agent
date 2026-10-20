@@ -10,7 +10,8 @@ export interface RuntimeSnapshot {
 
 export type RuntimeCommand =
   | { type: "prompt"; message: string }
-  | { type: "abort" };
+  | { type: "abort" }
+  | { type: "switch_session"; sessionPath: string };
 
 export interface CommandResult {
   accepted: true;

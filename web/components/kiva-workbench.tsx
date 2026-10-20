@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/lib/use-runtime";
-import type { BootstrapData } from "@/shared/types";
+import type { BootstrapData, SessionSummary } from "@/shared/types";
 
 function relativeTime(value: string) {
   const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
@@ -38,7 +38,7 @@ function relativeTime(value: string) {
 }
 
 export function KivaWorkbench({ data }: { data: BootstrapData }) {
-  const [selectedId, setSelectedId] = useState(data.sessions[0]?.id);
+  const [selectedId, setSelectedId] = useState<string>();
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
   const runtime = useRuntime();
@@ -59,6 +59,15 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
+    }
+  }
+
+  async function selectSession(session: SessionSummary) {
+    try {
+      await runtime.switchSession(session.path);
+      setSelectedId(session.id);
+    } catch {
+      // Runtime state exposes the actionable error beside the conversation.
     }
   }
 
@@ -90,7 +99,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         <ScrollArea className="session-scroll">
           <div className="space-y-1 px-2 pb-4">
             {data.sessions.length ? data.sessions.map((session) => (
-              <button key={session.id} onClick={() => setSelectedId(session.id)} className={cn("session-item", selectedId === session.id && "selected")}>
+              <button key={session.id} onClick={() => void selectSession(session)} className={cn("session-item", selectedId === session.id && "selected")}>
                 <span className="truncate text-sm font-medium">{session.name}</span>
                 <span className="line-clamp-2 text-left text-xs leading-5 text-muted-foreground">{session.preview}</span>
                 <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt)}</span>

@@ -33,5 +33,6 @@ export function createPiAdapter(repoRoot: string): RuntimeAdapter {
     getState: () => client.getState(),
     prompt: (message) => client.prompt(message),
     abort: () => client.abort(),
+    switchSession: (path) => client.switchSession(path),
   };
 }

@@ -1,5 +1,6 @@
 export interface SessionSummary {
   id: string;
+  path: string;
   name: string;
   preview: string;
   updatedAt: string;

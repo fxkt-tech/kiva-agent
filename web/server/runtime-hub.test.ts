@@ -6,6 +6,7 @@ function createAdapter() {
   let starts = 0;
   const prompts: string[] = [];
   let aborts = 0;
+  const switchedSessions: string[] = [];
   let eventListener: ((event: unknown) => void) | undefined;
   const adapter: RuntimeAdapter = {
     async start() { starts += 1; },
@@ -21,6 +22,7 @@ function createAdapter() {
     },
     async prompt(message) { prompts.push(message); return "started"; },
     async abort() { aborts += 1; },
+    async switchSession(path) { switchedSessions.push(path); },
   };
   return {
     adapter,
@@ -28,6 +30,7 @@ function createAdapter() {
     prompts,
     aborts: () => aborts,
     emit: (event: unknown) => eventListener?.(event),
+    switchedSessions,
   };
 }
 
@@ -75,5 +78,13 @@ describe("RuntimeHub", () => {
     });
     assert.equal((events[1] as { type: string }).type, "pi_event");
     assert.equal((events[2] as { type: string }).type, "snapshot");
+  });
+
+  it("switches the active Pi session through the same runtime boundary", async () => {
+    const fake = createAdapter();
+    const hub = new RuntimeHub(() => fake.adapter);
+
+    assert.deepEqual(await hub.execute({ type: "switch_session", sessionPath: "/repo/session.jsonl" }), { accepted: true });
+    assert.deepEqual(fake.switchedSessions, ["/repo/session.jsonl"]);
   });
 });

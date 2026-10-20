@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
@@ -9,7 +9,7 @@ import type { RuntimeCommand } from "../shared/runtime-types";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(process.env.KIVA_REPO_ROOT ?? resolve(webRoot, ".."));
-const host = process.env.HOST ?? "127.0.0.1";
+const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 30141);
 const dev = process.env.NODE_ENV !== "production";
 
@@ -19,6 +19,7 @@ const runtime = new RuntimeHub(() => createPiAdapter(repoRoot));
 const sockets = new WebSocketServer({ noServer: true });
 
 await app.prepare();
+const handleUpgrade = app.getUpgradeHandler();
 
 const server = createServer(async (request, response) => {
   try {
@@ -27,7 +28,8 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, await runtime.snapshot());
     }
     if (url.pathname === "/api/runtime/command" && request.method === "POST") {
-      const command = await readCommand(request);
+      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
+      const command = normalizeCommand(await readCommand(request));
       return sendJson(response, 202, await runtime.execute(command));
     }
     await handle(request, response);
@@ -38,7 +40,14 @@ const server = createServer(async (request, response) => {
 
 server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
-  if (url.pathname !== "/api/runtime/events") return;
+  if (url.pathname !== "/api/runtime/events") {
+    void handleUpgrade(request, socket, head);
+    return;
+  }
+  if (!isAllowedOrigin(request)) {
+    socket.destroy();
+    return;
+  }
   sockets.handleUpgrade(request, socket, head, (webSocket) => sockets.emit("connection", webSocket, request));
 });
 
@@ -82,7 +91,24 @@ async function readCommand(request: IncomingMessage): Promise<RuntimeCommand> {
 function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (typeof value !== "object" || value === null || !("type" in value)) return false;
   if (value.type === "abort") return true;
+  if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
   return value.type === "prompt" && "message" in value && typeof value.message === "string";
+}
+
+function normalizeCommand(command: RuntimeCommand): RuntimeCommand {
+  if (command.type !== "switch_session") return command;
+  const sessionRoot = resolve(repoRoot, ".kiva", "sessions");
+  const sessionPath = resolve(sessionRoot, command.sessionPath);
+  if (!sessionPath.startsWith(`${sessionRoot}${sep}`) || !sessionPath.endsWith(".jsonl")) {
+    throw new Error("Invalid session path");
+  }
+  return { ...command, sessionPath };
+}
+
+function isAllowedOrigin(request: IncomingMessage) {
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  return origin === `http://${host}:${port}` || origin === `http://localhost:${port}`;
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
