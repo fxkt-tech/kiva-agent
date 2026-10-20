@@ -15,6 +15,7 @@ export function getBootstrapData(): BootstrapData {
   const sessions = new SessionCatalog(repoRoot).list("active").slice(0, 30);
   const modelConfigFound = existsSync(join(repoRoot, ".kiva", "agent", "models.json"));
   return {
+    renderedAt: new Date().toISOString(),
     project: {
       name: basename(repoRoot),
       path: repoRoot,

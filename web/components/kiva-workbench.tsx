@@ -35,8 +35,8 @@ import { useRuntime } from "@/lib/use-runtime";
 import { MessageContent } from "@/components/message-content";
 import type { BootstrapData, SessionAction, SessionCollections, SessionSummary } from "@/shared/types";
 
-function relativeTime(value: string) {
-  const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
+function relativeTime(value: string, renderedAt: string) {
+  const minutes = Math.round((new Date(renderedAt).getTime() - new Date(value).getTime()) / 60_000);
   if (minutes < 1) return "刚刚";
   if (minutes < 60) return `${minutes} 分钟`;
   if (minutes < 1_440) return `${Math.floor(minutes / 60)} 小时`;
@@ -208,7 +208,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
                 <button onClick={() => sessionView === "active" && void selectSession(session).catch(() => {})} className={cn("session-item", selectedId === session.id && "selected")}>
                   <span className="truncate pr-6 text-sm font-medium">{session.name}</span>
                   <span className="line-clamp-2 text-left text-xs leading-5 text-muted-foreground">{session.preview}</span>
-                  <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt)}</span>
+                  <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt, data.renderedAt)}</span>
                 </button>
                 <button className="session-more" aria-label="会话操作" onClick={() => setSessionMenu((value) => value === session.path ? undefined : session.path)}><MoreHorizontal size={14} /></button>
                 {sessionMenu === session.path && <div className="session-menu">

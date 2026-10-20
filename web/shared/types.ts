@@ -7,6 +7,7 @@ export interface SessionSummary {
 }
 
 export interface BootstrapData {
+  renderedAt: string;
   project: { name: string; path: string; branch: string; dirtyFiles: number };
   runtime: { piVersion: string; modelConfigFound: boolean; status: "ready" | "needs-model" };
   sessions: SessionSummary[];
