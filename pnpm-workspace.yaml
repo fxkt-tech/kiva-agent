@@ -1,0 +1,5 @@
+allowBuilds:
+  '@agegr/pi-web': true
+  '@google/genai': false
+  node-pty: true
+  protobufjs: false

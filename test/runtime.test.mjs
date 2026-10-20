@@ -44,9 +44,12 @@ test("plugin installs require a reproducible source", () => {
 
 test("the general Kiva command cannot bypass project-local plugin management", () => {
   assert.deepEqual(createAgentArgs(["--help"]), ["--help"]);
-  assert.throws(() => createAgentArgs(["install", "npm:example@1.2.3"]), /plugin:add/);
-  assert.throws(() => createAgentArgs(["remove", "npm:example"]), /plugin:remove/);
-  assert.throws(() => createAgentArgs(["uninstall", "npm:example"]), /plugin:remove/);
+  assert.throws(
+    () => createAgentArgs(["install", "npm:example@1.2.3"]),
+    /pnpm plugin:add <source>/,
+  );
+  assert.throws(() => createAgentArgs(["remove", "npm:example"]), /pnpm plugin:remove <source>/);
+  assert.throws(() => createAgentArgs(["uninstall", "npm:example"]), /pnpm plugin:remove <source>/);
 });
 
 test("runPi launches the repository-local Pi executable with the isolated runtime", () => {

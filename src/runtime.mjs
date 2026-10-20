@@ -39,7 +39,7 @@ export function createAgentArgs(args) {
   const packageCommands = new Set(["install", "remove", "uninstall"]);
   if (packageCommands.has(args[0])) {
     const script = args[0] === "install" ? "plugin:add" : "plugin:remove";
-    throw new Error(`Use 'npm run ${script} -- <source>' so package changes stay project-local`);
+    throw new Error(`Use 'pnpm ${script} <source>' so package changes stay project-local`);
   }
   return args;
 }

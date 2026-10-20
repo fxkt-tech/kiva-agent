@@ -2,6 +2,7 @@
   "name": "@fxkt-tech/kiva-agent",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@12.14.0",
   "type": "module",
   "bin": {
     "kiva": "./bin/kiva.mjs"
@@ -11,6 +12,7 @@
   },
   "scripts": {
     "start": "node ./bin/kiva.mjs",
+    "web": "node ./bin/kiva-web.mjs",
     "kiva": "node ./bin/kiva.mjs",
     "plugin:add": "node ./bin/kiva-plugin.mjs add",
     "plugin:remove": "node ./bin/kiva-plugin.mjs remove",
@@ -18,6 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agegr/pi-web": "0.12.2",
     "@earendil-works/pi-coding-agent": "1.3.0"
   },
   "devDependencies": {

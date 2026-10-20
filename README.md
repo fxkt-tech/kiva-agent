@@ -5,22 +5,31 @@ Kiva 是一个项目内自包含的 Pi Agent。Pi、Agent 资源、第三方插�
 ## 环境
 
 - Node.js 22.19 或更高版本
-- npm
+- pnpm 12.14（建议通过 Corepack 启用）
 
 ## 开始使用
 
 ```sh
-npm install --ignore-scripts
-npm start
+corepack enable
+pnpm install
+pnpm start
 ```
 
 首次启动后使用 `/login` 配置模型提供方。认证信息保存在被 Git 忽略的 `.kiva/agent/` 中。
 
+也可以直接启动 Web UI：
+
+```sh
+pnpm web
+```
+
+浏览器会自动打开 `http://127.0.0.1:30141`。Web UI 与终端版共用 `.kiva/agent/` 中的模型、认证和设置，以及 `.kiva/sessions/` 中的会话。
+
 也可以把参数直接传给 Pi：
 
 ```sh
-npm run kiva -- --help
-npm run kiva -- -p "解释这个仓库"
+pnpm kiva --help
+pnpm kiva -p "解释这个仓库"
 ```
 
 ## 插件
@@ -28,8 +37,8 @@ npm run kiva -- -p "解释这个仓库"
 通过项目命令安装和移除插件，命令会强制使用 Pi 的项目作用域：
 
 ```sh
-npm run plugin:add -- npm:some-pi-package@1.2.3
-npm run plugin:remove -- npm:some-pi-package
+pnpm plugin:add npm:some-pi-package@1.2.3
+pnpm plugin:remove npm:some-pi-package
 ```
 
 安装命令要求 npm 精确版本、完整 Git commit SHA 或仓库内的本地路径；未固定的远程来源会被拒绝。Git tag 也可能被移动，因此不能作为可复现版本。通用 `kiva install/remove` 入口同样被禁用，防止绕过项目作用域。插件声明写入 `.pi/settings.json`；下载内容分别位于 `.pi/npm/` 和 `.pi/git/`，不会提交到 Git。
@@ -53,8 +62,8 @@ agent/                  Kiva 自有的 Pi package
 ## 开发检查
 
 ```sh
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 node ./bin/kiva.mjs list --approve
 ```
 
