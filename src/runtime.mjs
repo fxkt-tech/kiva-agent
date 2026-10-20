@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export function createRuntime(repoRoot, baseEnv = process.env) {
@@ -22,7 +22,7 @@ export function createRuntime(repoRoot, baseEnv = process.env) {
   };
 }
 
-export function createPluginArgs(command, source) {
+export function createPluginArgs(command, source, { repoRoot = process.cwd() } = {}) {
   if (command !== "install" && command !== "remove") {
     throw new Error("Plugin command must be install or remove");
   }
@@ -30,7 +30,7 @@ export function createPluginArgs(command, source) {
     throw new Error("Plugin source is required");
   }
   if (command === "install") {
-    assertReproduciblePluginSource(source);
+    assertReproduciblePluginSource(source, repoRoot);
   }
   return [command, source, "--local"];
 }
@@ -44,8 +44,17 @@ export function createAgentArgs(args) {
   return args;
 }
 
-function assertReproduciblePluginSource(source) {
-  if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return;
+function assertReproduciblePluginSource(source, repoRoot) {
+  if (source.startsWith("./") || source.startsWith("../") || isAbsolute(source)) {
+    const canonicalRoot = realpathSync(repoRoot);
+    const candidate = resolve(repoRoot, source);
+    const canonicalCandidate = existsSync(candidate) ? realpathSync(candidate) : candidate;
+    const pathFromRoot = relative(canonicalRoot, canonicalCandidate);
+    if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+      throw new Error("Local plugin sources must stay inside the repository");
+    }
+    return;
+  }
 
   if (source.startsWith("npm:")) {
     const exactNpmVersion = /^npm:(?:@[^/]+\/)?[^@/]+@v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -59,8 +68,10 @@ function assertReproduciblePluginSource(source) {
   if (gitSource) {
     const normalized = source.startsWith("git:") ? source.slice(4) : source;
     const lastSeparator = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf(":"));
-    if (normalized.lastIndexOf("@") <= lastSeparator) {
-      throw new Error("git plugin sources must include a tag or commit");
+    const refSeparator = normalized.lastIndexOf("@");
+    const ref = refSeparator > lastSeparator ? normalized.slice(refSeparator + 1) : "";
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(ref)) {
+      throw new Error("git plugin sources must include a full commit SHA");
     }
     return;
   }

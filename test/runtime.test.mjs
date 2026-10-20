@@ -30,10 +30,16 @@ test("plugin commands always target project-local Pi settings", () => {
 test("plugin installs require a reproducible source", () => {
   assert.doesNotThrow(() => createPluginArgs("install", "npm:example@1.2.3"));
   assert.doesNotThrow(() => createPluginArgs("install", "npm:@scope/example@1.2.3-beta.1"));
-  assert.doesNotThrow(() => createPluginArgs("install", "git:github.com/example/plugin@v1"));
-  assert.doesNotThrow(() => createPluginArgs("install", "../local-plugin"));
+  assert.doesNotThrow(() =>
+    createPluginArgs("install", "git:github.com/example/plugin@0123456789abcdef0123456789abcdef01234567"),
+  );
+  assert.doesNotThrow(() => createPluginArgs("install", "./agent"));
   assert.throws(() => createPluginArgs("install", "npm:example"), /exact version/);
-  assert.throws(() => createPluginArgs("install", "git:github.com/example/plugin"), /tag or commit/);
+  assert.throws(() => createPluginArgs("install", "git:github.com/example/plugin"), /full commit SHA/);
+  assert.throws(() => createPluginArgs("install", "git:github.com/example/plugin@main"), /full commit SHA/);
+  assert.throws(() => createPluginArgs("install", "git:github.com/example/plugin@v1"), /full commit SHA/);
+  assert.throws(() => createPluginArgs("install", "../local-plugin"), /inside the repository/);
+  assert.throws(() => createPluginArgs("install", "/tmp/local-plugin"), /inside the repository/);
 });
 
 test("the general Kiva command cannot bypass project-local plugin management", () => {

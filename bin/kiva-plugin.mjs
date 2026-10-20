@@ -14,7 +14,7 @@ if (extra.length > 0) {
   process.exitCode = 1;
 } else {
   try {
-    process.exitCode = runPi(createPluginArgs(command, source), { repoRoot });
+    process.exitCode = runPi(createPluginArgs(command, source, { repoRoot }), { repoRoot });
   } catch (error) {
     console.error(`kiva-plugin: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
