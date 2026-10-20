@@ -29,7 +29,43 @@ export function createPluginArgs(command, source) {
   if (!source) {
     throw new Error("Plugin source is required");
   }
+  if (command === "install") {
+    assertReproduciblePluginSource(source);
+  }
   return [command, source, "--local"];
+}
+
+export function createAgentArgs(args) {
+  const packageCommands = new Set(["install", "remove", "uninstall"]);
+  if (packageCommands.has(args[0])) {
+    const script = args[0] === "install" ? "plugin:add" : "plugin:remove";
+    throw new Error(`Use 'npm run ${script} -- <source>' so package changes stay project-local`);
+  }
+  return args;
+}
+
+function assertReproduciblePluginSource(source) {
+  if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return;
+
+  if (source.startsWith("npm:")) {
+    const exactNpmVersion = /^npm:(?:@[^/]+\/)?[^@/]+@v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+    if (!exactNpmVersion.test(source)) {
+      throw new Error("npm plugin sources must include an exact version, for example npm:example@1.2.3");
+    }
+    return;
+  }
+
+  const gitSource = source.startsWith("git:") || /^(?:https?|ssh|git):\/\//.test(source);
+  if (gitSource) {
+    const normalized = source.startsWith("git:") ? source.slice(4) : source;
+    const lastSeparator = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf(":"));
+    if (normalized.lastIndexOf("@") <= lastSeparator) {
+      throw new Error("git plugin sources must include a tag or commit");
+    }
+    return;
+  }
+
+  throw new Error("Plugin source must be a pinned npm package, pinned git source, or local path");
 }
 
 export function runPi(args, { repoRoot, baseEnv = process.env, stdio = "inherit" }) {

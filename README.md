@@ -32,7 +32,7 @@ npm run plugin:add -- npm:some-pi-package@1.2.3
 npm run plugin:remove -- npm:some-pi-package
 ```
 
-应固定 npm 版本、Git tag 或 commit。插件声明写入 `.pi/settings.json`；下载内容分别位于 `.pi/npm/` 和 `.pi/git/`，不会提交到 Git。
+安装命令要求 npm 精确版本、Git tag/commit 或仓库内的本地路径；未固定的远程来源会被拒绝。通用 `kiva install/remove` 入口也被禁用，防止绕过项目作用域。插件声明写入 `.pi/settings.json`；下载内容分别位于 `.pi/npm/` 和 `.pi/git/`，不会提交到 Git。
 
 ## 目录职责
 
