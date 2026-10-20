@@ -120,9 +120,12 @@ button { cursor: pointer; }
 .suggestions button { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; color: #a8adb5; background: #ffffff04; font-size: 11px; }
 .suggestions button:hover { border-color: #d8ff7240; color: var(--foreground); }
 .composer-wrap { padding: 0 24px 16px; }
-.queue-panel { display: flex; max-width: 780px; align-items: center; gap: 10px; margin: 0 auto 8px; padding: 7px 9px 7px 11px; border: 1px solid #d8ff7226; border-radius: 10px; color: #aab087; background: #d8ff7208; font-size: 10px; }
-.queue-panel > div:first-child { display: flex; flex: none; align-items: center; gap: 6px; }
-.queue-preview { min-width: 0; overflow: hidden; color: #747b85; text-overflow: ellipsis; white-space: nowrap; }
+.queue-panel { display: grid; max-width: 780px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; margin: 0 auto 8px; padding: 8px 9px 8px 11px; border: 1px solid #d8ff7226; border-radius: 10px; color: #aab087; background: #d8ff7208; font-size: 10px; }
+.queue-heading { display: flex; align-items: center; gap: 6px; padding-top: 3px; white-space: nowrap; }
+.queue-items { display: grid; min-width: 0; max-height: 88px; gap: 3px; overflow-y: auto; }
+.queue-items > div { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 6px; color: #747b85; }
+.queue-items span { color: #9ca673; }
+.queue-items p { overflow-wrap: anywhere; }
 .queue-panel button { display: grid; width: 24px; height: 24px; margin-left: auto; flex: none; place-items: center; border: 0; border-radius: 6px; color: #777e88; background: transparent; }
 .queue-panel button:hover { color: var(--foreground); background: #ffffff0a; }
 .composer { max-width: 780px; margin: 0 auto; border: 1px solid #343a45; border-radius: 16px; background: #14171d; box-shadow: 0 16px 70px #0008; }

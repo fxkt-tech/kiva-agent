@@ -47,8 +47,16 @@ export class RuntimeHub {
   private unsubscribeAdapter?: () => void;
   private listeners = new Set<RuntimeListener>();
   private queue: RuntimeQueue = { steering: [], followUp: [] };
+  private healthTimer?: NodeJS.Timeout;
+  private healthCheckRunning = false;
+  private recovery?: Promise<RuntimeAdapter>;
+  private stopping = false;
+  private currentSessionPath?: string;
 
-  constructor(private readonly createAdapter: RuntimeAdapterFactory) {}
+  constructor(
+    private readonly createAdapter: RuntimeAdapterFactory,
+    private readonly healthIntervalMs = 2_000,
+  ) {}
 
   async snapshot(): Promise<RuntimeSnapshot> {
     let adapter = await this.ensureStarted();
@@ -56,8 +64,7 @@ export class RuntimeHub {
       return await this.readSnapshot(adapter);
     } catch (error) {
       if (!isProcessFailure(error)) throw error;
-      await this.resetAdapter();
-      adapter = await this.ensureStarted();
+      adapter = await this.recoverAdapter(adapter);
       return this.readSnapshot(adapter);
     }
   }
@@ -69,6 +76,7 @@ export class RuntimeHub {
       safeCall(() => adapter.getAvailableThinkingLevels(), []),
       safeCall<RuntimeSessionStats | undefined>(() => adapter.getSessionStats(), undefined),
     ]);
+    this.currentSessionPath = state.sessionFile;
 
     return {
       status: state.isStreaming ? "running" : "idle",
@@ -99,7 +107,13 @@ export class RuntimeHub {
   }
 
   async execute(command: RuntimeCommand): Promise<CommandResult> {
-    const adapter = await this.ensureStarted();
+    let adapter = await this.ensureStarted();
+    try {
+      await adapter.getState();
+    } catch (error) {
+      if (!isProcessFailure(error)) throw error;
+      adapter = await this.recoverAdapter(adapter);
+    }
     try {
       if (command.type === "prompt") {
         const message = command.message.trim();
@@ -131,7 +145,10 @@ export class RuntimeHub {
         await adapter.compact();
       }
     } catch (error) {
-      if (isProcessFailure(error)) await this.resetAdapter();
+      if (isProcessFailure(error)) {
+        const replacement = await this.recoverAdapter(adapter);
+        this.publish({ type: "snapshot", snapshot: await this.readSnapshot(replacement) });
+      }
       throw error;
     }
     await this.publishSnapshot();
@@ -144,10 +161,16 @@ export class RuntimeHub {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     await this.resetAdapter();
   }
 
   private async ensureStarted(): Promise<RuntimeAdapter> {
+    if (this.recovery) return this.recovery;
+    return this.startAdapter();
+  }
+
+  private async startAdapter(): Promise<RuntimeAdapter> {
     if (this.adapter) return this.adapter;
     if (!this.starting) {
       this.starting = (async () => {
@@ -155,6 +178,7 @@ export class RuntimeHub {
         await adapter.start();
         this.unsubscribeAdapter = adapter.onEvent((event) => this.handleAdapterEvent(event));
         this.adapter = adapter;
+        this.startHealthMonitor(adapter);
         return adapter;
       })();
     }
@@ -192,13 +216,64 @@ export class RuntimeHub {
     for (const listener of this.listeners) listener(event);
   }
 
-  private async resetAdapter() {
+  private startHealthMonitor(adapter: RuntimeAdapter) {
+    clearInterval(this.healthTimer);
+    this.healthTimer = setInterval(() => void this.checkHealth(adapter), this.healthIntervalMs);
+    this.healthTimer.unref();
+  }
+
+  private async checkHealth(adapter: RuntimeAdapter) {
+    if (this.healthCheckRunning || this.stopping || this.adapter !== adapter) return;
+    this.healthCheckRunning = true;
+    try {
+      await adapter.getState();
+    } catch (error) {
+      if (isProcessFailure(error) && this.adapter === adapter) {
+        try {
+          const replacement = await this.recoverAdapter(adapter);
+          this.publish({ type: "snapshot", snapshot: await this.readSnapshot(replacement) });
+        } catch (recoveryError) {
+          this.publish({ type: "error", message: errorMessage(recoveryError) });
+        }
+      }
+    } finally {
+      this.healthCheckRunning = false;
+    }
+  }
+
+  private async recoverAdapter(failedAdapter: RuntimeAdapter): Promise<RuntimeAdapter> {
+    if (this.adapter !== failedAdapter) return this.ensureStarted();
+    if (!this.recovery) {
+      this.recovery = Promise.resolve().then(async () => {
+        const sessionPath = this.currentSessionPath;
+        const queued = { steering: [...this.queue.steering], followUp: [...this.queue.followUp] };
+        await this.resetAdapter(failedAdapter, true);
+        if (this.stopping) throw new Error("Runtime is stopping");
+        const replacement = await this.startAdapter();
+        if (sessionPath) await replacement.switchSession(sessionPath);
+        for (const message of queued.steering) await replacement.steer(message);
+        for (const message of queued.followUp) await replacement.followUp(message);
+        this.queue = queued;
+        this.publish({ type: "runtime_reset" });
+        return replacement;
+      }).finally(() => { this.recovery = undefined; });
+    }
+    return this.recovery;
+  }
+
+  private async resetAdapter(expectedAdapter?: RuntimeAdapter, preserveState = false) {
+    if (expectedAdapter && this.adapter !== expectedAdapter) return;
     const adapter = this.adapter;
     this.adapter = undefined;
     this.starting = undefined;
+    clearInterval(this.healthTimer);
+    this.healthTimer = undefined;
     this.unsubscribeAdapter?.();
     this.unsubscribeAdapter = undefined;
-    this.queue = { steering: [], followUp: [] };
+    if (!preserveState) {
+      this.queue = { steering: [], followUp: [] };
+      this.currentSessionPath = undefined;
+    }
     if (adapter) {
       try { await adapter.stop(); } catch { /* The process may already be gone. */ }
     }

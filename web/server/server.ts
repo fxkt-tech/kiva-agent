@@ -68,9 +68,12 @@ server.on("upgrade", (request, socket, head) => {
 sockets.on("connection", async (socket, request) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
   const since = Number(url.searchParams.get("since"));
+  const cursor = { streamId: url.searchParams.get("stream") ?? undefined, since: Number.isSafeInteger(since) ? since : undefined };
+  const needsResync = eventStream.needsResync(cursor);
+  if (needsResync) sendSocket(socket, eventStream.resyncEvent());
   const unsubscribe = eventStream.subscribe(
     (event) => sendSocket(socket, event),
-    { streamId: url.searchParams.get("stream") ?? undefined, since: Number.isSafeInteger(since) ? since : undefined },
+    needsResync ? {} : cursor,
   );
   socket.once("close", unsubscribe);
   try {

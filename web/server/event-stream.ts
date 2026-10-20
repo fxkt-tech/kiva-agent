@@ -12,7 +12,7 @@ export class RuntimeEventStream {
   private listeners = new Set<(event: RuntimeWireEvent) => void>();
 
   constructor(
-    private readonly historyLimit = 256,
+    private readonly historyLimit = 2_048,
     readonly streamId: string = randomUUID(),
   ) {}
 
@@ -22,6 +22,15 @@ export class RuntimeEventStream {
     if (this.history.length > this.historyLimit) this.history.splice(0, this.history.length - this.historyLimit);
     for (const listener of this.listeners) listener(wireEvent);
     return wireEvent;
+  }
+
+  needsResync(cursor: RuntimeCursor) {
+    if (cursor.streamId !== this.streamId || !Number.isSafeInteger(cursor.since) || this.history.length === 0) return false;
+    return (cursor.since ?? 0) < this.history[0].seq - 1;
+  }
+
+  resyncEvent(): RuntimeWireEvent {
+    return { streamId: this.streamId, seq: this.sequence, event: { type: "runtime_reset" }, resync: true };
   }
 
   subscribe(listener: (event: RuntimeWireEvent) => void, cursor: RuntimeCursor = {}) {

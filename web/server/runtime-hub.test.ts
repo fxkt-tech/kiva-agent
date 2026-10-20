@@ -192,4 +192,86 @@ describe("RuntimeHub", () => {
     assert.equal(factories, 2);
     assert.equal(stops, 1);
   });
+
+  it("proactively replaces an exited Pi child and accepts the next command", async () => {
+    const broken = createAdapter();
+    let exited = false;
+    const originalGetState = broken.adapter.getState;
+    broken.adapter.getState = async () => {
+      if (exited) throw new Error("Agent process exited unexpectedly");
+      return originalGetState();
+    };
+    const healthy = createAdapter();
+    let factories = 0;
+    const hub = new RuntimeHub(() => factories++ === 0 ? broken.adapter : healthy.adapter, 5);
+    const events: string[] = [];
+    hub.subscribe((event) => events.push(event.type));
+
+    await hub.snapshot();
+    broken.emit({ type: "queue_update", steering: ["preserve this correction"], followUp: ["then summarize"] });
+    exited = true;
+    await waitFor(() => factories === 2);
+    await hub.execute({ type: "prompt", message: "continue safely" });
+    await hub.stop();
+
+    assert.deepEqual(healthy.prompts, ["continue safely"]);
+    assert.deepEqual(healthy.switchedSessions, ["/repo/session.jsonl"]);
+    assert.deepEqual(healthy.steers, ["preserve this correction"]);
+    assert.deepEqual(healthy.followUps, ["then summarize"]);
+    assert.ok(events.includes("runtime_reset"));
+    assert.ok(events.includes("snapshot"));
+  });
+
+  it("holds commands until an in-progress recovery restores the active session", async () => {
+    const broken = createAdapter();
+    const healthy = createAdapter();
+    const operations: string[] = [];
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => { releaseStop = resolve; });
+    let stopStarted = false;
+    broken.adapter.stop = async () => {
+      stopStarted = true;
+      await stopGate;
+    };
+    let exited = false;
+    const originalGetState = broken.adapter.getState;
+    broken.adapter.getState = async () => {
+      if (exited) throw new Error("Agent process exited unexpectedly");
+      return originalGetState();
+    };
+    healthy.adapter.switchSession = async (path) => {
+      operations.push(`switch:${path}`);
+      healthy.switchedSessions.push(path);
+    };
+    healthy.adapter.prompt = async (message) => {
+      operations.push(`prompt:${message}`);
+      healthy.prompts.push(message);
+      return "started";
+    };
+    let factories = 0;
+    const hub = new RuntimeHub(() => factories++ === 0 ? broken.adapter : healthy.adapter);
+
+    await hub.snapshot();
+    exited = true;
+    const recovery = hub.snapshot();
+    await waitFor(() => stopStarted);
+    const command = hub.execute({ type: "prompt", message: "after recovery" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(factories, 1);
+    assert.deepEqual(healthy.prompts, []);
+    releaseStop();
+    await Promise.all([recovery, command]);
+    await hub.stop();
+
+    assert.deepEqual(operations, ["switch:/repo/session.jsonl", "prompt:after recovery"]);
+  });
 });
+
+async function waitFor(predicate: () => boolean, timeoutMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

@@ -20,6 +20,7 @@ interface RuntimeViewState {
 
 type Action =
   | { type: "connected"; value: boolean }
+  | { type: "stream_changed" }
   | { type: "user"; message: ChatMessage }
   | { type: "event"; event: RuntimeEvent }
   | { type: "error"; message: string };
@@ -46,9 +47,16 @@ export function useRuntime() {
       socket.onmessage = (message) => {
         try {
           const wire = JSON.parse(String(message.data)) as RuntimeWireEvent;
+          if (wire.resync) {
+            streamId.current = wire.streamId;
+            sequence.current = wire.seq;
+            dispatch({ type: "stream_changed" });
+            return;
+          }
           if (streamId.current !== wire.streamId) {
             streamId.current = wire.streamId;
             sequence.current = 0;
+            dispatch({ type: "stream_changed" });
           }
           if (!Number.isSafeInteger(wire.seq) || wire.seq <= sequence.current) return;
           sequence.current = wire.seq;
@@ -141,11 +149,13 @@ export function useRuntime() {
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
-  if (action.type === "connected") return { ...state, connected: action.value, snapshot: action.value ? state.snapshot : undefined, error: action.value ? undefined : state.error };
+  if (action.type === "connected") return { ...state, connected: action.value, error: action.value ? undefined : state.error };
+  if (action.type === "stream_changed") return { ...state, snapshot: undefined };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };
   const event = action.event;
   if (event.type === "error") return { ...state, status: "error", error: event.message };
+  if (event.type === "runtime_reset") return { ...state, snapshot: undefined };
   if (event.type === "snapshot") {
     const sessionChanged = state.snapshot?.session.id !== event.snapshot.session.id;
     return {

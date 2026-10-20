@@ -26,4 +26,20 @@ describe("RuntimeEventStream", () => {
 
     assert.deepEqual(received, []);
   });
+
+  it("requests an authoritative resync when the replay cursor fell out of history", () => {
+    const stream = new RuntimeEventStream(2, "stream-a");
+    stream.publish({ type: "error", message: "one" });
+    stream.publish({ type: "error", message: "two" });
+    stream.publish({ type: "error", message: "three" });
+
+    assert.equal(stream.needsResync({ streamId: "stream-a", since: 0 }), true);
+    assert.equal(stream.needsResync({ streamId: "stream-a", since: 1 }), false);
+    assert.deepEqual(stream.resyncEvent(), {
+      streamId: "stream-a",
+      seq: 3,
+      event: { type: "runtime_reset" },
+      resync: true,
+    });
+  });
 });

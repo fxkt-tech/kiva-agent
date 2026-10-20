@@ -72,6 +72,7 @@ export interface CommandResult {
 
 export type RuntimeEvent =
   | { type: "snapshot"; snapshot: RuntimeSnapshot }
+  | { type: "runtime_reset" }
   | { type: "pi_event"; event: unknown }
   | { type: "error"; message: string };
 
@@ -79,4 +80,5 @@ export interface RuntimeWireEvent {
   streamId: string;
   seq: number;
   event: RuntimeEvent;
+  resync?: boolean;
 }

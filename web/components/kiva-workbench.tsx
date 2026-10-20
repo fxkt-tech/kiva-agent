@@ -264,8 +264,11 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
 
         <div className="composer-wrap">
           {(runtime.snapshot?.queue.steering.length || runtime.snapshot?.queue.followUp.length) ? <div className="queue-panel">
-            <div><Clock3 size={13} /><span>{runtime.snapshot.queue.steering.length} 条纠正 · {runtime.snapshot.queue.followUp.length} 条后续</span></div>
-            <div className="queue-preview">{[...runtime.snapshot.queue.steering, ...runtime.snapshot.queue.followUp].at(0)}</div>
+            <div className="queue-heading"><Clock3 size={13} /><span>{runtime.snapshot.queue.steering.length} 条纠正 · {runtime.snapshot.queue.followUp.length} 条后续</span></div>
+            <div className="queue-items">
+              {runtime.snapshot.queue.steering.map((message, index) => <div key={`steer-${index}`}><span>纠正</span><p>{message}</p></div>)}
+              {runtime.snapshot.queue.followUp.map((message, index) => <div key={`follow-up-${index}`}><span>后续</span><p>{message}</p></div>)}
+            </div>
             <button onClick={() => void runtime.clearQueue()} aria-label="清空队列"><X size={13} /></button>
           </div> : null}
           <form className="composer" onSubmit={submit}>
