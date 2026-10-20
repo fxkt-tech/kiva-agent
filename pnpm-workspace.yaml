@@ -2,7 +2,6 @@ packages:
   - web
 
 allowBuilds:
-  '@agegr/pi-web': true
   '@google/genai': false
   '@tailwindcss/oxide': true
   esbuild: true

@@ -25,14 +25,12 @@ pnpm web
 
 启动后访问 `http://127.0.0.1:30141`。点击左上角项目卡可以输入本机目录并切换工作区；Pi 的工作目录、文件浏览、Git 差异和会话都会随项目切换。模型、认证和 Kiva 扩展仍复用本仓库 `.kiva/agent/` 中的配置，各项目的会话保存在项目自己的 `.kiva/sessions/` 中。
 
-新版 Web UI 使用 Next.js、shadcn/ui 和 Tailwind CSS。构建或运行生产版本：
+Web UI 使用 Next.js、shadcn/ui 和 Tailwind CSS。构建或运行生产版本：
 
 ```sh
 pnpm web:build
 pnpm web:start
 ```
-
-迁移期间可通过 `pnpm web:legacy` 启动原来的 agegr/pi-web。
 
 也可以把参数直接传给 Pi：
 
@@ -76,4 +74,4 @@ pnpm typecheck
 node ./bin/kiva.mjs list --approve
 ```
 
-当前实现是项目专用 CLI：无论从哪里调用，工作目录都会固定为本仓库根目录。需要让 Kiva 操作任意工作区或提供 Web/API 接口时，再引入 Pi SDK 和自定义资源加载器。
+终端 CLI 的工作目录固定为本仓库根目录。Web UI 通过 Pi RPC 运行项目，可在界面中选择其他本机目录作为工作区。
