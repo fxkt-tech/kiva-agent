@@ -23,7 +23,16 @@ pnpm start
 pnpm web
 ```
 
-浏览器会自动打开 `http://127.0.0.1:30141`。Web UI 与终端版共用 `.kiva/agent/` 中的模型、认证和设置，以及 `.kiva/sessions/` 中的会话。
+启动后访问 `http://127.0.0.1:30141`。Web UI 与终端版共用 `.kiva/agent/` 中的模型、认证和设置，以及 `.kiva/sessions/` 中的会话。
+
+新版 Web UI 使用 Next.js、shadcn/ui 和 Tailwind CSS。构建或运行生产版本：
+
+```sh
+pnpm web:build
+pnpm web:start
+```
+
+迁移期间可通过 `pnpm web:legacy` 启动原来的 agegr/pi-web。
 
 也可以把参数直接传给 Pi：
 

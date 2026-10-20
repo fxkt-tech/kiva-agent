@@ -12,12 +12,15 @@
   },
   "scripts": {
     "start": "node ./bin/kiva.mjs",
-    "web": "node ./bin/kiva-web.mjs",
+    "web": "pnpm --dir web dev",
+    "web:build": "pnpm --dir web build",
+    "web:start": "pnpm --dir web start",
+    "web:legacy": "node ./bin/kiva-web.mjs",
     "kiva": "node ./bin/kiva.mjs",
     "plugin:add": "node ./bin/kiva-plugin.mjs add",
     "plugin:remove": "node ./bin/kiva-plugin.mjs remove",
     "test": "node --test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm --dir web typecheck"
   },
   "dependencies": {
     "@agegr/pi-web": "0.12.2",
