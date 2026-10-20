@@ -1,13 +1,23 @@
 "use client";
 
-import { Highlight, themes } from "prism-react-renderer";
+import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Brain, Check, ChevronRight, CircleX, Copy, LoaderCircle, Wrench } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ToolActivity } from "@/lib/use-runtime";
+
+const codeTheme: PrismTheme = {
+  plain: { color: "var(--code-text)", backgroundColor: "var(--subtle)" },
+  styles: [
+    { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "var(--code-comment)" } },
+    { types: ["keyword", "operator", "tag"], style: { color: "var(--code-keyword)" } },
+    { types: ["string", "char", "attr-value"], style: { color: "var(--code-string)" } },
+    { types: ["function", "class-name", "attr-name"], style: { color: "var(--code-function)" } },
+    { types: ["number", "boolean", "constant"], style: { color: "var(--code-number)" } },
+  ],
+};
 
 export function MessageContent({ message }: { message: ChatMessage }) {
   return <>
@@ -26,11 +36,14 @@ function Markdown({ children }: { children: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     components={{
+      pre({ children: preChildren }) {
+        return <div className="markdown-pre">{preChildren}</div>;
+      },
       code({ className, children: codeChildren, ...props }) {
         const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
         const code = String(codeChildren).replace(/\n$/, "");
         if (!language) return <code className={className} {...props}>{codeChildren}</code>;
-        return <Highlight theme={themes.nightOwl} code={code} language={language}>
+        return <Highlight theme={codeTheme} code={code} language={language}>
           {({ className: highlightClass, style, tokens, getLineProps, getTokenProps }) => <pre className={`${highlightClass} code-block`} style={style}>
             <div className="code-language">{language}</div>
             {tokens.map((line, index) => <div key={index} {...getLineProps({ line })}>
@@ -50,7 +63,7 @@ function ToolCard({ tool }: { tool: ToolActivity }) {
     <summary>
       <div className="tool-icon"><Wrench size={14} /></div>
       <div className="tool-summary"><p>{tool.name}</p><span>{tool.status === "running" ? "正在执行" : tool.status === "error" ? "执行失败" : "执行完成"}</span></div>
-      <Badge className={cn("ml-auto", tool.status === "error" ? "border-red-500/20 bg-red-500/10 text-red-300" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300")}>{icon}{tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成"}</Badge>
+      <span className="tool-status" data-status={tool.status}>{icon}{tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成"}</span>
       <ChevronRight size={14} className="tool-chevron" />
     </summary>
     <div className="tool-detail-body">

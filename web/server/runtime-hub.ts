@@ -129,6 +129,7 @@ export class RuntimeHub {
         await adapter.switchSession(command.sessionPath);
       } else if (command.type === "new_session") {
         await adapter.newSession();
+        await adapter.setSessionName("新会话");
       } else if (command.type === "rename_session") {
         const name = command.name.trim();
         if (!name) throw new Error("Session name cannot be empty");

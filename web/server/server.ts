@@ -9,19 +9,24 @@ import type { RuntimeCommand } from "../shared/runtime-types";
 import type { SessionAction } from "../shared/types";
 import { SessionCatalog, type SessionCollection } from "./session-catalog";
 import { RuntimeEventStream } from "./event-stream";
+import { getBootstrapData } from "./bootstrap";
+import { installationRoot, workspaceRegistry } from "./workspace-registry";
+import { readProjectDiff, readProjectFile } from "./workspace-files";
+import { listWorkspaceDirectories } from "./workspace-directories";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = resolve(process.env.KIVA_REPO_ROOT ?? resolve(webRoot, ".."));
+let repoRoot = workspaceRegistry.activeRoot();
 const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 30141);
 const dev = process.env.NODE_ENV !== "production";
 
 const app = next({ dev, dir: webRoot, hostname: host, port });
 const handle = app.getRequestHandler();
-const runtime = new RuntimeHub(() => createPiAdapter(repoRoot));
-const sessions = new SessionCatalog(repoRoot);
+let runtime = createRuntime(repoRoot);
+let sessions = new SessionCatalog(repoRoot);
 const eventStream = new RuntimeEventStream();
-const unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
+let unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
+let switchingProject: Promise<void> | undefined;
 const sockets = new WebSocketServer({ noServer: true });
 
 await app.prepare();
@@ -30,11 +35,30 @@ const handleUpgrade = app.getUpgradeHandler();
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
+    if (switchingProject) await switchingProject;
+    if (url.pathname === "/api/project" && request.method === "GET") {
+      return sendJson(response, 200, getBootstrapData());
+    }
+    if (url.pathname === "/api/project/open" && request.method === "POST") {
+      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
+      const path = await readProjectPath(request);
+      await switchProject(path);
+      return sendJson(response, 200, getBootstrapData());
+    }
+    if (url.pathname === "/api/project/directories" && request.method === "GET") {
+      return sendJson(response, 200, listWorkspaceDirectories(url.searchParams.get("path") ?? repoRoot));
+    }
+    if (url.pathname === "/api/project/file" && request.method === "GET") {
+      return sendJson(response, 200, readProjectFile(repoRoot, url.searchParams.get("path") ?? ""));
+    }
+    if (url.pathname === "/api/project/diff" && request.method === "GET") {
+      return sendJson(response, 200, readProjectDiff(repoRoot, url.searchParams.get("path") ?? ""));
+    }
     if (url.pathname === "/api/runtime/state" && request.method === "GET") {
       return sendJson(response, 200, await runtime.snapshot());
     }
     if (url.pathname === "/api/sessions" && request.method === "GET") {
-      return sendJson(response, 200, sessionCollections());
+      return sendJson(response, 200, await sessionCollections());
     }
     if (url.pathname === "/api/runtime/command" && request.method === "POST") {
       if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
@@ -44,7 +68,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/sessions/action" && request.method === "POST") {
       if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
       await executeSessionAction(await readSessionAction(request));
-      return sendJson(response, 200, sessionCollections());
+      return sendJson(response, 200, await sessionCollections());
     }
     await handle(request, response);
   } catch (error) {
@@ -90,8 +114,42 @@ server.listen(port, host, () => {
 async function shutdown() {
   sockets.clients.forEach((socket) => socket.close(1001, "Server shutting down"));
   unsubscribeRuntime();
-  await runtime.stop();
-  server.close(() => process.exit(0));
+  server.close();
+  server.closeAllConnections();
+  const deadline = setTimeout(() => process.exit(0), 2_000);
+  deadline.unref();
+  try { await runtime.stop(); }
+  finally { process.exit(0); }
+}
+
+function createRuntime(projectRoot: string) {
+  return new RuntimeHub(() => createPiAdapter(projectRoot, installationRoot));
+}
+
+async function switchProject(path: string) {
+  const operation = (async () => {
+    const nextRoot = workspaceRegistry.open(path);
+    if (nextRoot === repoRoot) return;
+    unsubscribeRuntime();
+    await runtime.stop();
+    repoRoot = nextRoot;
+    runtime = createRuntime(repoRoot);
+    sessions = new SessionCatalog(repoRoot);
+    unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
+    eventStream.publish({ type: "runtime_reset" });
+    eventStream.publish({ type: "snapshot", snapshot: await runtime.snapshot() });
+  })();
+  switchingProject = operation;
+  try { await operation; }
+  finally { if (switchingProject === operation) switchingProject = undefined; }
+}
+
+async function readProjectPath(request: IncomingMessage) {
+  const value = await readJson(request);
+  if (typeof value !== "object" || value === null || !("path" in value) || typeof value.path !== "string") {
+    throw new Error("Invalid project path");
+  }
+  return value.path;
 }
 
 process.once("SIGINT", shutdown);
@@ -192,8 +250,25 @@ async function executeSessionAction(action: SessionAction) {
   else sessions.trash(action.sessionPath, action.collection);
 }
 
-function sessionCollections() {
-  return { active: sessions.list("active"), archived: sessions.list("archived"), trash: sessions.list("trash") };
+async function sessionCollections() {
+  const active = sessions.list("active");
+  const snapshot = await runtime.snapshot();
+  if (!active.some((session) => session.id === snapshot.session.id)) {
+    let path = "";
+    if (snapshot.session.path) {
+      try { path = sessions.relativePath(snapshot.session.path); }
+      catch { path = ""; }
+    }
+    active.unshift({
+      id: snapshot.session.id,
+      path,
+      name: snapshot.session.name ?? "新会话",
+      preview: "尚未发送消息",
+      updatedAt: new Date().toISOString(),
+      persisted: false,
+    });
+  }
+  return { active, archived: sessions.list("archived"), trash: sessions.list("trash") };
 }
 
 function isAllowedOrigin(request: IncomingMessage) {

@@ -1,24 +1,26 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient, type JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RuntimeAdapter } from "./runtime-hub";
 import type { RuntimeImage } from "../shared/runtime-types";
 
-export function createPiAdapter(repoRoot: string): RuntimeAdapter {
-  const agentDir = join(repoRoot, ".kiva", "agent");
+export function createPiAdapter(repoRoot: string, installationRoot = repoRoot): RuntimeAdapter {
+  const agentDir = join(installationRoot, ".kiva", "agent");
   const sessionDir = join(repoRoot, ".kiva", "sessions");
   const npmCacheDir = join(repoRoot, ".kiva", "cache", "npm");
   for (const path of [agentDir, sessionDir, npmCacheDir]) mkdirSync(path, { recursive: true });
 
   const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   const cliPath = join(dirname(packageEntry), "bundle", "cli.js");
+  const kivaExtension = join(installationRoot, "agent", "extensions", "kiva.ts");
   const env = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
   const client = new RpcClient({
     cliPath,
     cwd: repoRoot,
+    args: existsSync(kivaExtension) ? ["--extension", kivaExtension] : [],
     env: {
       ...env,
       PI_CODING_AGENT_DIR: agentDir,

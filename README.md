@@ -23,7 +23,7 @@ pnpm start
 pnpm web
 ```
 
-启动后访问 `http://127.0.0.1:30141`。Web UI 与终端版共用 `.kiva/agent/` 中的模型、认证和设置，以及 `.kiva/sessions/` 中的会话。
+启动后访问 `http://127.0.0.1:30141`。点击左上角项目卡可以输入本机目录并切换工作区；Pi 的工作目录、文件浏览、Git 差异和会话都会随项目切换。模型、认证和 Kiva 扩展仍复用本仓库 `.kiva/agent/` 中的配置，各项目的会话保存在项目自己的 `.kiva/sessions/` 中。
 
 新版 Web UI 使用 Next.js、shadcn/ui 和 Tailwind CSS。构建或运行生产版本：
 

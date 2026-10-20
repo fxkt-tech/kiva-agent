@@ -4,13 +4,22 @@ export interface SessionSummary {
   name: string;
   preview: string;
   updatedAt: string;
+  persisted?: boolean;
 }
 
 export interface BootstrapData {
   renderedAt: string;
-  project: { name: string; path: string; branch: string; dirtyFiles: number };
+  project: {
+    name: string;
+    path: string;
+    branch: string;
+    dirtyFiles: number;
+    files: string[];
+    changes: Array<{ status: string; path: string }>;
+  };
   runtime: { piVersion: string; modelConfigFound: boolean; status: "ready" | "needs-model" };
   sessions: SessionSummary[];
+  recentProjects: string[];
 }
 
 export interface SessionCollections {

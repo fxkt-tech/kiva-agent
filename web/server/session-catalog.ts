@@ -54,6 +54,13 @@ export class SessionCatalog {
     return managedPath(this.collectionRoot(collection), sessionPath);
   }
 
+  relativePath(sessionPath: string) {
+    const absolute = resolve(sessionPath);
+    const path = relative(this.sessionRoot, absolute);
+    managedPath(this.sessionRoot, path);
+    return path;
+  }
+
   private move(sessionPath: string, sourceRoot: string, destinationRoot: string, destinationPath = sessionPath) {
     const source = managedPath(sourceRoot, sessionPath);
     const destination = managedPath(destinationRoot, destinationPath);

@@ -148,7 +148,7 @@ describe("RuntimeHub", () => {
     await hub.execute({ type: "rename_session", name: "  Release work  " });
 
     assert.equal(fake.newSessions(), 1);
-    assert.deepEqual(fake.names, ["Release work"]);
+    assert.deepEqual(fake.names, ["新会话", "Release work"]);
     await assert.rejects(() => hub.execute({ type: "rename_session", name: "   " }), /empty/i);
   });
 
