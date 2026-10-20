@@ -115,7 +115,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > 1_000_000) throw new Error("Request body is too large");
+    if (size > 30_000_000) throw new Error("Request body is too large");
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -129,9 +129,26 @@ function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (value.type === "rename_session") return "name" in value && typeof value.name === "string";
   if (value.type === "set_model") return "provider" in value && typeof value.provider === "string" && "modelId" in value && typeof value.modelId === "string";
   if (value.type === "set_thinking") return "level" in value && typeof value.level === "string";
-  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string";
+  if (value.type === "extension_ui_response") return isUIResponse(value);
+  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string" && validImages(value);
   if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
-  return value.type === "prompt" && "message" in value && typeof value.message === "string";
+  return value.type === "prompt" && "message" in value && typeof value.message === "string" && validImages(value);
+}
+
+function validImages(value: Record<string, unknown>) {
+  if (!("images" in value) || value.images === undefined) return true;
+  return Array.isArray(value.images) && value.images.length <= 5 && value.images.every((image) => {
+    if (typeof image !== "object" || image === null) return false;
+    return "data" in image && typeof image.data === "string" && image.data.length <= 14_000_000
+      && "mimeType" in image && typeof image.mimeType === "string" && image.mimeType.startsWith("image/");
+  });
+}
+
+function isUIResponse(value: Record<string, unknown>) {
+  if (!("id" in value) || typeof value.id !== "string") return false;
+  return ("value" in value && typeof value.value === "string")
+    || ("confirmed" in value && typeof value.confirmed === "boolean")
+    || value.cancelled === true;
 }
 
 function normalizeCommand(command: RuntimeCommand): RuntimeCommand {

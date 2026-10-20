@@ -1,9 +1,10 @@
 "use client";
 
 import { Highlight, themes } from "prism-react-renderer";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Brain, Check, ChevronRight, CircleX, LoaderCircle, Wrench } from "lucide-react";
+import { Brain, Check, ChevronRight, CircleX, Copy, LoaderCircle, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ToolActivity } from "@/lib/use-runtime";
@@ -53,10 +54,20 @@ function ToolCard({ tool }: { tool: ToolActivity }) {
       <ChevronRight size={14} className="tool-chevron" />
     </summary>
     <div className="tool-detail-body">
-      {tool.args !== undefined && <div><span>输入</span><pre>{formatValue(tool.args)}</pre></div>}
-      {tool.result && <div><span>输出</span><pre>{tool.result}</pre></div>}
+      {tool.args !== undefined && <ToolValue label="输入" value={formatValue(tool.args)} />}
+      {tool.result && <ToolValue label="输出" value={tool.result} />}
     </div>
   </details>;
+}
+
+function ToolValue({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1_200);
+  }
+  return <div><span>{label}</span><button className="tool-copy" type="button" onClick={copy}><Copy size={11} />{copied ? "已复制" : "复制"}</button><pre>{value}</pre></div>;
 }
 
 function formatValue(value: unknown) {

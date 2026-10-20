@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeWireEvent } from "@/shared/runtime-types";
+import type { RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeUIRequest, RuntimeWireEvent } from "@/shared/runtime-types";
 
 export type ToolActivity = RuntimeTool;
 
@@ -16,6 +16,7 @@ interface RuntimeViewState {
   messages: ChatMessage[];
   sessionsVersion: number;
   error?: string;
+  uiRequest?: RuntimeUIRequest;
 }
 
 type Action =
@@ -23,7 +24,8 @@ type Action =
   | { type: "stream_changed" }
   | { type: "user"; message: ChatMessage }
   | { type: "event"; event: RuntimeEvent }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "ui_answered" };
 
 const initialState: RuntimeViewState = { connected: false, status: "connecting", messages: [], sessionsVersion: 0 };
 
@@ -88,11 +90,11 @@ export function useRuntime() {
     if (!response.ok) throw new Error(result.error ?? "运行时命令失败");
   }, []);
 
-  const sendPrompt = useCallback(async (message: string) => {
+  const sendPrompt = useCallback(async (message: string, images: RuntimeImage[] = []) => {
     const text = message.trim();
-    if (!text) return;
-    dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text, thinking: "", tools: [] } });
-    try { await execute({ type: "prompt", message: text }); }
+    if (!text && !images.length) return;
+    dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text: text || "请查看附件。", thinking: "", tools: [] } });
+    try { await execute({ type: "prompt", message: text, images }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
@@ -120,8 +122,8 @@ export function useRuntime() {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
-  const queueMessage = useCallback(async (message: string, mode: "steer" | "follow_up") => {
-    try { await execute({ type: mode, message }); }
+  const queueMessage = useCallback(async (message: string, mode: "steer" | "follow_up", images: RuntimeImage[] = []) => {
+    try { await execute({ type: mode, message, images }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
@@ -145,7 +147,16 @@ export function useRuntime() {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
   }, [execute]);
 
-  return { ...state, sendPrompt, abort, switchSession, newSession, renameSession, queueMessage, clearQueue, setModel, setThinking, compact };
+  const respondToUI = useCallback(async (response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) => {
+    try {
+      await execute({ type: "extension_ui_response", ...response });
+      dispatch({ type: "ui_answered" });
+    } catch (error) {
+      dispatch({ type: "error", message: errorMessage(error) });
+    }
+  }, [execute]);
+
+  return { ...state, sendPrompt, abort, switchSession, newSession, renameSession, queueMessage, clearQueue, setModel, setThinking, compact, respondToUI };
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
@@ -153,6 +164,7 @@ function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
   if (action.type === "stream_changed") return { ...state, snapshot: undefined };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };
+  if (action.type === "ui_answered") return { ...state, uiRequest: undefined };
   const event = action.event;
   if (event.type === "error") return { ...state, status: "error", error: event.message };
   if (event.type === "runtime_reset") return { ...state, snapshot: undefined };
@@ -173,6 +185,9 @@ function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
 function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState {
   const event = record(value);
   if (!event || typeof event.type !== "string") return state;
+  if (event.type === "extension_ui_request" && isInteractiveUIRequest(event)) {
+    return { ...state, uiRequest: event as unknown as RuntimeUIRequest };
+  }
   if (event.type === "agent_start") return { ...state, status: "running", error: undefined };
   if (event.type === "agent_settled") return { ...state, status: "idle", messages: finishAssistant(state.messages), sessionsVersion: state.sessionsVersion + 1 };
   if (event.type === "session_info_changed") return { ...state, sessionsVersion: state.sessionsVersion + 1 };
@@ -209,6 +224,11 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
     if (!id) return state;
     return { ...state, messages: updateTool(state.messages, id, event.isError ? "error" : "done", resultText(event.result)) };
   }
+  if (event.type === "tool_execution_update") {
+    const id = stringValue(event.toolCallId);
+    if (!id) return state;
+    return { ...state, messages: updateTool(state.messages, id, "running", resultText(event.partialResult)) };
+  }
   if (event.type === "queue_update" && state.snapshot) {
     return {
       ...state,
@@ -219,6 +239,11 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
     };
   }
   return state;
+}
+
+function isInteractiveUIRequest(event: Record<string, unknown>) {
+  return typeof event.id === "string" && typeof event.title === "string"
+    && ["select", "confirm", "input", "editor"].includes(String(event.method));
 }
 
 function ensureAssistant(messages: ChatMessage[]) {

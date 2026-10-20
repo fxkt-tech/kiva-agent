@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowUp,
@@ -33,6 +33,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/lib/use-runtime";
 import { MessageContent } from "@/components/message-content";
+import { ExtensionDialog } from "@/components/extension-dialog";
+import type { RuntimeImage } from "@/shared/runtime-types";
 import type { BootstrapData, SessionAction, SessionCollections, SessionSummary } from "@/shared/types";
 
 function relativeTime(value: string, renderedAt: string) {
@@ -57,17 +59,22 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
   const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
+  const [attachments, setAttachments] = useState<RuntimeImage[]>([]);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   const [sessions, setSessions] = useState(data.sessions);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
   const [sessionView, setSessionView] = useState<"active" | "archived" | "trash">("active");
   const [sessionMenu, setSessionMenu] = useState<string>();
   const messageEnd = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const runtime = useRuntime();
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId), [sessions, selectedId]);
   const visibleSessions = sessionView === "active" ? sessions : sessionView === "archived" ? archivedSessions : deletedSessions;
   const running = runtime.status === "running";
   const runtimeLabel = !runtime.connected ? "连接中" : running ? "运行中" : runtime.status === "error" ? "异常" : "已就绪";
+  const visibleCommands = useMemo(() => runtime.snapshot?.commands.filter((command) => `${command.name} ${command.description ?? ""}`.toLowerCase().includes(commandQuery.toLowerCase())).slice(0, 12) ?? [], [commandQuery, runtime.snapshot?.commands]);
 
   useEffect(() => { void refreshSessions(); }, [runtime.sessionsVersion]);
   useEffect(() => { messageEnd.current?.scrollIntoView({ block: "end", behavior: running ? "smooth" : "auto" }); }, [runtime.messages, running]);
@@ -91,14 +98,31 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!draft.trim()) return;
+    if (!draft.trim() && !attachments.length) return;
     const message = draft;
+    const images = attachments;
     setDraft("");
+    setAttachments([]);
+    setCommandOpen(false);
     try {
-      if (running) await runtime.queueMessage(message, queueMode);
-      else await runtime.sendPrompt(message);
+      if (running) await runtime.queueMessage(message, queueMode, images);
+      else await runtime.sendPrompt(message, images);
     }
-    catch { setDraft(message); }
+    catch { setDraft(message); setAttachments(images); }
+  }
+
+  async function attachImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.target.files ?? [])].slice(0, Math.max(0, 5 - attachments.length));
+    const valid = files.filter((file) => file.type.startsWith("image/") && file.size <= 10_000_000);
+    const images = await Promise.all(valid.map(readImage));
+    setAttachments((current) => [...current, ...images].slice(0, 5));
+    event.target.value = "";
+  }
+
+  function chooseCommand(name: string) {
+    setDraft(`/${name} `);
+    setCommandOpen(false);
+    setCommandQuery("");
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -263,6 +287,10 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         </ScrollArea>
 
         <div className="composer-wrap">
+          {commandOpen && <div className="command-palette">
+            <div className="command-search"><Command size={14} /><input autoFocus value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} placeholder="搜索命令、技能和模板" /></div>
+            <div className="command-list">{visibleCommands.length ? visibleCommands.map((command) => <button type="button" key={`${command.source}:${command.name}`} onClick={() => chooseCommand(command.name)}><span>/{command.name}</span><small>{command.description ?? "无说明"}</small><em>{command.source === "skill" ? "技能" : command.source === "prompt" ? "模板" : "扩展"}</em></button>) : <p>没有匹配的命令</p>}</div>
+          </div>}
           {(runtime.snapshot?.queue.steering.length || runtime.snapshot?.queue.followUp.length) ? <div className="queue-panel">
             <div className="queue-heading"><Clock3 size={13} /><span>{runtime.snapshot.queue.steering.length} 条纠正 · {runtime.snapshot.queue.followUp.length} 条后续</span></div>
             <div className="queue-items">
@@ -272,11 +300,13 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
             <button onClick={() => void runtime.clearQueue()} aria-label="清空队列"><X size={13} /></button>
           </div> : null}
           <form className="composer" onSubmit={submit}>
+            {attachments.length > 0 && <div className="attachment-list">{attachments.map((image, index) => <div key={`${image.name}-${index}`}><img src={`data:${image.mimeType};base64,${image.data}`} alt="" /><span>{image.name}</span><button type="button" aria-label={`移除 ${image.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
             <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 Kiva 你想完成什么…"} rows={2} />
             <div className="composer-actions">
-              <Button type="button" variant="ghost" size="icon"><Paperclip size={17} /></Button>
-              {running ? <select className="composer-mode" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm"><SquareTerminal size={15} />工具</Button>}
-              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" disabled={!draft.trim() || !runtime.connected}><ArrowUp size={17} /></Button></div>
+              <input ref={fileInput} className="sr-only" type="file" accept="image/*" multiple onChange={attachImages} />
+              <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加图片"><Paperclip size={17} /></Button>
+              {running ? <select className="composer-mode" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm" onClick={() => setCommandOpen((value) => !value)}><SquareTerminal size={15} />命令</Button>}
+              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" disabled={(!draft.trim() && !attachments.length) || !runtime.connected}><ArrowUp size={17} /></Button></div>
             </div>
           </form>
           <p className="composer-note">Kiva 可能会修改文件或执行命令，请在提交前检查变更。</p>
@@ -291,6 +321,16 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         <div className="inspector-section"><p className="inspector-label">可用能力</p><div className="capability-grid"><span><FileCode2 size={14} />文件</span><span><SquareTerminal size={14} />命令</span><span><GitBranch size={14} />Git</span><span><Wrench size={14} />工具</span></div></div>
         <div className="inspector-footer"><span className={cn("status-dot", !runtime.connected && "offline")} /><span>{runtimeLabel}</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>
       </aside>}
+      <ExtensionDialog request={runtime.uiRequest} respond={(response) => void runtime.respondToUI(response)} />
     </main>
   );
+}
+
+function readImage(file: File) {
+  return new Promise<RuntimeImage>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve({ name: file.name, mimeType: file.type, data: String(reader.result).split(",", 2)[1] ?? "" });
+    reader.readAsDataURL(file);
+  });
 }

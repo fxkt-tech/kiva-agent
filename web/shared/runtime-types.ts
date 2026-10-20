@@ -40,6 +40,28 @@ export interface RuntimeQueue {
   followUp: string[];
 }
 
+export interface RuntimeImage {
+  data: string;
+  mimeType: string;
+  name?: string;
+}
+
+export interface RuntimeSlashCommand {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill";
+}
+
+export interface RuntimeUIRequest {
+  id: string;
+  method: "select" | "confirm" | "input" | "editor";
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+}
+
 export interface RuntimeSnapshot {
   status: RuntimeStatus;
   session: { id: string; name?: string; path?: string; messageCount: number };
@@ -50,11 +72,12 @@ export interface RuntimeSnapshot {
   models: RuntimeModel[];
   context?: RuntimeContextUsage;
   queue: RuntimeQueue;
+  commands: RuntimeSlashCommand[];
   error?: string;
 }
 
 export type RuntimeCommand =
-  | { type: "prompt"; message: string }
+  | { type: "prompt"; message: string; images?: RuntimeImage[] }
   | { type: "abort" }
   | { type: "switch_session"; sessionPath: string }
   | { type: "new_session" }
@@ -62,8 +85,9 @@ export type RuntimeCommand =
   | { type: "set_model"; provider: string; modelId: string }
   | { type: "set_thinking"; level: string }
   | { type: "compact" }
-  | { type: "steer"; message: string }
-  | { type: "follow_up"; message: string }
+  | { type: "steer"; message: string; images?: RuntimeImage[] }
+  | { type: "follow_up"; message: string; images?: RuntimeImage[] }
+  | { type: "extension_ui_response"; id: string; value?: string; confirmed?: boolean; cancelled?: true }
   | { type: "clear_queue" };
 
 export interface CommandResult {

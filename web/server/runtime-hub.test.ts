@@ -5,6 +5,7 @@ import { RuntimeHub, type RuntimeAdapter } from "./runtime-hub";
 function createAdapter() {
   let starts = 0;
   const prompts: string[] = [];
+  const promptImages: unknown[][] = [];
   let aborts = 0;
   const switchedSessions: string[] = [];
   const names: string[] = [];
@@ -16,6 +17,7 @@ function createAdapter() {
   let compactions = 0;
   let queueClears = 0;
   let eventListener: ((event: unknown) => void) | undefined;
+  const uiResponses: unknown[] = [];
   const adapter: RuntimeAdapter = {
     async start() { starts += 1; },
     async stop() {},
@@ -29,7 +31,7 @@ function createAdapter() {
         thinkingLevel: "medium",
       };
     },
-    async prompt(message) { prompts.push(message); return "started"; },
+    async prompt(message, images) { prompts.push(message); promptImages.push(images ?? []); return "started"; },
     async abort() { aborts += 1; },
     async switchSession(path) { switchedSessions.push(path); },
     async newSession() { newSessions += 1; },
@@ -38,10 +40,12 @@ function createAdapter() {
     async getAvailableModels() { return [{ provider: "openai", id: "gpt-test", contextWindow: 100_000, reasoning: true }]; },
     async getAvailableThinkingLevels() { return ["low", "medium", "high"]; },
     async getSessionStats() { return { tokens: { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, total: 17 }, cost: 0.01, contextUsage: { tokens: 1_000, contextWindow: 100_000, percent: 1 } }; },
+    async getCommands() { return [{ name: "review", description: "Review changes", source: "skill" }]; },
     async setModel(provider, id) { models.push(`${provider}/${id}`); },
     async setThinkingLevel(level) { thinkingLevels.push(level); },
     async steer(message) { steers.push(message); },
     async followUp(message) { followUps.push(message); },
+    async respondToUI(response) { uiResponses.push(response); },
     async clearQueue() { queueClears += 1; return { steering: [], followUp: [] }; },
     async compact() { compactions += 1; },
   };
@@ -49,6 +53,7 @@ function createAdapter() {
     adapter,
     starts: () => starts,
     prompts,
+    promptImages,
     aborts: () => aborts,
     emit: (event: unknown) => eventListener?.(event),
     switchedSessions,
@@ -60,6 +65,7 @@ function createAdapter() {
     thinkingLevels,
     compactions: () => compactions,
     queueClears: () => queueClears,
+    uiResponses,
   };
 }
 
@@ -77,6 +83,7 @@ describe("RuntimeHub", () => {
     assert.equal(first.thinkingLevel, "medium");
     assert.equal(first.models[0].id, "gpt-test");
     assert.equal(first.context?.percent, 1);
+    assert.deepEqual(first.commands, [{ name: "review", description: "Review changes", source: "skill" }]);
     assert.deepEqual(second, first);
   });
 
@@ -90,6 +97,19 @@ describe("RuntimeHub", () => {
 
     assert.deepEqual(await hub.execute({ type: "abort" }), { accepted: true });
     assert.equal(fake.aborts(), 1);
+  });
+
+  it("sends image attachments and responds to extension UI requests", async () => {
+    const fake = createAdapter();
+    const hub = new RuntimeHub(() => fake.adapter);
+    const image = { name: "screen.png", mimeType: "image/png", data: "cG5n" };
+
+    await hub.execute({ type: "prompt", message: "", images: [image] });
+    await hub.execute({ type: "extension_ui_response", id: "ui-1", confirmed: true });
+
+    assert.equal(fake.prompts[0], "请查看附件。");
+    assert.deepEqual(fake.promptImages, [[image]]);
+    assert.deepEqual(fake.uiResponses, [{ type: "extension_ui_response", id: "ui-1", confirmed: true }]);
   });
 
   it("forwards Pi events and publishes fresh state when the agent settles", async () => {

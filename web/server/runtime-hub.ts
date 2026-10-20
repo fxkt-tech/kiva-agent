@@ -1,4 +1,4 @@
-import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
+import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSlashCommand, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
 
 export interface RuntimeAdapterState {
   isStreaming: boolean;
@@ -15,7 +15,7 @@ export interface RuntimeAdapter {
   stop(): Promise<void>;
   onEvent(listener: (event: unknown) => void): () => void;
   getState(): Promise<RuntimeAdapterState>;
-  prompt(message: string): Promise<unknown>;
+  prompt(message: string, images?: RuntimeImage[]): Promise<unknown>;
   abort(): Promise<void>;
   switchSession(path: string): Promise<unknown>;
   newSession(): Promise<unknown>;
@@ -24,10 +24,12 @@ export interface RuntimeAdapter {
   getAvailableModels(): Promise<RuntimeModel[]>;
   getAvailableThinkingLevels(): Promise<string[]>;
   getSessionStats(): Promise<RuntimeSessionStats>;
+  getCommands(): Promise<RuntimeSlashCommand[]>;
   setModel(provider: string, modelId: string): Promise<unknown>;
   setThinkingLevel(level: string): Promise<void>;
-  steer(message: string): Promise<unknown>;
-  followUp(message: string): Promise<unknown>;
+  steer(message: string, images?: RuntimeImage[]): Promise<unknown>;
+  followUp(message: string, images?: RuntimeImage[]): Promise<unknown>;
+  respondToUI(response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }): Promise<void>;
   clearQueue(): Promise<RuntimeQueue>;
   compact(): Promise<unknown>;
 }
@@ -70,11 +72,12 @@ export class RuntimeHub {
   }
 
   private async readSnapshot(adapter: RuntimeAdapter): Promise<RuntimeSnapshot> {
-    const [[state, messages], models, thinkingLevels, stats] = await Promise.all([
+    const [[state, messages], models, thinkingLevels, stats, commands] = await Promise.all([
       Promise.all([adapter.getState(), adapter.getMessages()]),
       safeCall(() => adapter.getAvailableModels(), []),
       safeCall(() => adapter.getAvailableThinkingLevels(), []),
       safeCall<RuntimeSessionStats | undefined>(() => adapter.getSessionStats(), undefined),
+      safeCall(() => adapter.getCommands(), []),
     ]);
     this.currentSessionPath = state.sessionFile;
 
@@ -103,6 +106,7 @@ export class RuntimeHub {
         cost: stats.cost,
       } : undefined,
       queue: { steering: [...this.queue.steering], followUp: [...this.queue.followUp] },
+      commands,
     };
   }
 
@@ -117,8 +121,8 @@ export class RuntimeHub {
     try {
       if (command.type === "prompt") {
         const message = command.message.trim();
-        if (!message) throw new Error("Prompt cannot be empty");
-        await adapter.prompt(message);
+        if (!message && !command.images?.length) throw new Error("Prompt cannot be empty");
+        await adapter.prompt(message || "请查看附件。", command.images);
       } else if (command.type === "abort") {
         await adapter.abort();
       } else if (command.type === "switch_session") {
@@ -135,9 +139,12 @@ export class RuntimeHub {
         await adapter.setThinkingLevel(command.level);
       } else if (command.type === "steer" || command.type === "follow_up") {
         const message = command.message.trim();
-        if (!message) throw new Error("Queued message cannot be empty");
-        if (command.type === "steer") await adapter.steer(message);
-        else await adapter.followUp(message);
+        if (!message && !command.images?.length) throw new Error("Queued message cannot be empty");
+        const prompt = message || "请查看附件。";
+        if (command.type === "steer") await adapter.steer(prompt, command.images);
+        else await adapter.followUp(prompt, command.images);
+      } else if (command.type === "extension_ui_response") {
+        await adapter.respondToUI(command);
       } else if (command.type === "clear_queue") {
         await adapter.clearQueue();
         this.queue = { steering: [], followUp: [] };

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient, type JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RuntimeAdapter } from "./runtime-hub";
+import type { RuntimeImage } from "../shared/runtime-types";
 
 export function createPiAdapter(repoRoot: string): RuntimeAdapter {
   const agentDir = join(repoRoot, ".kiva", "agent");
@@ -31,7 +32,7 @@ export function createPiAdapter(repoRoot: string): RuntimeAdapter {
     stop: () => client.stop(),
     onEvent: (listener) => client.onEvent((event: JsonAgentSessionEvent) => listener(event)),
     getState: () => client.getState(),
-    prompt: (message) => client.prompt(message),
+    prompt: (message, images) => client.prompt(message, piImages(images)),
     abort: () => client.abort(),
     switchSession: (path) => client.switchSession(path),
     newSession: () => client.newSession(),
@@ -40,11 +41,26 @@ export function createPiAdapter(repoRoot: string): RuntimeAdapter {
     getAvailableModels: () => client.getAvailableModels(),
     getAvailableThinkingLevels: () => client.getAvailableThinkingLevels(),
     getSessionStats: () => client.getSessionStats(),
+    getCommands: () => client.getCommands().then((commands) => commands.map(({ name, description, source }) => ({ name, description, source }))),
     setModel: (provider, modelId) => client.setModel(provider, modelId),
     setThinkingLevel: (level) => client.setThinkingLevel(level as Parameters<typeof client.setThinkingLevel>[0]),
-    steer: (message) => client.steer(message),
-    followUp: (message) => client.followUp(message),
+    steer: (message, images) => client.steer(message, piImages(images)),
+    followUp: (message, images) => client.followUp(message, piImages(images)),
+    respondToUI: (response) => writeUIResponse(client, response),
     clearQueue: () => client.clearQueue().then((queue) => ({ steering: [...queue.steering], followUp: [...queue.followUp] })),
     compact: () => client.compact(),
   };
+}
+
+function piImages(images?: RuntimeImage[]) {
+  return images?.map(({ data, mimeType }) => ({ type: "image" as const, data, mimeType }));
+}
+
+async function writeUIResponse(client: RpcClient, response: { id: string; value?: string; confirmed?: boolean; cancelled?: true }) {
+  const process = (client as unknown as { process?: { stdin?: NodeJS.WritableStream } }).process;
+  const stdin = process?.stdin;
+  if (!stdin?.writable) throw new Error("Agent process stdin is not writable");
+  await new Promise<void>((resolve, reject) => {
+    stdin.write(`${JSON.stringify({ type: "extension_ui_response", ...response })}\n`, (error?: Error | null) => error ? reject(error) : resolve());
+  });
 }
