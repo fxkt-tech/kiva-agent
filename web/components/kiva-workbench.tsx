@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useMemo, useState } from "react";
 import {
   Archive,
   ArrowUp,
@@ -19,12 +19,14 @@ import {
   Settings2,
   Sparkles,
   SquareTerminal,
+  StopCircle,
   Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useRuntime } from "@/lib/use-runtime";
 import type { BootstrapData } from "@/shared/types";
 
 function relativeTime(value: string) {
@@ -39,7 +41,26 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [selectedId, setSelectedId] = useState(data.sessions[0]?.id);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
+  const runtime = useRuntime();
   const selected = useMemo(() => data.sessions.find((session) => session.id === selectedId), [data.sessions, selectedId]);
+  const running = runtime.status === "running";
+  const runtimeLabel = !runtime.connected ? "连接中" : running ? "运行中" : runtime.status === "error" ? "异常" : "已就绪";
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.trim() || running) return;
+    const message = draft;
+    setDraft("");
+    try { await runtime.sendPrompt(message); }
+    catch { setDraft(message); }
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
 
   return (
     <main className={cn("workbench", !inspectorOpen && "inspector-closed")}>
@@ -87,60 +108,60 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
       <section className="conversation">
         <header className="conversation-header">
           <div className="min-w-0"><h1>{selected?.name ?? "新的开始"}</h1><p>{data.project.name} · {data.project.branch}</p></div>
-          <div className="header-actions"><Badge className="hidden sm:inline-flex"><CircleDot size={10} className="mr-1 text-emerald-400" />已就绪</Badge><Button variant="ghost" size="icon"><MoreHorizontal size={18} /></Button><Button variant="ghost" size="icon" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={18} /></Button></div>
+          <div className="header-actions"><Badge className="hidden sm:inline-flex"><CircleDot size={10} className={cn("mr-1", runtime.status === "error" ? "text-red-400" : running ? "text-amber-300" : "text-emerald-400")} />{runtimeLabel}</Badge><Button variant="ghost" size="icon"><MoreHorizontal size={18} /></Button><Button variant="ghost" size="icon" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={18} /></Button></div>
         </header>
 
         <ScrollArea className="message-scroll">
           <div className="message-column">
             <div className="date-divider"><span>今天</span></div>
-            {selected ? (
-              <>
-                <article className="user-message"><p>{selected.preview}</p></article>
-                <article className="assistant-message">
-                  <div className="assistant-avatar"><Sparkles size={14} /></div>
-                  <div className="assistant-body">
-                    <div className="message-meta"><strong>Kiva</strong><span>刚刚</span></div>
-                    <p>我已经载入这个项目和会话上下文。新版工作台骨架正在运行，下一步会接入 Pi RPC 的实时消息流。</p>
-                    <div className="tool-card">
-                      <div className="tool-icon"><Wrench size={14} /></div>
-                      <div><p>读取项目状态</p><span>已发现 {data.project.dirtyFiles} 个变更文件</span></div>
-                      <Badge className="ml-auto border-emerald-500/20 bg-emerald-500/10 text-emerald-300">完成</Badge>
-                    </div>
-                  </div>
-                </article>
-              </>
+            {runtime.messages.length ? runtime.messages.map((message) => message.role === "user" ? (
+              <article key={message.id} className="user-message"><p>{message.text}</p></article>
             ) : (
+              <article key={message.id} className="assistant-message">
+                <div className="assistant-avatar"><Sparkles size={14} /></div>
+                <div className="assistant-body">
+                  <div className="message-meta"><strong>Kiva</strong><span>{message.streaming ? "正在回答" : "刚刚"}</span></div>
+                  <p className={cn(message.streaming && "streaming-text")}>{message.text || (message.tools.length ? "正在使用工具…" : "正在思考…")}</p>
+                  {message.tools.map((tool) => <div className="tool-card" key={tool.id}>
+                    <div className="tool-icon"><Wrench size={14} /></div>
+                    <div><p>{tool.name}</p><span>{tool.status === "running" ? "正在执行" : tool.status === "error" ? "执行失败" : "执行完成"}</span></div>
+                    <Badge className={cn("ml-auto", tool.status === "error" ? "border-red-500/20 bg-red-500/10 text-red-300" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300")}>{tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成"}</Badge>
+                  </div>)}
+                </div>
+              </article>
+            )) : (
               <div className="empty-state">
                 <div className="empty-orbit"><Sparkles size={24} /></div>
                 <p className="eyebrow">KIVA AGENT</p>
                 <h2>把想法交给一个<br />了解项目的搭档。</h2>
                 <p className="empty-copy">从任务、问题或者一段不完整的思路开始。Kiva 会读取项目上下文，并把工作过程清晰地呈现在这里。</p>
-                <div className="suggestions"><button>解释当前代码结构</button><button>检查最近的代码变更</button><button>规划下一个功能</button></div>
+                <div className="suggestions"><button onClick={() => setDraft("解释当前代码结构")}>解释当前代码结构</button><button onClick={() => setDraft("检查最近的代码变更")}>检查最近的代码变更</button><button onClick={() => setDraft("规划下一个功能")}>规划下一个功能</button></div>
               </div>
             )}
+            {runtime.error && <div className="runtime-error">{runtime.error}</div>}
           </div>
         </ScrollArea>
 
         <div className="composer-wrap">
-          <div className="composer">
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="告诉 Kiva 你想完成什么…" rows={2} />
+          <form className="composer" onSubmit={submit}>
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="告诉 Kiva 你想完成什么…" rows={2} />
             <div className="composer-actions">
-              <Button variant="ghost" size="icon"><Paperclip size={17} /></Button>
-              <Button variant="ghost" size="sm"><SquareTerminal size={15} />工具</Button>
-              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span><Button size="icon" disabled={!draft.trim()}><ArrowUp size={17} /></Button></div>
+              <Button type="button" variant="ghost" size="icon"><Paperclip size={17} /></Button>
+              <Button type="button" variant="ghost" size="sm"><SquareTerminal size={15} />工具</Button>
+              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running ? <Button type="button" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button> : <Button type="submit" size="icon" disabled={!draft.trim() || !runtime.connected}><ArrowUp size={17} /></Button>}</div>
             </div>
-          </div>
+          </form>
           <p className="composer-note">Kiva 可能会修改文件或执行命令，请在提交前检查变更。</p>
         </div>
       </section>
 
       {inspectorOpen && <aside className="inspector">
         <div className="inspector-heading"><div><p className="eyebrow">SESSION CONTEXT</p><h2>运行上下文</h2></div><Button variant="ghost" size="icon" onClick={() => setInspectorOpen(false)}><PanelRightClose size={16} /></Button></div>
-        <div className="inspector-section"><p className="inspector-label">模型</p><button className="model-card"><span className="model-glyph">A</span><span><strong>等待模型配置</strong><small>{data.runtime.modelConfigFound ? "可从 models.json 选择" : "尚未找到 models.json"}</small></span><ChevronDown size={15} className="ml-auto" /></button></div>
+        <div className="inspector-section"><p className="inspector-label">模型</p><button className="model-card"><span className="model-glyph">A</span><span><strong>{runtime.snapshot?.model?.id ?? "等待模型配置"}</strong><small>{runtime.snapshot?.model?.provider ?? (data.runtime.modelConfigFound ? "可从 models.json 选择" : "尚未找到 models.json")}</small></span><ChevronDown size={15} className="ml-auto" /></button></div>
         <div className="inspector-section"><div className="flex items-center justify-between"><p className="inspector-label">上下文使用量</p><span className="text-xs text-muted-foreground">0%</span></div><div className="context-track"><span /></div><div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>0 tokens</span><span>等待首次请求</span></div></div>
         <div className="inspector-section"><p className="inspector-label">项目</p><dl className="detail-list"><div><dt>分支</dt><dd><GitBranch size={12} />{data.project.branch}</dd></div><div><dt>变更</dt><dd>{data.project.dirtyFiles} 个文件</dd></div><div><dt>工作区</dt><dd className="truncate">{data.project.name}</dd></div></dl></div>
         <div className="inspector-section"><p className="inspector-label">可用能力</p><div className="capability-grid"><span><FileCode2 size={14} />文件</span><span><SquareTerminal size={14} />命令</span><span><GitBranch size={14} />Git</span><span><Wrench size={14} />工具</span></div></div>
-        <div className="inspector-footer"><span className="status-dot" /><span>服务运行正常</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>
+        <div className="inspector-footer"><span className={cn("status-dot", !runtime.connected && "offline")} /><span>{runtimeLabel}</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>
       </aside>}
     </main>
   );

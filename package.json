@@ -19,7 +19,7 @@
     "kiva": "node ./bin/kiva.mjs",
     "plugin:add": "node ./bin/kiva-plugin.mjs add",
     "plugin:remove": "node ./bin/kiva-plugin.mjs remove",
-    "test": "node --test",
+    "test": "node --test test/*.test.mjs && pnpm --dir web test",
     "typecheck": "tsc --noEmit && pnpm --dir web typecheck"
   },
   "dependencies": {

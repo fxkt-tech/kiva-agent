@@ -2,13 +2,16 @@
   "name": "@fxkt-tech/kiva-web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 30141",
+    "dev": "tsx server/server.ts",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1 --port 30141",
+    "start": "NODE_ENV=production tsx server/server.ts",
+    "test": "tsx --test server/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.3.0",
     "@radix-ui/react-scroll-area": "1.2.10",
     "@radix-ui/react-slot": "1.2.4",
     "class-variance-authority": "0.7.1",
@@ -17,14 +20,17 @@
     "next": "16.3.8",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "tailwind-merge": "3.3.1"
+    "tailwind-merge": "3.3.1",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.14",
     "@types/node": "26.6.5",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@types/ws": "8.18.1",
     "tailwindcss": "4.1.14",
+    "tsx": "4.20.6",
     "typescript": "5.9.3"
   }
 }

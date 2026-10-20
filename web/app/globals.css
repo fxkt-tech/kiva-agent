@@ -50,6 +50,7 @@ button { cursor: pointer; }
 .sidebar-footer { border-top: 1px solid var(--border); padding: 8px 10px 10px; }
 .runtime-line { display: flex; align-items: center; padding: 8px 10px 2px; color: var(--muted-foreground); font-size: 10px; }
 .status-dot { width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #72e89a; box-shadow: 0 0 10px #72e89a99; }
+.status-dot.offline { background: #727985; box-shadow: none; }
 
 .conversation { display: grid; min-width: 0; grid-template-rows: 68px 1fr auto; }
 .conversation-header { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid var(--border); background: #0a0c10b8; backdrop-filter: blur(14px); }
@@ -66,6 +67,7 @@ button { cursor: pointer; }
 .assistant-avatar { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border: 1px solid #d8ff7230; border-radius: 9px; background: #d8ff7210; color: var(--primary); }
 .assistant-body { min-width: 0; flex: 1; color: #d6d5d0; font-size: 14px; line-height: 1.7; }
 .assistant-body > p { margin: 8px 0 18px; }
+.streaming-text::after { display: inline-block; width: 6px; height: 14px; margin-left: 4px; vertical-align: -2px; content: ""; background: var(--primary); animation: cursor-blink 1s steps(2) infinite; }
 .message-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .message-meta span { color: var(--muted-foreground); font-size: 10px; }
 .tool-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: #ffffff04; }
@@ -87,6 +89,9 @@ button { cursor: pointer; }
 .composer textarea::placeholder { color: #5f6671; }
 .composer-actions { display: flex; align-items: center; padding: 6px; }
 .composer-note { max-width: 780px; margin: 7px auto 0; color: #555c67; font-size: 9px; text-align: center; }
+.runtime-error { margin: 24px auto 0; padding: 10px 12px; border: 1px solid #ef444433; border-radius: 10px; color: #fca5a5; background: #ef44440c; font-size: 11px; }
+
+@keyframes cursor-blink { 50% { opacity: 0; } }
 
 .inspector { display: flex; min-width: 0; flex-direction: column; border-left: 1px solid var(--border); }
 .inspector-heading { display: flex; height: 68px; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border); }

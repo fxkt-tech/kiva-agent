@@ -5,5 +5,6 @@ allowBuilds:
   '@agegr/pi-web': true
   '@google/genai': false
   '@tailwindcss/oxide': true
+  esbuild: true
   node-pty: true
   protobufjs: false
