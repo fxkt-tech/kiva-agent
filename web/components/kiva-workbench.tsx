@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowUp,
@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 import { useRuntime } from "@/lib/use-runtime";
 import { MessageContent } from "@/components/message-content";
 import { ExtensionDialog } from "@/components/extension-dialog";
-import type { RuntimeImage } from "@/shared/runtime-types";
+import type { RuntimeAttachment } from "@/shared/runtime-types";
 import type { BootstrapData, SessionAction, SessionCollections, SessionSummary } from "@/shared/types";
 
 function relativeTime(value: string, renderedAt: string) {
@@ -59,9 +59,10 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
   const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
-  const [attachments, setAttachments] = useState<RuntimeImage[]>([]);
+  const [attachments, setAttachments] = useState<RuntimeAttachment[]>([]);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
+  const [workspaceMenu, setWorkspaceMenu] = useState(false);
   const [sessions, setSessions] = useState(data.sessions);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
@@ -112,11 +113,32 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   }
 
   async function attachImages(event: ChangeEvent<HTMLInputElement>) {
-    const files = [...(event.target.files ?? [])].slice(0, Math.max(0, 5 - attachments.length));
-    const valid = files.filter((file) => file.type.startsWith("image/") && file.size <= 10_000_000);
-    const images = await Promise.all(valid.map(readImage));
-    setAttachments((current) => [...current, ...images].slice(0, 5));
+    await addFiles([...(event.target.files ?? [])]);
     event.target.value = "";
+  }
+
+  async function addFiles(files: File[]) {
+    const available = files.slice(0, Math.max(0, 5 - attachments.length));
+    const valid = available.filter((file) => file.type.startsWith("image/") ? file.size <= 10_000_000 : isTextFile(file) && file.size <= 1_000_000);
+    const next = await Promise.all(valid.map(readAttachment));
+    setAttachments((current) => [...current, ...next].slice(0, 5));
+  }
+
+  function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = [...event.clipboardData.files];
+    if (files.length) {
+      event.preventDefault();
+      void addFiles(files);
+    }
+  }
+
+  function changeDraft(value: string) {
+    setDraft(value);
+    const slashQuery = /^\/([^\s]*)$/.exec(value);
+    if (slashQuery) {
+      setCommandOpen(true);
+      setCommandQuery(slashQuery[1]);
+    }
   }
 
   function chooseCommand(name: string) {
@@ -248,7 +270,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         </ScrollArea>
 
         <div className="sidebar-footer">
-          <button className="nav-item"><Settings2 size={16} />设置</button>
+          <button className="nav-item" onClick={() => setInspectorOpen(true)}><Settings2 size={16} />设置</button>
           <div className="runtime-line"><span className="status-dot" />Pi {data.runtime.piVersion}<span className="ml-auto">本地</span></div>
         </div>
       </aside>
@@ -256,7 +278,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
       <section className="conversation">
         <header className="conversation-header">
           <div className="min-w-0"><h1>{selected?.name ?? runtime.snapshot?.session.name ?? "新的开始"}</h1><p>{data.project.name} · {data.project.branch}</p></div>
-          <div className="header-actions"><Badge className="hidden sm:inline-flex"><CircleDot size={10} className={cn("mr-1", runtime.status === "error" ? "text-red-400" : running ? "text-amber-300" : "text-emerald-400")} />{runtimeLabel}</Badge><Button variant="ghost" size="icon"><MoreHorizontal size={18} /></Button><Button variant="ghost" size="icon" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={18} /></Button></div>
+          <div className="header-actions"><Badge className="hidden sm:inline-flex"><CircleDot size={10} className={cn("mr-1", runtime.status === "error" ? "text-red-400" : running ? "text-amber-300" : "text-emerald-400")} />{runtimeLabel}</Badge><div className="workspace-menu-wrap"><Button variant="ghost" size="icon" onClick={() => setWorkspaceMenu((value) => !value)} aria-label="会话菜单"><MoreHorizontal size={18} /></Button>{workspaceMenu && <div className="workspace-menu"><button onClick={() => { setWorkspaceMenu(false); void createSession(); }}>新建会话</button><button onClick={() => { setWorkspaceMenu(false); setInspectorOpen(true); }}>会话设置</button><button disabled={running || !runtime.snapshot?.context} onClick={() => { setWorkspaceMenu(false); compactSession(); }}>压缩上下文</button></div>}</div><Button variant="ghost" size="icon" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={18} /></Button></div>
         </header>
 
         <ScrollArea className="message-scroll">
@@ -300,11 +322,11 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
             <button onClick={() => void runtime.clearQueue()} aria-label="清空队列"><X size={13} /></button>
           </div> : null}
           <form className="composer" onSubmit={submit}>
-            {attachments.length > 0 && <div className="attachment-list">{attachments.map((image, index) => <div key={`${image.name}-${index}`}><img src={`data:${image.mimeType};base64,${image.data}`} alt="" /><span>{image.name}</span><button type="button" aria-label={`移除 ${image.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 Kiva 你想完成什么…"} rows={2} />
+            {attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`}>{attachment.kind === "image" ? <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="" /> : <span className="attachment-file"><FileCode2 size={14} /></span>}<span>{attachment.name}</span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
+            <textarea value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 Kiva 你想完成什么…"} rows={2} />
             <div className="composer-actions">
-              <input ref={fileInput} className="sr-only" type="file" accept="image/*" multiple onChange={attachImages} />
-              <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加图片"><Paperclip size={17} /></Button>
+              <input ref={fileInput} className="sr-only" type="file" accept="image/*,text/*,.md,.json,.js,.jsx,.ts,.tsx,.css,.html,.xml,.yaml,.yml,.toml,.go,.py,.rs,.java,.sh" multiple onChange={attachImages} />
+              <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Paperclip size={17} /></Button>
               {running ? <select className="composer-mode" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm" onClick={() => setCommandOpen((value) => !value)}><SquareTerminal size={15} />命令</Button>}
               <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" disabled={(!draft.trim() && !attachments.length) || !runtime.connected}><ArrowUp size={17} /></Button></div>
             </div>
@@ -321,16 +343,21 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         <div className="inspector-section"><p className="inspector-label">可用能力</p><div className="capability-grid"><span><FileCode2 size={14} />文件</span><span><SquareTerminal size={14} />命令</span><span><GitBranch size={14} />Git</span><span><Wrench size={14} />工具</span></div></div>
         <div className="inspector-footer"><span className={cn("status-dot", !runtime.connected && "offline")} /><span>{runtimeLabel}</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>
       </aside>}
-      <ExtensionDialog request={runtime.uiRequest} respond={(response) => void runtime.respondToUI(response)} />
+      <ExtensionDialog request={runtime.uiRequest} respond={runtime.respondToUI} />
     </main>
   );
 }
 
-function readImage(file: File) {
-  return new Promise<RuntimeImage>((resolve, reject) => {
+function readAttachment(file: File): Promise<RuntimeAttachment> {
+  if (!file.type.startsWith("image/")) return file.text().then((data) => ({ kind: "text", name: file.name, mimeType: file.type || "text/plain", data }));
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve({ name: file.name, mimeType: file.type, data: String(reader.result).split(",", 2)[1] ?? "" });
+    reader.onload = () => resolve({ kind: "image", name: file.name, mimeType: file.type, data: String(reader.result).split(",", 2)[1] ?? "" });
     reader.readAsDataURL(file);
   });
+}
+
+function isTextFile(file: File) {
+  return file.type.startsWith("text/") || /\.(md|json|jsx?|tsx?|css|html?|xml|ya?ml|toml|go|py|rs|java|sh)$/i.test(file.name);
 }

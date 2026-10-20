@@ -130,16 +130,25 @@ function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (value.type === "set_model") return "provider" in value && typeof value.provider === "string" && "modelId" in value && typeof value.modelId === "string";
   if (value.type === "set_thinking") return "level" in value && typeof value.level === "string";
   if (value.type === "extension_ui_response") return isUIResponse(value);
-  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string" && validImages(value);
+  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string" && validImages(value) && validFiles(value);
   if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
-  return value.type === "prompt" && "message" in value && typeof value.message === "string" && validImages(value);
+  return value.type === "prompt" && "message" in value && typeof value.message === "string" && validImages(value) && validFiles(value);
+}
+
+function validFiles(value: Record<string, unknown>) {
+  if (!("files" in value) || value.files === undefined) return true;
+  return Array.isArray(value.files) && value.files.length <= 5 && value.files.every((file) => {
+    if (typeof file !== "object" || file === null) return false;
+    return file.kind === "text" && typeof file.name === "string" && file.name.length <= 255
+      && typeof file.mimeType === "string" && typeof file.data === "string" && file.data.length <= 1_000_000;
+  });
 }
 
 function validImages(value: Record<string, unknown>) {
   if (!("images" in value) || value.images === undefined) return true;
   return Array.isArray(value.images) && value.images.length <= 5 && value.images.every((image) => {
     if (typeof image !== "object" || image === null) return false;
-    return "data" in image && typeof image.data === "string" && image.data.length <= 14_000_000
+    return image.kind === "image" && "data" in image && typeof image.data === "string" && image.data.length <= 14_000_000
       && "mimeType" in image && typeof image.mimeType === "string" && image.mimeType.startsWith("image/");
   });
 }

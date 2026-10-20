@@ -10,6 +10,11 @@ export function ExtensionDialog({ request, respond }: {
 }) {
   const [value, setValue] = useState("");
   useEffect(() => setValue(request?.prefill ?? ""), [request?.id, request?.prefill]);
+  useEffect(() => {
+    if (!request?.timeout) return;
+    const timer = setTimeout(() => respond({ id: request.id, cancelled: true }), request.timeout);
+    return () => clearTimeout(timer);
+  }, [request, respond]);
   if (!request) return null;
 
   return <div className="dialog-backdrop" role="presentation">

@@ -63,9 +63,13 @@ function ToolCard({ tool }: { tool: ToolActivity }) {
 function ToolValue({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1_200);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1_200);
+    } catch {
+      // Clipboard permissions can be denied by the browser.
+    }
   }
   return <div><span>{label}</span><button className="tool-copy" type="button" onClick={copy}><Copy size={11} />{copied ? "已复制" : "复制"}</button><pre>{value}</pre></div>;
 }

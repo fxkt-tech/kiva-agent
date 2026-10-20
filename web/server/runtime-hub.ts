@@ -1,4 +1,4 @@
-import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSlashCommand, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
+import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSlashCommand, RuntimeSnapshot, RuntimeTextFile, RuntimeTool } from "../shared/runtime-types";
 
 export interface RuntimeAdapterState {
   isStreaming: boolean;
@@ -121,8 +121,8 @@ export class RuntimeHub {
     try {
       if (command.type === "prompt") {
         const message = command.message.trim();
-        if (!message && !command.images?.length) throw new Error("Prompt cannot be empty");
-        await adapter.prompt(message || "请查看附件。", command.images);
+        if (!message && !command.images?.length && !command.files?.length) throw new Error("Prompt cannot be empty");
+        await adapter.prompt(withTextFiles(message || "请查看附件。", command.files), command.images);
       } else if (command.type === "abort") {
         await adapter.abort();
       } else if (command.type === "switch_session") {
@@ -139,8 +139,8 @@ export class RuntimeHub {
         await adapter.setThinkingLevel(command.level);
       } else if (command.type === "steer" || command.type === "follow_up") {
         const message = command.message.trim();
-        if (!message && !command.images?.length) throw new Error("Queued message cannot be empty");
-        const prompt = message || "请查看附件。";
+        if (!message && !command.images?.length && !command.files?.length) throw new Error("Queued message cannot be empty");
+        const prompt = withTextFiles(message || "请查看附件。", command.files);
         if (command.type === "steer") await adapter.steer(prompt, command.images);
         else await adapter.followUp(prompt, command.images);
       } else if (command.type === "extension_ui_response") {
@@ -307,12 +307,22 @@ function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function withTextFiles(message: string, files?: RuntimeTextFile[]) {
+  if (!files?.length) return message;
+  const blocks = files.map((file) => `<attached_file name="${file.name.replaceAll('"', "&quot;")}">\n${file.data.replaceAll("</attached_file>", "<\\/attached_file>")}\n</attached_file>`);
+  return `${message}\n\n${blocks.join("\n\n")}`;
+}
+
+function displayPrompt(message: string) {
+  return message.replace(/<attached_file name="([^"]+)">[\s\S]*?<\/attached_file>/g, "[附件: $1]").trim();
+}
+
 export function normalizeMessages(values: unknown[]): RuntimeMessage[] {
   const messages: RuntimeMessage[] = [];
   values.forEach((value, index) => {
     const message = record(value);
     if (message?.role === "user") {
-      messages.push({ id: `history-${index}`, role: "user", text: contentText(message.content), thinking: "", tools: [] });
+      messages.push({ id: `history-${index}`, role: "user", text: displayPrompt(contentText(message.content)), thinking: "", tools: [] });
       return;
     }
     if (message?.role === "assistant") {

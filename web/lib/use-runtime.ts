@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeUIRequest, RuntimeWireEvent } from "@/shared/runtime-types";
+import type { RuntimeAttachment, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeUIRequest, RuntimeWireEvent } from "@/shared/runtime-types";
 
 export type ToolActivity = RuntimeTool;
 
@@ -90,11 +90,11 @@ export function useRuntime() {
     if (!response.ok) throw new Error(result.error ?? "运行时命令失败");
   }, []);
 
-  const sendPrompt = useCallback(async (message: string, images: RuntimeImage[] = []) => {
+  const sendPrompt = useCallback(async (message: string, attachments: RuntimeAttachment[] = []) => {
     const text = message.trim();
-    if (!text && !images.length) return;
+    if (!text && !attachments.length) return;
     dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text: text || "请查看附件。", thinking: "", tools: [] } });
-    try { await execute({ type: "prompt", message: text, images }); }
+    try { await execute({ type: "prompt", message: text, images: attachments.filter((item) => item.kind === "image"), files: attachments.filter((item) => item.kind === "text") }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
@@ -122,8 +122,8 @@ export function useRuntime() {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
-  const queueMessage = useCallback(async (message: string, mode: "steer" | "follow_up", images: RuntimeImage[] = []) => {
-    try { await execute({ type: mode, message, images }); }
+  const queueMessage = useCallback(async (message: string, mode: "steer" | "follow_up", attachments: RuntimeAttachment[] = []) => {
+    try { await execute({ type: mode, message, images: attachments.filter((item) => item.kind === "image"), files: attachments.filter((item) => item.kind === "text") }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
@@ -161,13 +161,13 @@ export function useRuntime() {
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
   if (action.type === "connected") return { ...state, connected: action.value, error: action.value ? undefined : state.error };
-  if (action.type === "stream_changed") return { ...state, snapshot: undefined };
+  if (action.type === "stream_changed") return { ...state, snapshot: undefined, uiRequest: undefined };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };
   if (action.type === "ui_answered") return { ...state, uiRequest: undefined };
   const event = action.event;
   if (event.type === "error") return { ...state, status: "error", error: event.message };
-  if (event.type === "runtime_reset") return { ...state, snapshot: undefined };
+  if (event.type === "runtime_reset") return { ...state, snapshot: undefined, uiRequest: undefined };
   if (event.type === "snapshot") {
     const sessionChanged = state.snapshot?.session.id !== event.snapshot.session.id;
     return {
@@ -189,12 +189,12 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
     return { ...state, uiRequest: event as unknown as RuntimeUIRequest };
   }
   if (event.type === "agent_start") return { ...state, status: "running", error: undefined };
-  if (event.type === "agent_settled") return { ...state, status: "idle", messages: finishAssistant(state.messages), sessionsVersion: state.sessionsVersion + 1 };
+  if (event.type === "agent_settled") return { ...state, status: "idle", messages: finishAssistant(state.messages), sessionsVersion: state.sessionsVersion + 1, uiRequest: undefined };
   if (event.type === "session_info_changed") return { ...state, sessionsVersion: state.sessionsVersion + 1 };
   if (event.type === "message_start") {
     const message = record(event.message);
     if (message?.role === "user") {
-      const text = messageText(message.content);
+      const text = displayPrompt(messageText(message.content));
       if (!text || (state.messages.at(-1)?.role === "user" && state.messages.at(-1)?.text === text)) return state;
       return { ...state, messages: [...state.messages, { id: crypto.randomUUID(), role: "user", text, thinking: "", tools: [] }] };
     }
@@ -295,6 +295,10 @@ function messageText(value: unknown) {
   if (typeof value === "string") return value;
   if (!Array.isArray(value)) return "";
   return value.map(record).map((item) => item?.type === "text" ? stringValue(item.text) ?? "" : "").join("");
+}
+
+function displayPrompt(message: string) {
+  return message.replace(/<attached_file name="([^"]+)">[\s\S]*?<\/attached_file>/g, "[附件: $1]").trim();
 }
 
 function stringArray(value: unknown) {

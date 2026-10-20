@@ -102,12 +102,13 @@ describe("RuntimeHub", () => {
   it("sends image attachments and responds to extension UI requests", async () => {
     const fake = createAdapter();
     const hub = new RuntimeHub(() => fake.adapter);
-    const image = { name: "screen.png", mimeType: "image/png", data: "cG5n" };
+    const image = { kind: "image" as const, name: "screen.png", mimeType: "image/png", data: "cG5n" };
+    const file = { kind: "text" as const, name: "notes.md", mimeType: "text/markdown", data: "# Notes\n</attached_file>" };
 
-    await hub.execute({ type: "prompt", message: "", images: [image] });
+    await hub.execute({ type: "prompt", message: "Inspect", images: [image], files: [file] });
     await hub.execute({ type: "extension_ui_response", id: "ui-1", confirmed: true });
 
-    assert.equal(fake.prompts[0], "请查看附件。");
+    assert.equal(fake.prompts[0], "Inspect\n\n<attached_file name=\"notes.md\">\n# Notes\n<\\/attached_file>\n</attached_file>");
     assert.deepEqual(fake.promptImages, [[image]]);
     assert.deepEqual(fake.uiResponses, [{ type: "extension_ui_response", id: "ui-1", confirmed: true }]);
   });
@@ -154,7 +155,7 @@ describe("RuntimeHub", () => {
   it("hydrates user, assistant, thinking, and tool results in snapshots", async () => {
     const fake = createAdapter();
     fake.adapter.getMessages = async () => [
-      { role: "user", content: "Inspect the project" },
+      { role: "user", content: "Inspect the project\n\n<attached_file name=\"notes.md\">\nsecret contents\n</attached_file>" },
       { role: "assistant", content: [
         { type: "thinking", thinking: "I should inspect files." },
         { type: "text", text: "I found **two** files." },
@@ -168,7 +169,7 @@ describe("RuntimeHub", () => {
 
     assert.equal(snapshot.session.path, "/repo/session.jsonl");
     assert.deepEqual(snapshot.messages, [
-      { id: "history-0", role: "user", text: "Inspect the project", thinking: "", tools: [] },
+      { id: "history-0", role: "user", text: "Inspect the project\n\n[附件: notes.md]", thinking: "", tools: [] },
       { id: "history-1", role: "assistant", text: "I found **two** files.", thinking: "I should inspect files.", tools: [
         { id: "tool-1", name: "read", args: { path: "README.md" }, result: "# Kiva", status: "done" },
       ] },

@@ -65,6 +65,11 @@ button { cursor: pointer; }
 .conversation-header h1 { max-width: 620px; margin: 0; overflow: hidden; color: #f3f1eb; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-header p { margin: 3px 0 0; color: var(--muted-foreground); font-size: 11px; }
 .header-actions { display: flex; align-items: center; gap: 3px; }
+.workspace-menu-wrap { position: relative; }
+.workspace-menu { position: absolute; z-index: 20; top: 40px; right: 0; display: grid; width: 150px; gap: 2px; padding: 5px; border: 1px solid #343b46; border-radius: 10px; background: #151920f5; box-shadow: 0 18px 60px #000b; backdrop-filter: blur(16px); }
+.workspace-menu button { padding: 7px 8px; border: 0; border-radius: 6px; color: #b8bdc5; background: transparent; font-size: 10px; text-align: left; }
+.workspace-menu button:hover:not(:disabled) { color: var(--foreground); background: #ffffff08; }
+.workspace-menu button:disabled { opacity: .4; cursor: default; }
 .message-scroll { min-height: 0; }
 .message-column { width: min(780px, calc(100% - 40px)); min-height: 100%; margin: 0 auto; padding: 28px 0 48px; }
 .date-divider { display: flex; align-items: center; gap: 14px; margin: 6px 0 30px; color: #626975; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
@@ -135,6 +140,7 @@ button { cursor: pointer; }
 .attachment-list { display: flex; gap: 7px; overflow-x: auto; padding: 10px 12px 0; }
 .attachment-list > div { display: flex; max-width: 180px; align-items: center; gap: 6px; padding: 4px 6px 4px 4px; border: 1px solid var(--border); border-radius: 8px; color: #aeb4bd; background: #ffffff05; font-size: 10px; }
 .attachment-list img { width: 28px; height: 28px; flex: none; border-radius: 5px; object-fit: cover; }
+.attachment-file { display: grid; width: 28px; height: 28px; flex: none; border-radius: 5px; color: #a9bd73; background: #d8ff7210; place-items: center; }
 .attachment-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-list button { display: grid; padding: 2px; border: 0; color: #737b86; background: transparent; place-items: center; }
 .command-palette { position: absolute; right: 24px; bottom: 142px; left: 24px; z-index: 15; max-width: 780px; margin: 0 auto; overflow: hidden; border: 1px solid #343b46; border-radius: 14px; background: #151920f5; box-shadow: 0 24px 80px #000b; backdrop-filter: blur(18px); }

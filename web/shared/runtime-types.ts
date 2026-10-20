@@ -41,10 +41,20 @@ export interface RuntimeQueue {
 }
 
 export interface RuntimeImage {
+  kind: "image";
   data: string;
   mimeType: string;
   name?: string;
 }
+
+export interface RuntimeTextFile {
+  kind: "text";
+  data: string;
+  mimeType: string;
+  name: string;
+}
+
+export type RuntimeAttachment = RuntimeImage | RuntimeTextFile;
 
 export interface RuntimeSlashCommand {
   name: string;
@@ -60,6 +70,7 @@ export interface RuntimeUIRequest {
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  timeout?: number;
 }
 
 export interface RuntimeSnapshot {
@@ -77,7 +88,7 @@ export interface RuntimeSnapshot {
 }
 
 export type RuntimeCommand =
-  | { type: "prompt"; message: string; images?: RuntimeImage[] }
+  | { type: "prompt"; message: string; images?: RuntimeImage[]; files?: RuntimeTextFile[] }
   | { type: "abort" }
   | { type: "switch_session"; sessionPath: string }
   | { type: "new_session" }
@@ -85,8 +96,8 @@ export type RuntimeCommand =
   | { type: "set_model"; provider: string; modelId: string }
   | { type: "set_thinking"; level: string }
   | { type: "compact" }
-  | { type: "steer"; message: string; images?: RuntimeImage[] }
-  | { type: "follow_up"; message: string; images?: RuntimeImage[] }
+  | { type: "steer"; message: string; images?: RuntimeImage[]; files?: RuntimeTextFile[] }
+  | { type: "follow_up"; message: string; images?: RuntimeImage[]; files?: RuntimeTextFile[] }
   | { type: "extension_ui_response"; id: string; value?: string; confirmed?: boolean; cancelled?: true }
   | { type: "clear_queue" };
 
