@@ -1,19 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { RuntimeCommand, RuntimeEvent, RuntimeSnapshot, RuntimeStatus } from "@/shared/runtime-types";
+import type { RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool } from "@/shared/runtime-types";
 
-export interface ToolActivity {
-  id: string;
-  name: string;
-  status: "running" | "done" | "error";
-}
+export type ToolActivity = RuntimeTool;
 
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  tools: ToolActivity[];
+export interface ChatMessage extends RuntimeMessage {
   streaming?: boolean;
 }
 
@@ -22,17 +14,17 @@ interface RuntimeViewState {
   status: RuntimeStatus;
   snapshot?: RuntimeSnapshot;
   messages: ChatMessage[];
+  sessionsVersion: number;
   error?: string;
 }
 
 type Action =
   | { type: "connected"; value: boolean }
   | { type: "user"; message: ChatMessage }
-  | { type: "session_switched" }
   | { type: "event"; event: RuntimeEvent }
   | { type: "error"; message: string };
 
-const initialState: RuntimeViewState = { connected: false, status: "connecting", messages: [] };
+const initialState: RuntimeViewState = { connected: false, status: "connecting", messages: [], sessionsVersion: 0 };
 
 export function useRuntime() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -76,7 +68,7 @@ export function useRuntime() {
   const sendPrompt = useCallback(async (message: string) => {
     const text = message.trim();
     if (!text) return;
-    dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text, tools: [] } });
+    dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text, thinking: "", tools: [] } });
     try { await execute({ type: "prompt", message: text }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
@@ -89,24 +81,42 @@ export function useRuntime() {
   const switchSession = useCallback(async (sessionPath: string) => {
     try {
       await execute({ type: "switch_session", sessionPath });
-      dispatch({ type: "session_switched" });
     } catch (error) {
       dispatch({ type: "error", message: errorMessage(error) });
       throw error;
     }
   }, [execute]);
 
-  return { ...state, sendPrompt, abort, switchSession };
+  const newSession = useCallback(async () => {
+    try { await execute({ type: "new_session" }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
+  }, [execute]);
+
+  const renameSession = useCallback(async (name: string) => {
+    try { await execute({ type: "rename_session", name }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
+  }, [execute]);
+
+  return { ...state, sendPrompt, abort, switchSession, newSession, renameSession };
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
-  if (action.type === "connected") return { ...state, connected: action.value, error: action.value ? undefined : state.error };
+  if (action.type === "connected") return { ...state, connected: action.value, snapshot: action.value ? state.snapshot : undefined, error: action.value ? undefined : state.error };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
-  if (action.type === "session_switched") return { ...state, messages: [], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };
   const event = action.event;
   if (event.type === "error") return { ...state, status: "error", error: event.message };
-  if (event.type === "snapshot") return { ...state, snapshot: event.snapshot, status: event.snapshot.status, error: event.snapshot.error };
+  if (event.type === "snapshot") {
+    const sessionChanged = state.snapshot?.session.id !== event.snapshot.session.id;
+    return {
+      ...state,
+      snapshot: event.snapshot,
+      status: event.snapshot.status,
+      messages: sessionChanged || state.messages.length === 0 ? event.snapshot.messages : state.messages,
+      sessionsVersion: sessionChanged ? state.sessionsVersion + 1 : state.sessionsVersion,
+      error: event.snapshot.error,
+    };
+  }
   return applyPiEvent(state, event.event);
 }
 
@@ -114,7 +124,8 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
   const event = record(value);
   if (!event || typeof event.type !== "string") return state;
   if (event.type === "agent_start") return { ...state, status: "running", error: undefined };
-  if (event.type === "agent_settled") return { ...state, status: "idle", messages: finishAssistant(state.messages) };
+  if (event.type === "agent_settled") return { ...state, status: "idle", messages: finishAssistant(state.messages), sessionsVersion: state.sessionsVersion + 1 };
+  if (event.type === "session_info_changed") return { ...state, sessionsVersion: state.sessionsVersion + 1 };
   if (event.type === "message_start") {
     const message = record(event.message);
     if (message?.role !== "assistant") return state;
@@ -122,41 +133,43 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
   }
   if (event.type === "message_update") {
     const update = record(event.assistantMessageEvent);
-    if (update?.type !== "text_delta" || typeof update.delta !== "string") return state;
-    return { ...state, messages: appendAssistantText(state.messages, update.delta) };
+    if (typeof update?.delta !== "string") return state;
+    if (update.type === "text_delta") return { ...state, messages: appendAssistantField(state.messages, "text", update.delta) };
+    if (update.type === "thinking_delta") return { ...state, messages: appendAssistantField(state.messages, "thinking", update.delta) };
+    return state;
   }
   if (event.type === "message_end") {
     const message = record(event.message);
     if (message?.role !== "assistant") return state;
-    const text = contentText(message.content);
-    return { ...state, messages: replaceAssistantText(state.messages, text) };
+    const content = assistantContent(message.content);
+    return { ...state, messages: replaceAssistantContent(state.messages, content) };
   }
   if (event.type === "tool_execution_start") {
     const id = stringValue(event.toolCallId) ?? crypto.randomUUID();
     const name = stringValue(event.toolName) ?? "工具";
-    return { ...state, messages: upsertTool(ensureAssistant(state.messages), { id, name, status: "running" }) };
+    return { ...state, messages: upsertTool(ensureAssistant(state.messages), { id, name, args: event.args, status: "running" }) };
   }
   if (event.type === "tool_execution_end") {
     const id = stringValue(event.toolCallId);
     if (!id) return state;
-    return { ...state, messages: updateTool(state.messages, id, event.isError ? "error" : "done") };
+    return { ...state, messages: updateTool(state.messages, id, event.isError ? "error" : "done", resultText(event.result)) };
   }
   return state;
 }
 
 function ensureAssistant(messages: ChatMessage[]) {
   if (messages.at(-1)?.role === "assistant" && messages.at(-1)?.streaming) return messages;
-  return [...messages, { id: crypto.randomUUID(), role: "assistant" as const, text: "", tools: [], streaming: true }];
+  return [...messages, { id: crypto.randomUUID(), role: "assistant" as const, text: "", thinking: "", tools: [], streaming: true }];
 }
 
-function appendAssistantText(messages: ChatMessage[], delta: string) {
+function appendAssistantField(messages: ChatMessage[], field: "text" | "thinking", delta: string) {
   const next = ensureAssistant(messages);
-  return next.map((message, index) => index === next.length - 1 ? { ...message, text: message.text + delta } : message);
+  return next.map((message, index) => index === next.length - 1 ? { ...message, [field]: message[field] + delta } : message);
 }
 
-function replaceAssistantText(messages: ChatMessage[], text: string) {
+function replaceAssistantContent(messages: ChatMessage[], content: { text: string; thinking: string }) {
   const next = ensureAssistant(messages);
-  return next.map((message, index) => index === next.length - 1 ? { ...message, text: text || message.text, streaming: false } : message);
+  return next.map((message, index) => index === next.length - 1 ? { ...message, text: content.text || message.text, thinking: content.thinking || message.thinking, streaming: false } : message);
 }
 
 function finishAssistant(messages: ChatMessage[]) {
@@ -169,13 +182,24 @@ function upsertTool(messages: ChatMessage[], tool: ToolActivity) {
     : message);
 }
 
-function updateTool(messages: ChatMessage[], id: string, status: ToolActivity["status"]) {
-  return messages.map((message) => ({ ...message, tools: message.tools.map((tool) => tool.id === id ? { ...tool, status } : tool) }));
+function updateTool(messages: ChatMessage[], id: string, status: ToolActivity["status"], result?: string) {
+  return messages.map((message) => ({ ...message, tools: message.tools.map((tool) => tool.id === id ? { ...tool, status, result } : tool) }));
 }
 
-function contentText(value: unknown) {
-  if (!Array.isArray(value)) return "";
-  return value.map(record).filter(Boolean).map((item) => item?.type === "text" && typeof item.text === "string" ? item.text : "").join("");
+function assistantContent(value: unknown) {
+  if (!Array.isArray(value)) return { text: "", thinking: "" };
+  const items = value.map(record).filter(Boolean);
+  return {
+    text: items.map((item) => item?.type === "text" && typeof item.text === "string" ? item.text : "").join(""),
+    thinking: items.map((item) => item?.type === "thinking" && typeof item.thinking === "string" ? item.thinking : "").join("\n"),
+  };
+}
+
+function resultText(value: unknown) {
+  if (typeof value === "string") return value;
+  const item = record(value);
+  if (item && "content" in item && Array.isArray(item.content)) return item.content.map(record).map((part) => part?.type === "text" ? stringValue(part.text) ?? "" : "").join("");
+  try { return JSON.stringify(value, null, 2); } catch { return String(value ?? ""); }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

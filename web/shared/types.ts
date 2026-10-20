@@ -11,3 +11,13 @@ export interface BootstrapData {
   runtime: { piVersion: string; modelConfigFound: boolean; status: "ready" | "needs-model" };
   sessions: SessionSummary[];
 }
+
+export interface SessionCollections {
+  active: SessionSummary[];
+  archived: SessionSummary[];
+}
+
+export type SessionAction =
+  | { type: "archive"; sessionPath: string }
+  | { type: "restore"; sessionPath: string }
+  | { type: "delete"; sessionPath: string; collection: "active" | "archived" };

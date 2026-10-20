@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent, useMemo, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowUp,
@@ -14,12 +14,15 @@ import {
   MoreHorizontal,
   PanelRightClose,
   Paperclip,
+  Pencil,
   Plus,
+  RotateCcw,
   Search,
   Settings2,
   Sparkles,
   SquareTerminal,
   StopCircle,
+  Trash2,
   Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +30,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/lib/use-runtime";
-import type { BootstrapData, SessionSummary } from "@/shared/types";
+import { MessageContent } from "@/components/message-content";
+import type { BootstrapData, SessionAction, SessionCollections, SessionSummary } from "@/shared/types";
 
 function relativeTime(value: string) {
   const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
@@ -41,10 +45,31 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
+  const [sessions, setSessions] = useState(data.sessions);
+  const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
+  const [sessionView, setSessionView] = useState<"active" | "archived">("active");
+  const [sessionMenu, setSessionMenu] = useState<string>();
+  const messageEnd = useRef<HTMLDivElement>(null);
   const runtime = useRuntime();
-  const selected = useMemo(() => data.sessions.find((session) => session.id === selectedId), [data.sessions, selectedId]);
+  const selected = useMemo(() => sessions.find((session) => session.id === selectedId), [sessions, selectedId]);
+  const visibleSessions = sessionView === "active" ? sessions : archivedSessions;
   const running = runtime.status === "running";
   const runtimeLabel = !runtime.connected ? "连接中" : running ? "运行中" : runtime.status === "error" ? "异常" : "已就绪";
+
+  useEffect(() => { void refreshSessions(); }, [runtime.sessionsVersion]);
+  useEffect(() => { messageEnd.current?.scrollIntoView({ block: "end", behavior: running ? "smooth" : "auto" }); }, [runtime.messages, running]);
+
+  async function refreshSessions() {
+    try {
+      const response = await fetch("/api/sessions");
+      if (!response.ok) return;
+      const collections = await response.json() as SessionCollections;
+      setSessions(collections.active);
+      setArchivedSessions(collections.archived);
+    } catch {
+      // The runtime connection indicator already communicates server availability.
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -71,6 +96,52 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
     }
   }
 
+  async function createSession() {
+    try {
+      await runtime.newSession();
+      setSelectedId(undefined);
+      setSessionView("active");
+      await refreshSessions();
+    } catch {
+      // Runtime error is displayed in the conversation.
+    }
+  }
+
+  async function renameSession(session: SessionSummary) {
+    const name = window.prompt("新的会话名称", session.name)?.trim();
+    if (!name) return;
+    try {
+      if (selectedId !== session.id) await selectSession(session);
+      await runtime.renameSession(name);
+      await refreshSessions();
+    } finally {
+      setSessionMenu(undefined);
+    }
+  }
+
+  async function mutateSession(action: SessionAction) {
+    const response = await fetch("/api/sessions/action", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(action),
+    });
+    const result = await response.json() as SessionCollections & { error?: string };
+    if (!response.ok) throw new Error(result.error ?? "会话操作失败");
+    setSessions(result.active);
+    setArchivedSessions(result.archived);
+    setSessionMenu(undefined);
+  }
+
+  async function deleteSession(session: SessionSummary, collection: "active" | "archived") {
+    if (!window.confirm(`删除“${session.name}”？会话会移动到可恢复的本地垃圾目录。`)) return;
+    try {
+      await mutateSession({ type: "delete", sessionPath: session.path, collection });
+      if (selectedId === session.id) setSelectedId(undefined);
+    } catch {
+      await refreshSessions();
+    }
+  }
+
   return (
     <main className={cn("workbench", !inspectorOpen && "inspector-closed")}>
       <aside className="sidebar">
@@ -86,25 +157,35 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
           <ChevronDown size={15} className="text-muted-foreground" />
         </div>
 
-        <Button className="mx-3 mt-3 justify-start"><Plus size={16} />新建会话<span className="ml-auto text-[10px] opacity-60">⌘ N</span></Button>
+        <Button className="mx-3 mt-3 justify-start" onClick={() => void createSession()}><Plus size={16} />新建会话<span className="ml-auto text-[10px] opacity-60">⌘ N</span></Button>
 
         <nav className="nav-list">
-          <button className="nav-item active"><Bot size={16} />会话</button>
+          <button className={cn("nav-item", sessionView === "active" && "active")} onClick={() => setSessionView("active")}><Bot size={16} />会话</button>
           <button className="nav-item"><FileCode2 size={16} />文件</button>
           <button className="nav-item"><GitBranch size={16} />代码变更<Badge className="ml-auto">{data.project.dirtyFiles}</Badge></button>
-          <button className="nav-item"><Archive size={16} />归档</button>
+          <button className={cn("nav-item", sessionView === "archived" && "active")} onClick={() => setSessionView("archived")}><Archive size={16} />归档<Badge className="ml-auto">{archivedSessions.length}</Badge></button>
         </nav>
 
-        <div className="section-label"><span>最近会话</span><Search size={13} /></div>
+        <div className="section-label"><span>{sessionView === "active" ? "最近会话" : "已归档"}</span><Search size={13} /></div>
         <ScrollArea className="session-scroll">
           <div className="space-y-1 px-2 pb-4">
-            {data.sessions.length ? data.sessions.map((session) => (
-              <button key={session.id} onClick={() => void selectSession(session)} className={cn("session-item", selectedId === session.id && "selected")}>
-                <span className="truncate text-sm font-medium">{session.name}</span>
-                <span className="line-clamp-2 text-left text-xs leading-5 text-muted-foreground">{session.preview}</span>
-                <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt)}</span>
-              </button>
-            )) : <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">还没有会话。<br />创建一个开始工作。</p>}
+            {visibleSessions.length ? visibleSessions.map((session) => (
+              <div className="session-item-wrap" key={session.id}>
+                <button onClick={() => sessionView === "active" && void selectSession(session)} className={cn("session-item", selectedId === session.id && "selected")}>
+                  <span className="truncate pr-6 text-sm font-medium">{session.name}</span>
+                  <span className="line-clamp-2 text-left text-xs leading-5 text-muted-foreground">{session.preview}</span>
+                  <span className="mt-1 text-[10px] text-muted-foreground/70">{relativeTime(session.updatedAt)}</span>
+                </button>
+                <button className="session-more" aria-label="会话操作" onClick={() => setSessionMenu((value) => value === session.id ? undefined : session.id)}><MoreHorizontal size={14} /></button>
+                {sessionMenu === session.id && <div className="session-menu">
+                  {sessionView === "active" ? <>
+                    <button onClick={() => void renameSession(session)}><Pencil size={12} />重命名</button>
+                    <button onClick={() => void mutateSession({ type: "archive", sessionPath: session.path }).then(() => selectedId === session.id && setSelectedId(undefined))}><Archive size={12} />归档</button>
+                  </> : <button onClick={() => void mutateSession({ type: "restore", sessionPath: session.path })}><RotateCcw size={12} />恢复</button>}
+                  <button className="danger" onClick={() => void deleteSession(session, sessionView)}><Trash2 size={12} />删除</button>
+                </div>}
+              </div>
+            )) : <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{sessionView === "active" ? <>还没有会话。<br />创建一个开始工作。</> : "还没有归档会话。"}</p>}
           </div>
         </ScrollArea>
 
@@ -130,12 +211,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
                 <div className="assistant-avatar"><Sparkles size={14} /></div>
                 <div className="assistant-body">
                   <div className="message-meta"><strong>Kiva</strong><span>{message.streaming ? "正在回答" : "刚刚"}</span></div>
-                  <p className={cn(message.streaming && "streaming-text")}>{message.text || (message.tools.length ? "正在使用工具…" : "正在思考…")}</p>
-                  {message.tools.map((tool) => <div className="tool-card" key={tool.id}>
-                    <div className="tool-icon"><Wrench size={14} /></div>
-                    <div><p>{tool.name}</p><span>{tool.status === "running" ? "正在执行" : tool.status === "error" ? "执行失败" : "执行完成"}</span></div>
-                    <Badge className={cn("ml-auto", tool.status === "error" ? "border-red-500/20 bg-red-500/10 text-red-300" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300")}>{tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成"}</Badge>
-                  </div>)}
+                  <MessageContent message={message} />
                 </div>
               </article>
             )) : (
@@ -148,6 +224,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
               </div>
             )}
             {runtime.error && <div className="runtime-error">{runtime.error}</div>}
+            <div ref={messageEnd} />
           </div>
         </ScrollArea>
 

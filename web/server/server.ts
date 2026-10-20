@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
 import { createPiAdapter } from "./pi-adapter";
 import { RuntimeHub } from "./runtime-hub";
 import type { RuntimeCommand } from "../shared/runtime-types";
+import type { SessionAction } from "../shared/types";
+import { SessionCatalog, type SessionCollection } from "./session-catalog";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(process.env.KIVA_REPO_ROOT ?? resolve(webRoot, ".."));
@@ -16,6 +18,7 @@ const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev, dir: webRoot, hostname: host, port });
 const handle = app.getRequestHandler();
 const runtime = new RuntimeHub(() => createPiAdapter(repoRoot));
+const sessions = new SessionCatalog(repoRoot);
 const sockets = new WebSocketServer({ noServer: true });
 
 await app.prepare();
@@ -27,10 +30,18 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/runtime/state" && request.method === "GET") {
       return sendJson(response, 200, await runtime.snapshot());
     }
+    if (url.pathname === "/api/sessions" && request.method === "GET") {
+      return sendJson(response, 200, sessionCollections());
+    }
     if (url.pathname === "/api/runtime/command" && request.method === "POST") {
       if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
       const command = normalizeCommand(await readCommand(request));
       return sendJson(response, 202, await runtime.execute(command));
+    }
+    if (url.pathname === "/api/sessions/action" && request.method === "POST") {
+      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
+      await executeSessionAction(await readSessionAction(request));
+      return sendJson(response, 200, sessionCollections());
     }
     await handle(request, response);
   } catch (error) {
@@ -75,6 +86,18 @@ process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
 async function readCommand(request: IncomingMessage): Promise<RuntimeCommand> {
+  const value = await readJson(request);
+  if (!isRuntimeCommand(value)) throw new Error("Invalid runtime command");
+  return value;
+}
+
+async function readSessionAction(request: IncomingMessage): Promise<SessionAction> {
+  const value = await readJson(request);
+  if (!isSessionAction(value)) throw new Error("Invalid session action");
+  return value;
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -83,26 +106,48 @@ async function readCommand(request: IncomingMessage): Promise<RuntimeCommand> {
     if (size > 1_000_000) throw new Error("Request body is too large");
     chunks.push(buffer);
   }
-  const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (!isRuntimeCommand(value)) throw new Error("Invalid runtime command");
-  return value;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (typeof value !== "object" || value === null || !("type" in value)) return false;
   if (value.type === "abort") return true;
+  if (value.type === "new_session") return true;
+  if (value.type === "rename_session") return "name" in value && typeof value.name === "string";
   if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
   return value.type === "prompt" && "message" in value && typeof value.message === "string";
 }
 
 function normalizeCommand(command: RuntimeCommand): RuntimeCommand {
   if (command.type !== "switch_session") return command;
-  const sessionRoot = resolve(repoRoot, ".kiva", "sessions");
-  const sessionPath = resolve(sessionRoot, command.sessionPath);
-  if (!sessionPath.startsWith(`${sessionRoot}${sep}`) || !sessionPath.endsWith(".jsonl")) {
-    throw new Error("Invalid session path");
+  return { ...command, sessionPath: sessions.absolutePath(command.sessionPath) };
+}
+
+function isSessionAction(value: unknown): value is SessionAction {
+  if (typeof value !== "object" || value === null || !("type" in value) || !("sessionPath" in value) || typeof value.sessionPath !== "string") return false;
+  if (value.type === "archive" || value.type === "restore") return true;
+  return value.type === "delete" && "collection" in value && (value.collection === "active" || value.collection === "archived");
+}
+
+async function executeSessionAction(action: SessionAction) {
+  if (action.type === "restore") {
+    sessions.restore(action.sessionPath);
+    return;
   }
-  return { ...command, sessionPath };
+  const collection: SessionCollection = action.type === "archive" ? "active" : action.collection;
+  const targetPath = sessions.absolutePath(action.sessionPath, collection);
+  if (collection === "active") {
+    const snapshot = await runtime.snapshot();
+    if (snapshot.session.path && resolve(snapshot.session.path) === targetPath) {
+      await runtime.execute({ type: "new_session" });
+    }
+  }
+  if (action.type === "archive") sessions.archive(action.sessionPath);
+  else sessions.trash(action.sessionPath, action.collection);
+}
+
+function sessionCollections() {
+  return { active: sessions.list("active"), archived: sessions.list("archived") };
 }
 
 function isAllowedOrigin(request: IncomingMessage) {

@@ -7,6 +7,8 @@ function createAdapter() {
   const prompts: string[] = [];
   let aborts = 0;
   const switchedSessions: string[] = [];
+  const names: string[] = [];
+  let newSessions = 0;
   let eventListener: ((event: unknown) => void) | undefined;
   const adapter: RuntimeAdapter = {
     async start() { starts += 1; },
@@ -16,6 +18,7 @@ function createAdapter() {
       return {
         isStreaming: false,
         messageCount: 0,
+        sessionFile: "/repo/session.jsonl",
         sessionId: "session-1",
         thinkingLevel: "medium",
       };
@@ -23,6 +26,9 @@ function createAdapter() {
     async prompt(message) { prompts.push(message); return "started"; },
     async abort() { aborts += 1; },
     async switchSession(path) { switchedSessions.push(path); },
+    async newSession() { newSessions += 1; },
+    async setSessionName(name) { names.push(name); },
+    async getMessages() { return []; },
   };
   return {
     adapter,
@@ -31,6 +37,8 @@ function createAdapter() {
     aborts: () => aborts,
     emit: (event: unknown) => eventListener?.(event),
     switchedSessions,
+    names,
+    newSessions: () => newSessions,
   };
 }
 
@@ -86,5 +94,41 @@ describe("RuntimeHub", () => {
 
     assert.deepEqual(await hub.execute({ type: "switch_session", sessionPath: "/repo/session.jsonl" }), { accepted: true });
     assert.deepEqual(fake.switchedSessions, ["/repo/session.jsonl"]);
+  });
+
+  it("creates and renames sessions", async () => {
+    const fake = createAdapter();
+    const hub = new RuntimeHub(() => fake.adapter);
+
+    await hub.execute({ type: "new_session" });
+    await hub.execute({ type: "rename_session", name: "  Release work  " });
+
+    assert.equal(fake.newSessions(), 1);
+    assert.deepEqual(fake.names, ["Release work"]);
+    await assert.rejects(() => hub.execute({ type: "rename_session", name: "   " }), /empty/i);
+  });
+
+  it("hydrates user, assistant, thinking, and tool results in snapshots", async () => {
+    const fake = createAdapter();
+    fake.adapter.getMessages = async () => [
+      { role: "user", content: "Inspect the project" },
+      { role: "assistant", content: [
+        { type: "thinking", thinking: "I should inspect files." },
+        { type: "text", text: "I found **two** files." },
+        { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+      ] },
+      { role: "toolResult", toolCallId: "tool-1", toolName: "read", content: [{ type: "text", text: "# Kiva" }], isError: false },
+    ];
+    const hub = new RuntimeHub(() => fake.adapter);
+
+    const snapshot = await hub.snapshot();
+
+    assert.equal(snapshot.session.path, "/repo/session.jsonl");
+    assert.deepEqual(snapshot.messages, [
+      { id: "history-0", role: "user", text: "Inspect the project", thinking: "", tools: [] },
+      { id: "history-1", role: "assistant", text: "I found **two** files.", thinking: "I should inspect files.", tools: [
+        { id: "tool-1", name: "read", args: { path: "README.md" }, result: "# Kiva", status: "done" },
+      ] },
+    ]);
   });
 });

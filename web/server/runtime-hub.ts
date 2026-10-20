@@ -1,9 +1,10 @@
-import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeSnapshot } from "../shared/runtime-types";
+import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
 
 export interface RuntimeAdapterState {
   isStreaming: boolean;
   messageCount: number;
   sessionId: string;
+  sessionFile?: string;
   sessionName?: string;
   thinkingLevel: string;
   model?: { provider?: string; id?: string };
@@ -17,6 +18,9 @@ export interface RuntimeAdapter {
   prompt(message: string): Promise<unknown>;
   abort(): Promise<void>;
   switchSession(path: string): Promise<unknown>;
+  newSession(): Promise<unknown>;
+  setSessionName(name: string): Promise<void>;
+  getMessages(): Promise<unknown[]>;
 }
 
 export type RuntimeAdapterFactory = () => RuntimeAdapter;
@@ -31,15 +35,17 @@ export class RuntimeHub {
 
   async snapshot(): Promise<RuntimeSnapshot> {
     const adapter = await this.ensureStarted();
-    const state = await adapter.getState();
+    const [state, messages] = await Promise.all([adapter.getState(), adapter.getMessages()]);
 
     return {
       status: state.isStreaming ? "running" : "idle",
       session: {
         id: state.sessionId,
         name: state.sessionName,
+        path: state.sessionFile,
         messageCount: state.messageCount,
       },
+      messages: normalizeMessages(messages),
       thinkingLevel: state.thinkingLevel,
       model: state.model?.id
         ? { provider: state.model.provider ?? "unknown", id: state.model.id }
@@ -55,8 +61,14 @@ export class RuntimeHub {
       await adapter.prompt(message);
     } else if (command.type === "abort") {
       await adapter.abort();
-    } else {
+    } else if (command.type === "switch_session") {
       await adapter.switchSession(command.sessionPath);
+    } else if (command.type === "new_session") {
+      await adapter.newSession();
+    } else {
+      const name = command.name.trim();
+      if (!name) throw new Error("Session name cannot be empty");
+      await adapter.setSessionName(name);
     }
     await this.publishSnapshot();
     return { accepted: true };
@@ -111,4 +123,54 @@ function isEventType(event: unknown, type: string): event is { type: string } {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function normalizeMessages(values: unknown[]): RuntimeMessage[] {
+  const messages: RuntimeMessage[] = [];
+  values.forEach((value, index) => {
+    const message = record(value);
+    if (message?.role === "user") {
+      messages.push({ id: `history-${index}`, role: "user", text: contentText(message.content), thinking: "", tools: [] });
+      return;
+    }
+    if (message?.role === "assistant") {
+      const content = Array.isArray(message.content) ? message.content.map(record).filter(Boolean) : [];
+      const tools: RuntimeTool[] = content.flatMap((item) => item?.type === "toolCall" && typeof item.id === "string"
+        ? [{ id: item.id, name: typeof item.name === "string" ? item.name : "工具", args: item.arguments, status: "running" as const }]
+        : []);
+      messages.push({
+        id: `history-${index}`,
+        role: "assistant",
+        text: content.filter((item) => item?.type === "text").map((item) => stringValue(item?.text)).join(""),
+        thinking: content.filter((item) => item?.type === "thinking").map((item) => stringValue(item?.thinking)).join("\n"),
+        tools,
+      });
+      return;
+    }
+    if (message?.role === "toolResult" && typeof message.toolCallId === "string") {
+      for (let target = messages.length - 1; target >= 0; target -= 1) {
+        const tool = messages[target].tools.find((item) => item.id === message.toolCallId);
+        if (tool) {
+          tool.result = contentText(message.content);
+          tool.status = message.isError ? "error" : "done";
+          break;
+        }
+      }
+    }
+  });
+  return messages;
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map(record).filter(Boolean).map((item) => item?.type === "text" ? stringValue(item.text) : "").join("");
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
 }

@@ -1,8 +1,25 @@
 export type RuntimeStatus = "connecting" | "idle" | "running" | "error";
 
+export interface RuntimeTool {
+  id: string;
+  name: string;
+  args?: unknown;
+  result?: string;
+  status: "running" | "done" | "error";
+}
+
+export interface RuntimeMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  thinking: string;
+  tools: RuntimeTool[];
+}
+
 export interface RuntimeSnapshot {
   status: RuntimeStatus;
-  session: { id: string; name?: string; messageCount: number };
+  session: { id: string; name?: string; path?: string; messageCount: number };
+  messages: RuntimeMessage[];
   thinkingLevel: string;
   model?: { provider: string; id: string };
   error?: string;
@@ -11,7 +28,9 @@ export interface RuntimeSnapshot {
 export type RuntimeCommand =
   | { type: "prompt"; message: string }
   | { type: "abort" }
-  | { type: "switch_session"; sessionPath: string };
+  | { type: "switch_session"; sessionPath: string }
+  | { type: "new_session" }
+  | { type: "rename_session"; name: string };
 
 export interface CommandResult {
   accepted: true;
