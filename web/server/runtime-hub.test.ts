@@ -8,7 +8,13 @@ function createAdapter() {
   let aborts = 0;
   const switchedSessions: string[] = [];
   const names: string[] = [];
+  const steers: string[] = [];
+  const followUps: string[] = [];
+  const models: string[] = [];
+  const thinkingLevels: string[] = [];
   let newSessions = 0;
+  let compactions = 0;
+  let queueClears = 0;
   let eventListener: ((event: unknown) => void) | undefined;
   const adapter: RuntimeAdapter = {
     async start() { starts += 1; },
@@ -29,6 +35,15 @@ function createAdapter() {
     async newSession() { newSessions += 1; },
     async setSessionName(name) { names.push(name); },
     async getMessages() { return []; },
+    async getAvailableModels() { return [{ provider: "openai", id: "gpt-test", contextWindow: 100_000, reasoning: true }]; },
+    async getAvailableThinkingLevels() { return ["low", "medium", "high"]; },
+    async getSessionStats() { return { tokens: { input: 10, output: 5, cacheRead: 2, cacheWrite: 0, total: 17 }, cost: 0.01, contextUsage: { tokens: 1_000, contextWindow: 100_000, percent: 1 } }; },
+    async setModel(provider, id) { models.push(`${provider}/${id}`); },
+    async setThinkingLevel(level) { thinkingLevels.push(level); },
+    async steer(message) { steers.push(message); },
+    async followUp(message) { followUps.push(message); },
+    async clearQueue() { queueClears += 1; return { steering: [], followUp: [] }; },
+    async compact() { compactions += 1; },
   };
   return {
     adapter,
@@ -39,6 +54,12 @@ function createAdapter() {
     switchedSessions,
     names,
     newSessions: () => newSessions,
+    steers,
+    followUps,
+    models,
+    thinkingLevels,
+    compactions: () => compactions,
+    queueClears: () => queueClears,
   };
 }
 
@@ -54,6 +75,8 @@ describe("RuntimeHub", () => {
     assert.equal(first.status, "idle");
     assert.equal(first.session.id, "session-1");
     assert.equal(first.thinkingLevel, "medium");
+    assert.equal(first.models[0].id, "gpt-test");
+    assert.equal(first.context?.percent, 1);
     assert.deepEqual(second, first);
   });
 
@@ -130,5 +153,43 @@ describe("RuntimeHub", () => {
         { id: "tool-1", name: "read", args: { path: "README.md" }, result: "# Kiva", status: "done" },
       ] },
     ]);
+  });
+
+  it("controls models, thinking, compaction, and running message queues", async () => {
+    const fake = createAdapter();
+    const hub = new RuntimeHub(() => fake.adapter);
+
+    await hub.execute({ type: "set_model", provider: "openai", modelId: "gpt-test" });
+    await hub.execute({ type: "set_thinking", level: "high" });
+    await hub.execute({ type: "steer", message: "  focus on tests  " });
+    await hub.execute({ type: "follow_up", message: "  summarize afterwards  " });
+    fake.emit({ type: "queue_update", steering: ["focus on tests"], followUp: ["summarize afterwards"] });
+    const queued = await hub.snapshot();
+    await hub.execute({ type: "clear_queue" });
+    await hub.execute({ type: "compact" });
+
+    assert.deepEqual(fake.models, ["openai/gpt-test"]);
+    assert.deepEqual(fake.thinkingLevels, ["high"]);
+    assert.deepEqual(fake.steers, ["focus on tests"]);
+    assert.deepEqual(fake.followUps, ["summarize afterwards"]);
+    assert.deepEqual(queued.queue, { steering: ["focus on tests"], followUp: ["summarize afterwards"] });
+    assert.equal(fake.queueClears(), 1);
+    assert.equal(fake.compactions(), 1);
+  });
+
+  it("restarts a failed Pi child before serving a safe snapshot", async () => {
+    const broken = createAdapter();
+    let stops = 0;
+    broken.adapter.stop = async () => { stops += 1; };
+    broken.adapter.getState = async () => { throw new Error("RPC process exited unexpectedly"); };
+    const healthy = createAdapter();
+    let factories = 0;
+    const hub = new RuntimeHub(() => factories++ === 0 ? broken.adapter : healthy.adapter);
+
+    const snapshot = await hub.snapshot();
+
+    assert.equal(snapshot.session.id, "session-1");
+    assert.equal(factories, 2);
+    assert.equal(stops, 1);
   });
 });

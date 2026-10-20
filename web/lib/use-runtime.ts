@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool } from "@/shared/runtime-types";
+import type { RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeWireEvent } from "@/shared/runtime-types";
 
 export type ToolActivity = RuntimeTool;
 
@@ -29,16 +29,31 @@ const initialState: RuntimeViewState = { connected: false, status: "connecting",
 export function useRuntime() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const streamId = useRef<string>(undefined);
+  const sequence = useRef(0);
 
   useEffect(() => {
     let disposed = false;
     let socket: WebSocket | undefined;
     const connect = () => {
       if (disposed) return;
-      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/runtime/events`);
+      const cursor = new URLSearchParams();
+      if (streamId.current) cursor.set("stream", streamId.current);
+      if (sequence.current) cursor.set("since", String(sequence.current));
+      const suffix = cursor.size ? `?${cursor}` : "";
+      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/runtime/events${suffix}`);
       socket.onopen = () => dispatch({ type: "connected", value: true });
       socket.onmessage = (message) => {
-        try { dispatch({ type: "event", event: JSON.parse(String(message.data)) as RuntimeEvent }); }
+        try {
+          const wire = JSON.parse(String(message.data)) as RuntimeWireEvent;
+          if (streamId.current !== wire.streamId) {
+            streamId.current = wire.streamId;
+            sequence.current = 0;
+          }
+          if (!Number.isSafeInteger(wire.seq) || wire.seq <= sequence.current) return;
+          sequence.current = wire.seq;
+          dispatch({ type: "event", event: wire.event });
+        }
         catch { dispatch({ type: "error", message: "收到无法解析的运行时事件" }); }
       };
       socket.onerror = () => dispatch({ type: "error", message: "无法连接到 Kiva 运行时" });
@@ -97,7 +112,32 @@ export function useRuntime() {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
 
-  return { ...state, sendPrompt, abort, switchSession, newSession, renameSession };
+  const queueMessage = useCallback(async (message: string, mode: "steer" | "follow_up") => {
+    try { await execute({ type: mode, message }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
+  }, [execute]);
+
+  const clearQueue = useCallback(async () => {
+    try { await execute({ type: "clear_queue" }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
+  }, [execute]);
+
+  const setModel = useCallback(async (provider: string, modelId: string) => {
+    try { await execute({ type: "set_model", provider, modelId }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
+  }, [execute]);
+
+  const setThinking = useCallback(async (level: string) => {
+    try { await execute({ type: "set_thinking", level }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
+  }, [execute]);
+
+  const compact = useCallback(async () => {
+    try { await execute({ type: "compact" }); }
+    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
+  }, [execute]);
+
+  return { ...state, sendPrompt, abort, switchSession, newSession, renameSession, queueMessage, clearQueue, setModel, setThinking, compact };
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
@@ -128,6 +168,11 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
   if (event.type === "session_info_changed") return { ...state, sessionsVersion: state.sessionsVersion + 1 };
   if (event.type === "message_start") {
     const message = record(event.message);
+    if (message?.role === "user") {
+      const text = messageText(message.content);
+      if (!text || (state.messages.at(-1)?.role === "user" && state.messages.at(-1)?.text === text)) return state;
+      return { ...state, messages: [...state.messages, { id: crypto.randomUUID(), role: "user", text, thinking: "", tools: [] }] };
+    }
     if (message?.role !== "assistant") return state;
     return { ...state, messages: ensureAssistant(state.messages) };
   }
@@ -153,6 +198,15 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
     const id = stringValue(event.toolCallId);
     if (!id) return state;
     return { ...state, messages: updateTool(state.messages, id, event.isError ? "error" : "done", resultText(event.result)) };
+  }
+  if (event.type === "queue_update" && state.snapshot) {
+    return {
+      ...state,
+      snapshot: {
+        ...state.snapshot,
+        queue: { steering: stringArray(event.steering), followUp: stringArray(event.followUp) },
+      },
+    };
   }
   return state;
 }
@@ -200,6 +254,16 @@ function resultText(value: unknown) {
   const item = record(value);
   if (item && "content" in item && Array.isArray(item.content)) return item.content.map(record).map((part) => part?.type === "text" ? stringValue(part.text) ?? "" : "").join("");
   try { return JSON.stringify(value, null, 2); } catch { return String(value ?? ""); }
+}
+
+function messageText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map(record).map((item) => item?.type === "text" ? stringValue(item.text) ?? "" : "").join("");
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

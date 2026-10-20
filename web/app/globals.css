@@ -120,11 +120,17 @@ button { cursor: pointer; }
 .suggestions button { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; color: #a8adb5; background: #ffffff04; font-size: 11px; }
 .suggestions button:hover { border-color: #d8ff7240; color: var(--foreground); }
 .composer-wrap { padding: 0 24px 16px; }
+.queue-panel { display: flex; max-width: 780px; align-items: center; gap: 10px; margin: 0 auto 8px; padding: 7px 9px 7px 11px; border: 1px solid #d8ff7226; border-radius: 10px; color: #aab087; background: #d8ff7208; font-size: 10px; }
+.queue-panel > div:first-child { display: flex; flex: none; align-items: center; gap: 6px; }
+.queue-preview { min-width: 0; overflow: hidden; color: #747b85; text-overflow: ellipsis; white-space: nowrap; }
+.queue-panel button { display: grid; width: 24px; height: 24px; margin-left: auto; flex: none; place-items: center; border: 0; border-radius: 6px; color: #777e88; background: transparent; }
+.queue-panel button:hover { color: var(--foreground); background: #ffffff0a; }
 .composer { max-width: 780px; margin: 0 auto; border: 1px solid #343a45; border-radius: 16px; background: #14171d; box-shadow: 0 16px 70px #0008; }
 .composer:focus-within { border-color: #d8ff7255; box-shadow: 0 16px 70px #0008, 0 0 0 3px #d8ff7209; }
 .composer textarea { width: 100%; min-height: 64px; resize: none; border: 0; outline: 0; padding: 14px 15px 4px; color: var(--foreground); background: transparent; font-size: 14px; line-height: 1.5; }
 .composer textarea::placeholder { color: #5f6671; }
 .composer-actions { display: flex; align-items: center; padding: 6px; }
+.composer-mode { height: 32px; border: 0; outline: 0; border-radius: 7px; padding: 0 8px; color: #aeb4bc; background: #ffffff08; font-size: 11px; }
 .composer-note { max-width: 780px; margin: 7px auto 0; color: #555c67; font-size: 9px; text-align: center; }
 .runtime-error { margin: 24px auto 0; padding: 10px 12px; border: 1px solid #ef444433; border-radius: 10px; color: #fca5a5; background: #ef44440c; font-size: 11px; }
 
@@ -136,12 +142,18 @@ button { cursor: pointer; }
 .inspector-section { padding: 16px; border-bottom: 1px solid var(--border); }
 .inspector-label { margin: 0 0 10px; color: #777e89; font-size: 10px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .model-card { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; color: var(--foreground); background: #ffffff04; text-align: left; }
-.model-card span:not(.model-glyph) { display: flex; min-width: 0; flex-direction: column; }
+.model-card label { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .model-card strong { font-size: 11px; font-weight: 550; }
 .model-card small { margin-top: 2px; color: var(--muted-foreground); font-size: 9px; }
+.model-card select { width: 25px; height: 28px; border: 0; outline: 0; color: #858c96; background: transparent; cursor: pointer; }
+.model-card select:disabled { cursor: default; }
+.thinking-row { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; color: var(--muted-foreground); font-size: 10px; }
+.thinking-row select { min-width: 90px; border: 1px solid var(--border); border-radius: 7px; outline: 0; padding: 5px 7px; color: #bec2c8; background: #ffffff05; font-size: 10px; }
 .model-glyph { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; color: #11150a; background: var(--primary); font-size: 11px; font-weight: 800; }
 .context-track { height: 5px; overflow: hidden; border-radius: 10px; background: #252a32; }
 .context-track span { display: block; width: 2%; height: 100%; background: var(--primary); }
+.context-details { display: flex; justify-content: space-between; margin-top: 7px; color: #666d77; font-size: 9px; }
+.compact-button { width: 100%; margin-top: 9px; border: 1px solid var(--border); }
 .detail-list { display: grid; gap: 10px; margin: 0; }
 .detail-list div { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
 .detail-list dt { color: var(--muted-foreground); }

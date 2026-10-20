@@ -8,6 +8,7 @@ import {
   Braces,
   ChevronDown,
   CircleDot,
+  Clock3,
   Command,
   FileCode2,
   GitBranch,
@@ -23,6 +24,7 @@ import {
   SquareTerminal,
   StopCircle,
   Trash2,
+  X,
   Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -41,10 +43,20 @@ function relativeTime(value: string) {
   return `${Math.floor(minutes / 1_440)} 天`;
 }
 
+function formatTokens(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("zh-CN", { notation: value >= 10_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? "—" : `${Math.round(value)}%`;
+}
+
 export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [draft, setDraft] = useState("");
+  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
   const [sessions, setSessions] = useState(data.sessions);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
@@ -79,10 +91,13 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!draft.trim() || running) return;
+    if (!draft.trim()) return;
     const message = draft;
     setDraft("");
-    try { await runtime.sendPrompt(message); }
+    try {
+      if (running) await runtime.queueMessage(message, queueMode);
+      else await runtime.sendPrompt(message);
+    }
     catch { setDraft(message); }
   }
 
@@ -145,6 +160,19 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
     } catch {
       await refreshSessions();
     }
+  }
+
+  function changeModel(value: string) {
+    try {
+      const model = JSON.parse(value) as { provider: string; id: string };
+      void runtime.setModel(model.provider, model.id);
+    } catch {
+      // Options are generated from the trusted runtime snapshot.
+    }
+  }
+
+  function compactSession() {
+    if (window.confirm("压缩会调用当前模型生成会话摘要。确定继续吗？")) void runtime.compact();
   }
 
   return (
@@ -235,12 +263,17 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         </ScrollArea>
 
         <div className="composer-wrap">
+          {(runtime.snapshot?.queue.steering.length || runtime.snapshot?.queue.followUp.length) ? <div className="queue-panel">
+            <div><Clock3 size={13} /><span>{runtime.snapshot.queue.steering.length} 条纠正 · {runtime.snapshot.queue.followUp.length} 条后续</span></div>
+            <div className="queue-preview">{[...runtime.snapshot.queue.steering, ...runtime.snapshot.queue.followUp].at(0)}</div>
+            <button onClick={() => void runtime.clearQueue()} aria-label="清空队列"><X size={13} /></button>
+          </div> : null}
           <form className="composer" onSubmit={submit}>
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="告诉 Kiva 你想完成什么…" rows={2} />
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 Kiva 你想完成什么…"} rows={2} />
             <div className="composer-actions">
               <Button type="button" variant="ghost" size="icon"><Paperclip size={17} /></Button>
-              <Button type="button" variant="ghost" size="sm"><SquareTerminal size={15} />工具</Button>
-              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running ? <Button type="button" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button> : <Button type="submit" size="icon" disabled={!draft.trim() || !runtime.connected}><ArrowUp size={17} /></Button>}</div>
+              {running ? <select className="composer-mode" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm"><SquareTerminal size={15} />工具</Button>}
+              <div className="ml-auto flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:block">⌘ Enter</span>{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" disabled={!draft.trim() || !runtime.connected}><ArrowUp size={17} /></Button></div>
             </div>
           </form>
           <p className="composer-note">Kiva 可能会修改文件或执行命令，请在提交前检查变更。</p>
@@ -249,8 +282,8 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
 
       {inspectorOpen && <aside className="inspector">
         <div className="inspector-heading"><div><p className="eyebrow">SESSION CONTEXT</p><h2>运行上下文</h2></div><Button variant="ghost" size="icon" onClick={() => setInspectorOpen(false)}><PanelRightClose size={16} /></Button></div>
-        <div className="inspector-section"><p className="inspector-label">模型</p><button className="model-card"><span className="model-glyph">A</span><span><strong>{runtime.snapshot?.model?.id ?? "等待模型配置"}</strong><small>{runtime.snapshot?.model?.provider ?? (data.runtime.modelConfigFound ? "可从 models.json 选择" : "尚未找到 models.json")}</small></span><ChevronDown size={15} className="ml-auto" /></button></div>
-        <div className="inspector-section"><div className="flex items-center justify-between"><p className="inspector-label">上下文使用量</p><span className="text-xs text-muted-foreground">0%</span></div><div className="context-track"><span /></div><div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>0 tokens</span><span>等待首次请求</span></div></div>
+        <div className="inspector-section"><p className="inspector-label">模型</p><div className="model-card"><span className="model-glyph">A</span><label><strong>{runtime.snapshot?.model?.id ?? "等待模型配置"}</strong><small>{runtime.snapshot?.model?.provider ?? (data.runtime.modelConfigFound ? "可从 models.json 选择" : "尚未找到 models.json")}</small></label><select aria-label="选择模型" disabled={running || !runtime.snapshot?.models.length} value={runtime.snapshot?.model ? JSON.stringify({ provider: runtime.snapshot.model.provider, id: runtime.snapshot.model.id }) : ""} onChange={(event) => changeModel(event.target.value)}><option value="" disabled>选择模型</option>{runtime.snapshot?.models.map((model) => <option key={`${model.provider}:${model.id}`} value={JSON.stringify({ provider: model.provider, id: model.id })}>{model.provider} / {model.id}</option>)}</select></div><div className="thinking-row"><span>思考强度</span><select aria-label="思考强度" disabled={running || !runtime.snapshot?.thinkingLevels.length} value={runtime.snapshot?.thinkingLevel ?? ""} onChange={(event) => void runtime.setThinking(event.target.value)}>{runtime.snapshot?.thinkingLevels.map((level) => <option key={level} value={level}>{level}</option>)}</select></div></div>
+        <div className="inspector-section"><div className="flex items-center justify-between"><p className="inspector-label">上下文使用量</p><span className="text-xs text-muted-foreground">{formatPercent(runtime.snapshot?.context?.percent)}</span></div><div className="context-track"><span style={{ width: `${Math.min(100, runtime.snapshot?.context?.percent ?? 0)}%` }} /></div><div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>{formatTokens(runtime.snapshot?.context?.tokens)} tokens</span><span>{runtime.snapshot?.context ? `${formatTokens(runtime.snapshot.context.contextWindow)} 上限` : "等待首次请求"}</span></div>{runtime.snapshot?.context && <div className="context-details"><span>累计 {formatTokens(runtime.snapshot.context.total)}</span><span>${runtime.snapshot.context.cost.toFixed(4)}</span></div>}<Button type="button" variant="ghost" size="sm" className="compact-button" disabled={running || !runtime.snapshot?.context} onClick={compactSession}>压缩上下文</Button></div>
         <div className="inspector-section"><p className="inspector-label">项目</p><dl className="detail-list"><div><dt>分支</dt><dd><GitBranch size={12} />{data.project.branch}</dd></div><div><dt>变更</dt><dd>{data.project.dirtyFiles} 个文件</dd></div><div><dt>工作区</dt><dd className="truncate">{data.project.name}</dd></div></dl></div>
         <div className="inspector-section"><p className="inspector-label">可用能力</p><div className="capability-grid"><span><FileCode2 size={14} />文件</span><span><SquareTerminal size={14} />命令</span><span><GitBranch size={14} />Git</span><span><Wrench size={14} />工具</span></div></div>
         <div className="inspector-footer"><span className={cn("status-dot", !runtime.connected && "offline")} /><span>{runtimeLabel}</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>

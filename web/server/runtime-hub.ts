@@ -1,4 +1,4 @@
-import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
+import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSnapshot, RuntimeTool } from "../shared/runtime-types";
 
 export interface RuntimeAdapterState {
   isStreaming: boolean;
@@ -21,6 +21,21 @@ export interface RuntimeAdapter {
   newSession(): Promise<unknown>;
   setSessionName(name: string): Promise<void>;
   getMessages(): Promise<unknown[]>;
+  getAvailableModels(): Promise<RuntimeModel[]>;
+  getAvailableThinkingLevels(): Promise<string[]>;
+  getSessionStats(): Promise<RuntimeSessionStats>;
+  setModel(provider: string, modelId: string): Promise<unknown>;
+  setThinkingLevel(level: string): Promise<void>;
+  steer(message: string): Promise<unknown>;
+  followUp(message: string): Promise<unknown>;
+  clearQueue(): Promise<RuntimeQueue>;
+  compact(): Promise<unknown>;
+}
+
+export interface RuntimeSessionStats {
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cost: number;
+  contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
 }
 
 export type RuntimeAdapterFactory = () => RuntimeAdapter;
@@ -29,13 +44,31 @@ export type RuntimeListener = (event: RuntimeEvent) => void;
 export class RuntimeHub {
   private adapter?: RuntimeAdapter;
   private starting?: Promise<RuntimeAdapter>;
+  private unsubscribeAdapter?: () => void;
   private listeners = new Set<RuntimeListener>();
+  private queue: RuntimeQueue = { steering: [], followUp: [] };
 
   constructor(private readonly createAdapter: RuntimeAdapterFactory) {}
 
   async snapshot(): Promise<RuntimeSnapshot> {
-    const adapter = await this.ensureStarted();
-    const [state, messages] = await Promise.all([adapter.getState(), adapter.getMessages()]);
+    let adapter = await this.ensureStarted();
+    try {
+      return await this.readSnapshot(adapter);
+    } catch (error) {
+      if (!isProcessFailure(error)) throw error;
+      await this.resetAdapter();
+      adapter = await this.ensureStarted();
+      return this.readSnapshot(adapter);
+    }
+  }
+
+  private async readSnapshot(adapter: RuntimeAdapter): Promise<RuntimeSnapshot> {
+    const [[state, messages], models, thinkingLevels, stats] = await Promise.all([
+      Promise.all([adapter.getState(), adapter.getMessages()]),
+      safeCall(() => adapter.getAvailableModels(), []),
+      safeCall(() => adapter.getAvailableThinkingLevels(), []),
+      safeCall<RuntimeSessionStats | undefined>(() => adapter.getSessionStats(), undefined),
+    ]);
 
     return {
       status: state.isStreaming ? "running" : "idle",
@@ -47,28 +80,59 @@ export class RuntimeHub {
       },
       messages: normalizeMessages(messages),
       thinkingLevel: state.thinkingLevel,
+      thinkingLevels,
       model: state.model?.id
         ? { provider: state.model.provider ?? "unknown", id: state.model.id }
         : undefined,
+      models,
+      context: stats?.contextUsage ? {
+        ...stats.contextUsage,
+        input: stats.tokens.input,
+        output: stats.tokens.output,
+        cacheRead: stats.tokens.cacheRead,
+        cacheWrite: stats.tokens.cacheWrite,
+        total: stats.tokens.total,
+        cost: stats.cost,
+      } : undefined,
+      queue: { steering: [...this.queue.steering], followUp: [...this.queue.followUp] },
     };
   }
 
   async execute(command: RuntimeCommand): Promise<CommandResult> {
     const adapter = await this.ensureStarted();
-    if (command.type === "prompt") {
-      const message = command.message.trim();
-      if (!message) throw new Error("Prompt cannot be empty");
-      await adapter.prompt(message);
-    } else if (command.type === "abort") {
-      await adapter.abort();
-    } else if (command.type === "switch_session") {
-      await adapter.switchSession(command.sessionPath);
-    } else if (command.type === "new_session") {
-      await adapter.newSession();
-    } else {
-      const name = command.name.trim();
-      if (!name) throw new Error("Session name cannot be empty");
-      await adapter.setSessionName(name);
+    try {
+      if (command.type === "prompt") {
+        const message = command.message.trim();
+        if (!message) throw new Error("Prompt cannot be empty");
+        await adapter.prompt(message);
+      } else if (command.type === "abort") {
+        await adapter.abort();
+      } else if (command.type === "switch_session") {
+        await adapter.switchSession(command.sessionPath);
+      } else if (command.type === "new_session") {
+        await adapter.newSession();
+      } else if (command.type === "rename_session") {
+        const name = command.name.trim();
+        if (!name) throw new Error("Session name cannot be empty");
+        await adapter.setSessionName(name);
+      } else if (command.type === "set_model") {
+        await adapter.setModel(command.provider, command.modelId);
+      } else if (command.type === "set_thinking") {
+        await adapter.setThinkingLevel(command.level);
+      } else if (command.type === "steer" || command.type === "follow_up") {
+        const message = command.message.trim();
+        if (!message) throw new Error("Queued message cannot be empty");
+        if (command.type === "steer") await adapter.steer(message);
+        else await adapter.followUp(message);
+      } else if (command.type === "clear_queue") {
+        await adapter.clearQueue();
+        this.queue = { steering: [], followUp: [] };
+      } else {
+        await adapter.compact();
+      }
+    } catch (error) {
+      if (isProcessFailure(error)) await this.resetAdapter();
+      throw error;
     }
     await this.publishSnapshot();
     return { accepted: true };
@@ -80,7 +144,7 @@ export class RuntimeHub {
   }
 
   async stop(): Promise<void> {
-    if (this.adapter) await this.adapter.stop();
+    await this.resetAdapter();
   }
 
   private async ensureStarted(): Promise<RuntimeAdapter> {
@@ -89,15 +153,27 @@ export class RuntimeHub {
       this.starting = (async () => {
         const adapter = this.createAdapter();
         await adapter.start();
-        adapter.onEvent((event) => this.handleAdapterEvent(event));
+        this.unsubscribeAdapter = adapter.onEvent((event) => this.handleAdapterEvent(event));
         this.adapter = adapter;
         return adapter;
       })();
     }
-    return this.starting;
+    try {
+      return await this.starting;
+    } catch (error) {
+      this.starting = undefined;
+      throw error;
+    }
   }
 
   private handleAdapterEvent(event: unknown) {
+    const value = record(event);
+    if (value?.type === "queue_update") {
+      this.queue = {
+        steering: stringArray(value.steering),
+        followUp: stringArray(value.followUp),
+      };
+    }
     this.publish({ type: "pi_event", event });
     if (isEventType(event, "agent_settled")) {
       void this.publishSnapshot();
@@ -115,6 +191,18 @@ export class RuntimeHub {
   private publish(event: RuntimeEvent) {
     for (const listener of this.listeners) listener(event);
   }
+
+  private async resetAdapter() {
+    const adapter = this.adapter;
+    this.adapter = undefined;
+    this.starting = undefined;
+    this.unsubscribeAdapter?.();
+    this.unsubscribeAdapter = undefined;
+    this.queue = { steering: [], followUp: [] };
+    if (adapter) {
+      try { await adapter.stop(); } catch { /* The process may already be gone. */ }
+    }
+  }
 }
 
 function isEventType(event: unknown, type: string): event is { type: string } {
@@ -123,6 +211,18 @@ function isEventType(event: unknown, type: string): event is { type: string } {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isProcessFailure(error: unknown) {
+  return /process.*(exit|closed)|not running|EPIPE|stdin|RPC client/i.test(errorMessage(error));
+}
+
+async function safeCall<T>(operation: () => Promise<T>, fallback: T): Promise<T> {
+  try { return await operation(); } catch { return fallback; }
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 export function normalizeMessages(values: unknown[]): RuntimeMessage[] {

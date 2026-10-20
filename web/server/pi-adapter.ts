@@ -37,5 +37,14 @@ export function createPiAdapter(repoRoot: string): RuntimeAdapter {
     newSession: () => client.newSession(),
     setSessionName: (name) => client.setSessionName(name),
     getMessages: () => client.getMessages(),
+    getAvailableModels: () => client.getAvailableModels(),
+    getAvailableThinkingLevels: () => client.getAvailableThinkingLevels(),
+    getSessionStats: () => client.getSessionStats(),
+    setModel: (provider, modelId) => client.setModel(provider, modelId),
+    setThinkingLevel: (level) => client.setThinkingLevel(level as Parameters<typeof client.setThinkingLevel>[0]),
+    steer: (message) => client.steer(message),
+    followUp: (message) => client.followUp(message),
+    clearQueue: () => client.clearQueue().then((queue) => ({ steering: [...queue.steering], followUp: [...queue.followUp] })),
+    compact: () => client.compact(),
   };
 }

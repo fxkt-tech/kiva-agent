@@ -8,6 +8,7 @@ import { RuntimeHub } from "./runtime-hub";
 import type { RuntimeCommand } from "../shared/runtime-types";
 import type { SessionAction } from "../shared/types";
 import { SessionCatalog, type SessionCollection } from "./session-catalog";
+import { RuntimeEventStream } from "./event-stream";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(process.env.KIVA_REPO_ROOT ?? resolve(webRoot, ".."));
@@ -19,6 +20,8 @@ const app = next({ dev, dir: webRoot, hostname: host, port });
 const handle = app.getRequestHandler();
 const runtime = new RuntimeHub(() => createPiAdapter(repoRoot));
 const sessions = new SessionCatalog(repoRoot);
+const eventStream = new RuntimeEventStream();
+const unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
 const sockets = new WebSocketServer({ noServer: true });
 
 await app.prepare();
@@ -62,13 +65,18 @@ server.on("upgrade", (request, socket, head) => {
   sockets.handleUpgrade(request, socket, head, (webSocket) => sockets.emit("connection", webSocket, request));
 });
 
-sockets.on("connection", async (socket) => {
-  const unsubscribe = runtime.subscribe((event) => sendSocket(socket, event));
+sockets.on("connection", async (socket, request) => {
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
+  const since = Number(url.searchParams.get("since"));
+  const unsubscribe = eventStream.subscribe(
+    (event) => sendSocket(socket, event),
+    { streamId: url.searchParams.get("stream") ?? undefined, since: Number.isSafeInteger(since) ? since : undefined },
+  );
   socket.once("close", unsubscribe);
   try {
-    sendSocket(socket, { type: "snapshot", snapshot: await runtime.snapshot() });
+    eventStream.publish({ type: "snapshot", snapshot: await runtime.snapshot() });
   } catch (error) {
-    sendSocket(socket, { type: "error", message: errorMessage(error) });
+    eventStream.publish({ type: "error", message: errorMessage(error) });
   }
 });
 
@@ -78,6 +86,7 @@ server.listen(port, host, () => {
 
 async function shutdown() {
   sockets.clients.forEach((socket) => socket.close(1001, "Server shutting down"));
+  unsubscribeRuntime();
   await runtime.stop();
   server.close(() => process.exit(0));
 }
@@ -113,7 +122,11 @@ function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (typeof value !== "object" || value === null || !("type" in value)) return false;
   if (value.type === "abort") return true;
   if (value.type === "new_session") return true;
+  if (value.type === "compact" || value.type === "clear_queue") return true;
   if (value.type === "rename_session") return "name" in value && typeof value.name === "string";
+  if (value.type === "set_model") return "provider" in value && typeof value.provider === "string" && "modelId" in value && typeof value.modelId === "string";
+  if (value.type === "set_thinking") return "level" in value && typeof value.level === "string";
+  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string";
   if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
   return value.type === "prompt" && "message" in value && typeof value.message === "string";
 }
