@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/kiva-web/frontend/visual-system.md", "reason": "Verify existing workbench behavior and browser regressions remain intact."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review scoped IDs, decoded commands/events, lifecycle effects and migration round-trips through every owning module."}
+{"file": ".trellis/tasks/10-21-workspace-routing/research.md", "reason": "Check resource identity, read-only navigation, lifecycle and migration acceptance against the investigated constraints."}
+{"file": ".trellis/tasks/10-21-workspace-routing/worktree-deletion.md", "reason": "Verify optional worktree removal cannot target another resource, discard unapproved files or misrepresent history/workspace recovery."}
+{"file": ".trellis/tasks/10-21-workspace-routing/design.md", "reason": "Check actual URL/state/transport/execution ownership and non-destructive compatibility against the final design."}
+{"file": ".trellis/tasks/10-21-workspace-routing/implement.md", "reason": "Require all acceptance and real browser/worktree identity gates, not only build/typecheck success."}

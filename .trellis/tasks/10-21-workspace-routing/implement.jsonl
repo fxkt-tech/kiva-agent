@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/kiva-web/frontend/visual-system.md", "reason": "Preserve the accepted UI, local fonts, mobile navigation and legacy cache recovery during routing extraction."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace explicit project/session identity across routes, filesystem access, commands and event replay."}
+{"file": ".trellis/tasks/10-21-workspace-routing/research.md", "reason": "Repository and installed-Pi evidence behind the confirmed concurrency/worktree and compatibility choices."}
+{"file": ".trellis/tasks/10-21-workspace-routing/worktree-deletion.md", "reason": "Default-checked optional cleanup, mandatory dirty blocking, ownership/runtime safety and recovery limits."}
+{"file": ".trellis/tasks/10-21-workspace-routing/design.md", "reason": "Converged route/module/storage/runtime/transport and migration contracts; await final approval before execution."}
+{"file": ".trellis/tasks/10-21-workspace-routing/implement.md", "reason": "Ordered vertical slices, technical probes, acceptance mappings and rollback gates."}
