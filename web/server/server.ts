@@ -1,292 +1,48 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import next from "next";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
 import { createPiAdapter } from "./pi-adapter";
-import { RuntimeHub } from "./runtime-hub";
-import type { RuntimeCommand } from "../shared/runtime-types";
-import type { SessionAction } from "../shared/types";
-import { SessionCatalog, type SessionCollection } from "./session-catalog";
-import { RuntimeEventStream } from "./event-stream";
-import { getBootstrapData } from "./bootstrap";
-import { installationRoot, workspaceRegistry } from "./workspace-registry";
-import { readProjectDiff, readProjectFile } from "./workspace-files";
-import { listWorkspaceDirectories } from "./workspace-directories";
+import { RuntimeManager } from "./runtime-manager";
+import { SessionRepository } from "./session-repository";
+import { createScopedTransport, sendError } from "./scoped-transport";
+import { workspaceRegistry } from "./workspace-registry";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-let repoRoot = workspaceRegistry.activeRoot();
 const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 30141);
 const dev = process.env.NODE_ENV !== "production";
-
+// Only explicit server startup performs controlled migration. Next rendering
+// imports passive storage, never this execution composition root.
+workspaceRegistry.initialize();
+const repository = new SessionRepository(workspaceRegistry, { worktreeRoot: process.env.KIVA_WEB_WORKTREE_ROOT });
+const manager = new RuntimeManager(repository, createPiAdapter, Number(process.env.KIVA_WEB_RUNTIME_CAPACITY ?? 4));
+const transport = createScopedTransport({ registry: workspaceRegistry, repository, manager, allowedOrigins: [`http://${host}:${port}`, `http://localhost:${port}`] });
 const app = next({ dev, dir: webRoot, hostname: host, port });
-const handle = app.getRequestHandler();
-let runtime = createRuntime(repoRoot);
-let sessions = new SessionCatalog(repoRoot);
-const eventStream = new RuntimeEventStream();
-let unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
-let switchingProject: Promise<void> | undefined;
-const sockets = new WebSocketServer({ noServer: true });
-
 await app.prepare();
-const handleUpgrade = app.getUpgradeHandler();
-
+const handle = app.getRequestHandler(), handleUpgrade = app.getUpgradeHandler();
+const sockets = new WebSocketServer({ noServer: true });
 const server = createServer(async (request, response) => {
-  try {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
-    if (switchingProject) await switchingProject;
-    if (url.pathname === "/api/project" && request.method === "GET") {
-      return sendJson(response, 200, getBootstrapData());
-    }
-    if (url.pathname === "/api/project/open" && request.method === "POST") {
-      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
-      const path = await readProjectPath(request);
-      await switchProject(path);
-      return sendJson(response, 200, getBootstrapData());
-    }
-    if (url.pathname === "/api/project/directories" && request.method === "GET") {
-      return sendJson(response, 200, listWorkspaceDirectories(url.searchParams.get("path") ?? repoRoot));
-    }
-    if (url.pathname === "/api/project/file" && request.method === "GET") {
-      return sendJson(response, 200, readProjectFile(repoRoot, url.searchParams.get("path") ?? ""));
-    }
-    if (url.pathname === "/api/project/diff" && request.method === "GET") {
-      return sendJson(response, 200, readProjectDiff(repoRoot, url.searchParams.get("path") ?? ""));
-    }
-    if (url.pathname === "/api/runtime/state" && request.method === "GET") {
-      return sendJson(response, 200, await runtime.snapshot());
-    }
-    if (url.pathname === "/api/sessions" && request.method === "GET") {
-      return sendJson(response, 200, await sessionCollections());
-    }
-    if (url.pathname === "/api/runtime/command" && request.method === "POST") {
-      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
-      const command = normalizeCommand(await readCommand(request));
-      return sendJson(response, 202, await runtime.execute(command));
-    }
-    if (url.pathname === "/api/sessions/action" && request.method === "POST") {
-      if (!isAllowedOrigin(request)) return sendJson(response, 403, { error: "Origin is not allowed" });
-      await executeSessionAction(await readSessionAction(request));
-      return sendJson(response, 200, await sessionCollections());
-    }
-    await handle(request, response);
-  } catch (error) {
-    sendJson(response, 400, { error: errorMessage(error) });
-  }
+  try { if (!await transport.handle(request, response)) await handle(request, response); }
+  catch (error) { sendError(response, error); }
 });
-
 server.on("upgrade", (request, socket, head) => {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
-  if (url.pathname !== "/api/runtime/events") {
-    void handleUpgrade(request, socket, head);
-    return;
-  }
-  if (!isAllowedOrigin(request)) {
-    socket.destroy();
-    return;
-  }
-  sockets.handleUpgrade(request, socket, head, (webSocket) => sockets.emit("connection", webSocket, request));
+  if (transport.isEventPath(request)) {
+    if (!transport.allowed(request)) { socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); return; }
+    sockets.handleUpgrade(request, socket, head, (webSocket) => sockets.emit("connection", webSocket, request));
+  } else if (request.url?.startsWith("/api/") || request.url?.startsWith("/ws")) {
+    socket.write("HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\nRefresh required: unscoped runtime subscriptions are retired"); socket.destroy();
+  } else void handleUpgrade(request, socket, head);
 });
-
-sockets.on("connection", async (socket, request) => {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
-  const since = Number(url.searchParams.get("since"));
-  const cursor = { streamId: url.searchParams.get("stream") ?? undefined, since: Number.isSafeInteger(since) ? since : undefined };
-  const needsResync = eventStream.needsResync(cursor);
-  if (needsResync) sendSocket(socket, eventStream.resyncEvent());
-  const unsubscribe = eventStream.subscribe(
-    (event) => sendSocket(socket, event),
-    needsResync ? {} : cursor,
-  );
-  socket.once("close", unsubscribe);
-  try {
-    eventStream.publish({ type: "snapshot", snapshot: await runtime.snapshot() });
-  } catch (error) {
-    eventStream.publish({ type: "error", message: errorMessage(error) });
-  }
-});
-
-server.listen(port, host, () => {
-  console.log(`Kiva Web listening on http://${host}:${port}`);
-});
+sockets.on("connection", (socket, request) => { void transport.connect(socket, request); });
+server.listen(port, host, () => console.log(`Kiva Web listening on http://${host}:${port}`));
 
 async function shutdown() {
   sockets.clients.forEach((socket) => socket.close(1001, "Server shutting down"));
-  unsubscribeRuntime();
-  server.close();
-  server.closeAllConnections();
-  const deadline = setTimeout(() => process.exit(0), 2_000);
-  deadline.unref();
-  try { await runtime.stop(); }
-  finally { process.exit(0); }
+  server.close(); server.closeAllConnections();
+  await manager.stop();
+  process.exit(0);
 }
-
-function createRuntime(projectRoot: string) {
-  return new RuntimeHub(() => createPiAdapter(projectRoot, installationRoot));
-}
-
-async function switchProject(path: string) {
-  const operation = (async () => {
-    const nextRoot = workspaceRegistry.open(path);
-    if (nextRoot === repoRoot) return;
-    unsubscribeRuntime();
-    await runtime.stop();
-    repoRoot = nextRoot;
-    runtime = createRuntime(repoRoot);
-    sessions = new SessionCatalog(repoRoot);
-    unsubscribeRuntime = runtime.subscribe((event) => eventStream.publish(event));
-    eventStream.publish({ type: "runtime_reset" });
-    eventStream.publish({ type: "snapshot", snapshot: await runtime.snapshot() });
-  })();
-  switchingProject = operation;
-  try { await operation; }
-  finally { if (switchingProject === operation) switchingProject = undefined; }
-}
-
-async function readProjectPath(request: IncomingMessage) {
-  const value = await readJson(request);
-  if (typeof value !== "object" || value === null || !("path" in value) || typeof value.path !== "string") {
-    throw new Error("Invalid project path");
-  }
-  return value.path;
-}
-
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
-
-async function readCommand(request: IncomingMessage): Promise<RuntimeCommand> {
-  const value = await readJson(request);
-  if (!isRuntimeCommand(value)) throw new Error("Invalid runtime command");
-  return value;
-}
-
-async function readSessionAction(request: IncomingMessage): Promise<SessionAction> {
-  const value = await readJson(request);
-  if (!isSessionAction(value)) throw new Error("Invalid session action");
-  return value;
-}
-
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.from(chunk);
-    size += buffer.length;
-    if (size > 30_000_000) throw new Error("Request body is too large");
-    chunks.push(buffer);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
-function isRuntimeCommand(value: unknown): value is RuntimeCommand {
-  if (typeof value !== "object" || value === null || !("type" in value)) return false;
-  if (value.type === "abort") return true;
-  if (value.type === "new_session") return true;
-  if (value.type === "compact" || value.type === "clear_queue") return true;
-  if (value.type === "rename_session") return "name" in value && typeof value.name === "string";
-  if (value.type === "set_model") return "provider" in value && typeof value.provider === "string" && "modelId" in value && typeof value.modelId === "string";
-  if (value.type === "set_thinking") return "level" in value && typeof value.level === "string";
-  if (value.type === "extension_ui_response") return isUIResponse(value);
-  if (value.type === "steer" || value.type === "follow_up") return "message" in value && typeof value.message === "string" && validImages(value) && validFiles(value);
-  if (value.type === "switch_session") return "sessionPath" in value && typeof value.sessionPath === "string";
-  return value.type === "prompt" && "message" in value && typeof value.message === "string" && validImages(value) && validFiles(value);
-}
-
-function validFiles(value: Record<string, unknown>) {
-  if (!("files" in value) || value.files === undefined) return true;
-  return Array.isArray(value.files) && value.files.length <= 5 && value.files.every((file) => {
-    if (typeof file !== "object" || file === null) return false;
-    return file.kind === "text" && typeof file.name === "string" && file.name.length <= 255
-      && typeof file.mimeType === "string" && typeof file.data === "string" && file.data.length <= 1_000_000;
-  });
-}
-
-function validImages(value: Record<string, unknown>) {
-  if (!("images" in value) || value.images === undefined) return true;
-  return Array.isArray(value.images) && value.images.length <= 5 && value.images.every((image) => {
-    if (typeof image !== "object" || image === null) return false;
-    return image.kind === "image" && "data" in image && typeof image.data === "string" && image.data.length <= 14_000_000
-      && "mimeType" in image && typeof image.mimeType === "string" && image.mimeType.startsWith("image/");
-  });
-}
-
-function isUIResponse(value: Record<string, unknown>) {
-  if (!("id" in value) || typeof value.id !== "string") return false;
-  return ("value" in value && typeof value.value === "string")
-    || ("confirmed" in value && typeof value.confirmed === "boolean")
-    || value.cancelled === true;
-}
-
-function normalizeCommand(command: RuntimeCommand): RuntimeCommand {
-  if (command.type !== "switch_session") return command;
-  return { ...command, sessionPath: sessions.absolutePath(command.sessionPath) };
-}
-
-function isSessionAction(value: unknown): value is SessionAction {
-  if (typeof value !== "object" || value === null || !("type" in value) || !("sessionPath" in value) || typeof value.sessionPath !== "string") return false;
-  if (value.type === "archive" || value.type === "restore" || value.type === "restore_deleted") return true;
-  return value.type === "delete" && "collection" in value && (value.collection === "active" || value.collection === "archived");
-}
-
-async function executeSessionAction(action: SessionAction) {
-  if (action.type === "restore") {
-    sessions.restore(action.sessionPath);
-    return;
-  }
-  if (action.type === "restore_deleted") {
-    sessions.restoreDeleted(action.sessionPath);
-    return;
-  }
-  const collection: SessionCollection = action.type === "archive" ? "active" : action.collection;
-  const targetPath = sessions.absolutePath(action.sessionPath, collection);
-  if (collection === "active") {
-    const snapshot = await runtime.snapshot();
-    if (snapshot.session.path && resolve(snapshot.session.path) === targetPath) {
-      await runtime.execute({ type: "new_session" });
-    }
-  }
-  if (action.type === "archive") sessions.archive(action.sessionPath);
-  else sessions.trash(action.sessionPath, action.collection);
-}
-
-async function sessionCollections() {
-  const active = sessions.list("active");
-  const snapshot = await runtime.snapshot();
-  if (!active.some((session) => session.id === snapshot.session.id)) {
-    let path = "";
-    if (snapshot.session.path) {
-      try { path = sessions.relativePath(snapshot.session.path); }
-      catch { path = ""; }
-    }
-    active.unshift({
-      id: snapshot.session.id,
-      path,
-      name: snapshot.session.name ?? "新会话",
-      preview: "尚未发送消息",
-      updatedAt: new Date().toISOString(),
-      persisted: false,
-    });
-  }
-  return { active, archived: sessions.list("archived"), trash: sessions.list("trash") };
-}
-
-function isAllowedOrigin(request: IncomingMessage) {
-  const origin = request.headers.origin;
-  if (!origin) return true;
-  return origin === `http://${host}:${port}` || origin === `http://localhost:${port}`;
-}
-
-function sendJson(response: ServerResponse, status: number, value: unknown) {
-  if (response.headersSent) return;
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(value));
-}
-
-function sendSocket(socket: WebSocket, value: unknown) {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value));
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}

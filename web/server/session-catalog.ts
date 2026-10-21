@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SessionSummary } from "../shared/types";
+import { decodeResourceId, WorkspaceError } from "../shared/workspace-contract";
 
 export type SessionCollection = "active" | "archived" | "trash";
 
@@ -10,7 +11,7 @@ export class SessionCatalog {
   private readonly trashRoot: string;
 
   constructor(repoRoot: string) {
-    this.sessionRoot = resolve(repoRoot, ".kiva", "sessions");
+    this.sessionRoot = resolve(realpathSync(repoRoot), ".kiva", "sessions");
     this.archiveRoot = join(this.sessionRoot, ".archive");
     this.trashRoot = join(this.sessionRoot, ".trash");
   }
@@ -18,10 +19,19 @@ export class SessionCatalog {
   list(collection: SessionCollection): SessionSummary[] {
     const root = this.collectionRoot(collection);
     if (!existsSync(root)) return [];
+    assertNoSymlinkAncestor(root);
     return listSessionFiles(root, collection === "active")
       .map((path) => readSession(path, root))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 100);
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  all() { return (["active", "archived", "trash"] as const).flatMap((collection) => this.list(collection).map((session) => ({ ...session, collection, absolutePath: this.absolutePath(session.path, collection) }))); }
+
+  find(id: string) {
+    decodeResourceId(id);
+    const matches = this.all().filter((entry) => entry.id === id);
+    if (matches.length > 1) throw new WorkspaceError("ambiguous_session", "More than one transcript has this ID; repair the duplicate before opening it.");
+    return matches[0];
   }
 
   archive(sessionPath: string) {
@@ -80,6 +90,7 @@ export class SessionCatalog {
 function listSessionFiles(root: string, skipHidden: boolean): string[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     if (skipHidden && entry.name.startsWith(".")) return [];
+    if (entry.isSymbolicLink()) return [];
     const path = join(root, entry.name);
     return entry.isDirectory() ? listSessionFiles(path, false) : entry.name.endsWith(".jsonl") ? [path] : [];
   });
@@ -119,10 +130,23 @@ function messageText(content: unknown): string {
 function managedPath(root: string, sessionPath: string) {
   const normalizedRoot = resolve(root);
   const path = resolve(normalizedRoot, sessionPath);
-  if (!sessionPath || !path.startsWith(`${normalizedRoot}${sep}`) || !path.endsWith(".jsonl")) {
+  if (!sessionPath || isAbsolute(sessionPath) || sessionPath.includes("\0") || sessionPath.includes("\\") || !path.startsWith(`${normalizedRoot}${sep}`) || !path.endsWith(".jsonl")) {
     throw new Error("Invalid session path");
   }
+  assertNoSymlinkAncestor(path);
   return path;
+}
+
+function assertNoSymlinkAncestor(path: string) {
+  let ancestor = path;
+  while (!existsSync(ancestor)) {
+    // existsSync follows dangling symlinks; lstat must reject those too.
+    try { if (lstatSync(ancestor).isSymbolicLink()) throw new Error("Invalid session path: symlink"); } catch (error) { if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error; }
+    const parent = dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  if (realpathSync(ancestor) !== ancestor) throw new Error("Invalid session path: symlink");
 }
 
 function uniquePath(path: string) {

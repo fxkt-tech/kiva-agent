@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -13,7 +13,7 @@ describe("workspace directory browser", () => {
   });
 
   it("lists only child directories and exposes the parent for navigation", () => {
-    const root = mkdtempSync(join(tmpdir(), "kiva-directories-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "kiva-directories-")));
     roots.push(root);
     mkdirSync(join(root, "beta"));
     mkdirSync(join(root, "alpha"));
@@ -22,7 +22,7 @@ describe("workspace directory browser", () => {
     const result = listWorkspaceDirectories(root);
 
     assert.equal(result.path, root);
-    assert.equal(result.parent, tmpdir());
+    assert.equal(result.parent, realpathSync(tmpdir()));
     assert.deepEqual(result.directories.map((entry) => entry.name), ["alpha", "beta"]);
     assert.deepEqual(result.directories.map((entry) => entry.path), [join(root, "alpha"), join(root, "beta")]);
   });

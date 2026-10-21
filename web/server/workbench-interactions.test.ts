@@ -1,389 +1,315 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { KivaWorkbench } from "../components/kiva-workbench";
+import { WorkspaceShell } from "../features/workspace/shell";
+import { parseWorkspaceRoute } from "../features/workspace/route";
+import SessionPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/page";
+import SessionsPage from "../app/(workspace)/projects/[projectId]/sessions/page";
+import FilesPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/files/page";
+import ProjectFilesPage from "../app/(workspace)/projects/[projectId]/files/page";
+import ChangesPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/changes/page";
+import ArchivePage from "../app/(workspace)/projects/[projectId]/archive/page";
+import TrashPage from "../app/(workspace)/projects/[projectId]/trash/page";
+import ProjectsPage from "../app/(workspace)/projects/page";
+import type { BootstrapData } from "../shared/types";
 import type { RuntimeSnapshot } from "../shared/runtime-types";
-import type { BootstrapData, SessionSummary } from "../shared/types";
+import type { DeletionPreview, SessionResource, ProjectResource } from "../shared/workspace-contract";
 import { formatMessageTime } from "../shared/message-time";
-import { normalizeMessages } from "./runtime-hub";
 
-const data: BootstrapData = {
-  renderedAt: "2026-10-20T16:00:30.000Z",
-  project: { name: "kiva-agent", path: "/repo", branch: "main", dirtyFiles: 1, files: ["README.md"], changes: [{ status: "M", path: "README.md" }] },
-  runtime: { piVersion: "1.3.0", modelConfigFound: true, status: "ready" },
-  sessions: [],
-  recentProjects: ["/repo"],
-};
+const p: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capability: { state: "ready", repositoryRoot: "/repo", commonDirectory: "/repo/.git", projectSubdirectory: "", head: "base", branch: "main" } };
+function session(id: string, overrides: Partial<SessionResource> = {}): SessionResource {
+  return { id, projectId: "alpha", name: `Session ${id}`, path: `/repo/.kiva/sessions/${id}.jsonl`, preview: id, updatedAt: "2026-10-20T16:00:00Z", createdAt: "2026-10-20T16:00:00Z", collection: "active", legacy: false, executable: true, workspace: { projectId: "alpha", sessionId: id, operationId: id, managedRoot: "/worktrees", treeRoot: `/worktrees/${id}`, executionRoot: `/worktrees/${id}`, repositoryRoot: "/repo", commonDirectory: "/repo/.git", projectSubdirectory: "", branch: `kiva/session/${id}`, baseCommit: "base", state: "ready" }, ...overrides };
+}
+function snapshot(id = "one", changes: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
+  return { status: "idle", session: { id, messageCount: 0 }, messages: [], thinkingLevel: "medium", thinkingLevels: ["off", "medium", "high"], model: { provider: "test", id: "test-model" }, models: [{ provider: "test", id: "test-model", contextWindow: 100_000, reasoning: true }], context: { tokens: 25_000, contextWindow: 100_000, percent: 25, input: 20_000, output: 5_000, cacheRead: 0, cacheWrite: 0, total: 30_000, cost: 0.1234 }, queue: { steering: [], followUp: [] }, commands: [], ...changes };
+}
+const bootstrap: BootstrapData = { renderedAt: "2026-10-20T16:00:30Z", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: ["README.md", "src/main.ts"], changes: [{ status: "M", path: "README.md" }] }, runtime: { piVersion: "1.3.0", modelConfigFound: true, status: "ready" }, sessions: [], recentProjects: ["/repo"] };
 
 class FakeWebSocket {
-  static latest: FakeWebSocket;
-  onopen?: () => void;
-  onmessage?: (message: { data: string }) => void;
-  onerror?: () => void;
-  onclose?: () => void;
-  constructor() { FakeWebSocket.latest = this; }
-  close() {}
+  static sockets: FakeWebSocket[] = [];
+  onopen?: () => void; onmessage?: (message: { data: string }) => void; onerror?: () => void; onclose?: (event: { code: number }) => void;
+  closed = false; seq = 0;
+  constructor(readonly url: string) { FakeWebSocket.sockets.push(this); }
+  close() { this.closed = true; }
+  publish(event: unknown, scope = { projectId: "alpha", sessionId: "one" }) { this.onmessage?.({ data: JSON.stringify({ protocol: 1, ...scope, streamId: "stream", seq: ++this.seq, event }) }); }
 }
+function text(node: ReactTestInstance): string { return node.children.map((child) => typeof child === "string" ? child : text(child)).join(""); }
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
-function runtimeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
-  return {
-    status: "idle", session: { id: "runtime-session", messageCount: 0 }, messages: [],
-    model: { provider: "test", id: "test-model" },
-    models: [{ provider: "test", id: "test-model", contextWindow: 100_000, reasoning: true }],
-    thinkingLevel: "medium", thinkingLevels: ["off", "medium", "high"],
-    context: { tokens: 25_000, contextWindow: 100_000, percent: 25, input: 20_000, output: 5_000, cacheRead: 0, cacheWrite: 0, total: 30_000, cost: 0.1234 },
-    queue: { steering: [], followUp: [] }, commands: [], ...overrides,
-  };
-}
-
-async function publishSnapshot(snapshot: RuntimeSnapshot, seq = 1) {
-  await act(() => {
-    FakeWebSocket.latest.onopen?.();
-    FakeWebSocket.latest.onmessage?.({ data: JSON.stringify({ streamId: "test-stream", seq, event: { type: "snapshot", snapshot } }) });
-  });
-}
-
-async function publishPiEvent(event: unknown, seq: number) {
-  await act(() => FakeWebSocket.latest.onmessage?.({ data: JSON.stringify({ streamId: "test-stream", seq, event: { type: "pi_event", event } }) }));
-}
-
-function textContent(node: ReactTestInstance): string {
-  return node.children.map((child) => typeof child === "string" ? child : textContent(child)).join("");
-}
-
-describe("KivaWorkbench sidebar", () => {
-  let renderer: ReactTestRenderer;
-  let reloads = 0;
-  let requests: Array<{ url: string; init?: RequestInit }> = [];
-  let activeSessions: SessionSummary[] = [];
+describe("routed workspace features", () => {
+  let renderer: ReactTestRenderer | undefined;
+  let requests: Array<{ url: string; body?: Record<string, unknown> }>;
+  let sessions: SessionResource[];
+  let currentSnapshot: RuntimeSnapshot;
+  let currentHref: string;
+  let pendingNavigation: Promise<void>;
+  let extraFetch: ((url: string, init?: RequestInit) => Promise<Response | undefined>) | undefined;
+  let preview: DeletionPreview;
+  let confirm = true;
   const originalFetch = globalThis.fetch;
   const originalWebSocket = globalThis.WebSocket;
   const originalWindow = globalThis.window;
+  const originalLocation = globalThis.location;
+  const originalStorage = globalThis.sessionStorage;
+  const events = new Map<string, Set<(event: unknown) => void>>();
+
+  async function page(href: string): Promise<ReactNode> {
+    const route = parseWorkspaceRoute(href.split("?")[0]);
+    if (!route.projectId) return ProjectsPage();
+    const params = Promise.resolve({ projectId: route.projectId, sessionId: route.sessionId! });
+    if (route.section === "archive") return ArchivePage({ params });
+    if (route.section === "trash") return TrashPage({ params });
+    if (route.section === "files") return route.sessionId ? FilesPage({ params }) : ProjectFilesPage({ params });
+    if (route.section === "changes") return ChangesPage({ params });
+    return route.sessionId ? SessionPage({ params }) : SessionsPage({ params });
+  }
+  async function renderRoute(href: string) {
+    currentHref = href;
+    const parsed = new URL(href, "http://localhost");
+    const content = await page(href);
+    const element = createElement(WorkspaceShell, { pathname: parsed.pathname, search: parsed.search.slice(1), navigate, children: content });
+    if (renderer) renderer.update(element); else renderer = create(element);
+    await settle();
+  }
+  function navigate(href: string) { pendingNavigation = renderRoute(href); }
+  async function open(href = "/projects/alpha/sessions/one") { await act(async () => { await renderRoute(href); }); }
+  async function click(node: ReactTestInstance) { await act(async () => { node.props.onClick({ button: 0, preventDefault() {} }); await pendingNavigation; await settle(); }); }
+  const button = (label: string) => renderer!.root.findAllByType("button").find((node) => text(node) === label)!;
+  const commandRequests = () => requests.filter((entry) => entry.url.endsWith("/commands"));
+  async function publish(value = currentSnapshot, socket = FakeWebSocket.sockets.at(-1)!) { await act(async () => { socket.onopen?.(); socket.publish({ type: "snapshot", snapshot: value }, { projectId: "alpha", sessionId: value.session.id }); }); }
 
   beforeEach(() => {
-    reloads = 0;
-    requests = [];
-    activeSessions = [];
+    renderer = undefined; requests = []; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; confirm = true; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:30141", reload: () => { reloads += 1; } } });
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { location: globalThis.location, addEventListener() {}, removeEventListener() {} } });
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); }, confirm: () => confirm, prompt: () => "Renamed" } });
+    Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:30141" } });
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {}, getItem() { return null; } } });
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
     globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      requests.push({ url, init });
-      if (url.startsWith("/api/project/directories")) {
-        const path = new URL(url, "http://localhost").searchParams.get("path") ?? "/repo";
-        return Response.json({ path, parent: path === "/repo" ? "/" : "/repo", directories: path === "/repo" ? [{ name: "other-project", path: "/repo/other-project" }] : [] });
-      }
-      if (url.startsWith("/api/project/file")) return Response.json({ path: "README.md", content: "# Real project" });
-      if (url === "/api/project/open") return Response.json(data);
-      if (url === "/api/runtime/command") return Response.json({ accepted: true });
-      return Response.json({ active: activeSessions, archived: [], trash: [] });
+      const url = String(input); const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined; requests.push({ url, body });
+      const custom = await extraFetch?.(url, init); if (custom) return custom;
+      if (url === "/api/projects" && init?.method === "POST") return Response.json({ project: { ...p, id: "beta", path: body.path } });
+      if (url === "/api/projects") return Response.json({ projects: [p] });
+      if (url === "/api/projects/alpha") return Response.json({ project: p, bootstrap });
+      if (url === "/api/projects/beta") return Response.json({ project: { ...p, id: "beta" }, bootstrap });
+      if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: session("created") });
+      if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
+      if (url.endsWith("/workspace")) return Response.json({ ...bootstrap, project: { ...bootstrap.project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
+      if (url.includes("/files?")) return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "# Real file" });
+      if (url.includes("/changes?")) return Response.json({ path: "README.md", content: "diff --git a/README.md b/README.md" });
+      if (url.startsWith("/api/project/directories")) { const path = new URL(url, "http://localhost").searchParams.get("path") ?? "/repo"; return Response.json({ path, parent: "/", directories: path === "/repo" ? [{ name: "other", path: "/repo/other" }] : [] }); }
+      if (url.endsWith("/deletion-preview")) return Response.json(preview);
+      if (url.endsWith("/continue")) return Response.json({ projectId: "alpha", sessionId: "continued", session: session("continued") });
+      if (url.endsWith("/actions")) return Response.json({ status: "complete", history: "trashed", workspace: body.removeWorktree ? "removed" : "retained" });
+      if (url.endsWith("/commands")) return Response.json({ accepted: true });
+      const id = url.split("/").at(-1)!; const found = sessions.find((item) => item.id === id) ?? session(id);
+      return Response.json({ projectId: "alpha", sessionId: id, session: found, snapshot: { ...currentSnapshot, session: { ...currentSnapshot.session, id } }, lifecycle: "dormant", executable: found.executable });
     };
   });
-
   afterEach(async () => {
-    if (renderer) await act(() => renderer.unmount());
+    if (renderer) await act(() => renderer!.unmount());
     globalThis.fetch = originalFetch;
-    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: originalWebSocket });
-    if (originalWindow) Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
-    else Reflect.deleteProperty(globalThis, "window");
-    Reflect.deleteProperty(globalThis, "location");
+    for (const [name, value] of [["WebSocket", originalWebSocket], ["window", originalWindow], ["location", originalLocation], ["sessionStorage", originalStorage]] as const) { if (value !== undefined) Object.defineProperty(globalThis, name, { configurable: true, value }); else Reflect.deleteProperty(globalThis, name); }
   });
 
-  it("opens a real file workspace from the File navigation item", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    const fileButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "文件");
-
-    assert.ok(fileButton, "File navigation item should exist");
-    assert.equal(typeof fileButton.props.onClick, "function", "File navigation item should be interactive");
-    await act(() => fileButton.props.onClick());
-    assert.ok(renderer.root.findAll((node) => textContent(node) === "文件浏览").length > 0);
-    const readmeButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "README.md");
-    await act(async () => { readmeButton?.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); });
-    assert.ok(renderer.root.findAllByType("pre").some((node) => textContent(node) === "# Real project"));
+  it("uses actual route pages and scoped reads without commands on navigation", async () => {
+    await open();
+    assert.equal(commandRequests().length, 0);
+    assert.match(FakeWebSocket.sockets[0].url, /\/api\/projects\/alpha\/sessions\/one\/events$/);
+    const fileLink = renderer!.root.findAllByType("a").find((node) => text(node) === "文件")!;
+    assert.equal(fileLink.props.href, "/projects/alpha/sessions/one/files"); await click(fileLink);
+    await click(button("README.md"));
+    assert.equal(currentHref, "/projects/alpha/sessions/one/files?path=README.md");
+    assert.ok(renderer!.root.findAllByType("pre").some((node) => text(node) === "# Real file"));
+    assert.equal(commandRequests().length, 0); assert.equal(FakeWebSocket.sockets[0].closed, true);
+    await open("/projects/alpha/files?path=README.md");
+    assert.ok(renderer!.root.findAllByType("span").some((node) => text(node).includes("原项目目录")));
   });
 
-  it("wires the remaining sidebar controls to visible state changes", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-
-    const changeButton = renderer.root.findAllByType("button").find((button) => textContent(button).startsWith("代码变更"));
-    assert.equal(typeof changeButton?.props.onClick, "function");
-    await act(() => changeButton?.props.onClick());
-    assert.equal(textContent(renderer.root.findByProps({ className: "workspace-browser-heading" }).findByType("p")), "代码变更");
-
-    const settingsButton = renderer.root.findByProps({ "aria-label": "切换右侧栏" });
-    assert.equal(renderer.root.findAll((node) => node.props.className === "inspector").length, 0, "Context starts collapsed to keep the conversation focused");
-    await act(() => settingsButton?.props.onClick());
-    assert.equal(renderer.root.findAll((node) => node.props.className === "inspector").length, 1);
-    assert.equal(renderer.root.findByProps({ className: "inspector" }).children.length, 0, "The right panel is reserved and contains no old runtime controls");
-    await act(() => settingsButton.props.onClick());
-    assert.equal(renderer.root.findAll((node) => node.props.className === "inspector").length, 0);
-
-    const projectButton = renderer.root.findByProps({ "aria-label": "添加项目" });
-    await act(async () => { projectButton.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); });
-    assert.equal(renderer.root.findAllByProps({ role: "dialog" }).length, 1);
-    assert.ok(requests.some((request) => request.url.startsWith("/api/project/directories")), "Opening the picker should browse real local directories");
-    const directoryButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("other-project"));
-    assert.ok(directoryButton, "Directory entries should be navigable");
-    await act(async () => { directoryButton.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); });
-    const useFolderButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "使用此文件夹");
-    assert.ok(useFolderButton);
-    await act(async () => { useFolderButton.props.onClick(); await new Promise((resolve) => setImmediate(resolve)); });
-    assert.ok(requests.some((request) => request.url === "/api/project/open" && request.init?.body === JSON.stringify({ path: "/repo/other-project" })));
-    assert.equal(reloads, 1);
-
-    const sessionsButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "会话");
-    await act(() => sessionsButton?.props.onClick());
-    const commandButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "命令");
-    assert.ok(commandButton, "Commands should remain accessible from the composer");
-    await act(() => commandButton.props.onClick());
-    assert.equal(renderer.root.findAll((node) => node.props.className === "command-palette").length, 1);
-
-    const searchButton = renderer.root.findByProps({ "aria-label": "搜索会话" });
-    await act(() => searchButton.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ placeholder: "搜索会话" }).length, 1);
+  it("retains project collapse/search ordering and creates while another session runs", async () => {
+    await open(); await publish(snapshot("one", { status: "running" }));
+    const row = renderer!.root.findByProps({ className: "project-card" });
+    assert.deepEqual(row.findAllByType("button").map((node) => node.props.className), ["project-toggle", "project-new-session", "project-search", "project-collapse"]);
+    await click(renderer!.root.findByProps({ className: "project-toggle" }));
+    assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, true);
+    assert.ok(!requests.some((entry) => entry.url.includes("directories")));
+    await click(renderer!.root.findByProps({ className: "project-search" }));
+    assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, false);
+    const search = renderer!.root.findByProps({ placeholder: "搜索会话" });
+    await act(() => search.props.onChange({ target: { value: "Session two" } }));
+    assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 1);
+    assert.equal(renderer!.root.findByProps({ className: "project-new-session" }).props.disabled, false);
+    await click(renderer!.root.findByProps({ className: "project-new-session" }));
+    assert.equal(currentHref, "/projects/alpha/sessions/created");
+    assert.ok(requests.some((entry) => entry.url === "/api/projects/alpha/sessions" && typeof entry.body?.operationId === "string"));
+    assert.ok(commandRequests().every((entry) => entry.body?.type !== "new_session" && entry.body?.type !== "switch_session"));
   });
 
-  it("keeps the conversation header title-free while retaining panel and mobile navigation controls", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await publishSnapshot(runtimeSnapshot({
-      session: { id: "header-session", name: "当前会话", messageCount: 1 },
-      messages: [{ id: "header-message", role: "user", text: "检查顶部栏", thinking: "", tools: [] }],
-    }));
-    const header = renderer.root.findByProps({ className: "conversation-header" });
-    assert.equal(textContent(header), "", "No title, subtitle, runtime text or menu labels remain in the header");
-    assert.equal(header.findAllByType("h1").length, 0);
-    assert.equal(header.findAllByType("p").length, 0);
-    assert.equal(header.findAllByProps({ className: "runtime-badge" }).length, 0);
-    assert.equal(header.findAllByProps({ "aria-label": "会话菜单" }).length, 0);
-    const mobileNavigation = header.findByProps({ "aria-label": "打开导航" });
-    assert.equal(mobileNavigation.findAllByType("svg").length, 1, "A visible mobile navigation icon replaces the removed title hit target");
-    await act(() => mobileNavigation.props.onClick());
-    assert.ok(renderer.root.findAllByType("main")[0].props.className.includes("sidebar-mobile-open"));
-    const panelToggle = header.findByProps({ "aria-label": "切换右侧栏" });
-    await act(() => panelToggle.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ className: "inspector" }).length, 1);
-    await act(() => panelToggle.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ className: "inspector" }).length, 0);
-    const files = renderer.root.findAllByType("button").find((button) => textContent(button) === "文件");
-    await act(() => files?.props.onClick());
-    assert.equal(textContent(header), "", "File navigation must not restore the header title");
-    assert.equal(renderer.root.findByProps({ className: "workspace-browser-heading" }).findByType("p").children[0], "文件浏览");
-    const changes = renderer.root.findAllByType("button").find((button) => textContent(button).startsWith("代码变更"));
-    assert.ok(changes);
-    await act(() => changes.props.onClick());
-    assert.equal(textContent(header), "", "Changes navigation must not restore the header title");
+  it("retains scoped draft and attachment memory across file and session navigation", async () => {
+    await open();
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "source draft" } }));
+    const attachment = { name: "note.md", type: "text/plain", size: 3, text: async () => "abc" };
+    await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [attachment], value: "file" } }));
+    await open("/projects/alpha/sessions/two");
+    assert.equal(renderer!.root.findByType("textarea").props.value, "");
+    await open("/projects/alpha/sessions/one/files"); await open();
+    assert.equal(renderer!.root.findByType("textarea").props.value, "source draft");
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "移除 note.md" }).length, 1);
   });
 
-  it("renders KivA with full local timestamps from normalized history and leaves unknown times explicit", async () => {
-    const timestamp = Date.parse("2006-01-02T15:04:05Z");
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await publishSnapshot(runtimeSnapshot({ messages: normalizeMessages([
-      { role: "assistant", timestamp, content: [{ type: "text", text: "已读取项目" }] },
-      { role: "assistant", content: [{ type: "text", text: "旧消息缺少时间" }] },
-    ]) }));
-    const metadata = renderer.root.findAllByProps({ className: "message-meta" });
-    assert.equal(textContent(metadata[0].findByType("strong")), "KivA");
-    assert.equal(textContent(metadata[0].findByType("time")), formatMessageTime(timestamp));
-    assert.equal(metadata[0].findByType("time").props.dateTime, "2006-01-02T15:04:05.000Z");
-    assert.equal(textContent(metadata[1].findByType("time")), "时间未知");
-    assert.equal(metadata[1].findByType("time").props.dateTime, undefined);
-    assert.equal(renderer.root.findAllByType("textarea")[0].props.placeholder, "告诉 KivA 你想完成什么…");
+  it("restores a failed async send only into its captured source draft", async () => {
+    const response = deferred<Response>();
+    extraFetch = async (url) => url.endsWith("/commands") ? response.promise : undefined;
+    await open(); await publish();
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "restore one" } }));
+    let submission!: Promise<void>;
+    await act(() => { submission = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    await open("/projects/alpha/sessions/two");
+    response.resolve(Response.json({ error: "failed source send" }, { status: 409 }));
+    await act(async () => { await submission; });
+    assert.equal(renderer!.root.findByType("textarea").props.value, "");
+    await open(); assert.equal(renderer!.root.findByType("textarea").props.value, "restore one");
   });
 
-  it("preserves live timestamps through streaming and tool execution without duplicating the assistant row", async () => {
-    const timestamp = Date.parse("2006-01-02T15:04:05Z");
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await publishSnapshot(runtimeSnapshot());
-    await publishPiEvent({ type: "message_start", message: { role: "assistant", timestamp, content: [] } }, 2);
-    await publishPiEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "检查文件" } }, 3);
-    await publishPiEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "live-read", name: "read", arguments: { path: "README.md" } }] } }, 4);
-    await publishPiEvent({ type: "tool_execution_start", toolCallId: "live-read", toolName: "read", args: { path: "README.md" } }, 5);
-    assert.equal(renderer.root.findAllByProps({ className: "assistant-message" }).length, 1, "The tool belongs to the completed assistant message, not a new timeless placeholder");
-    await publishPiEvent({ type: "tool_execution_end", toolCallId: "live-read", result: { content: [{ type: "text", text: "# README" }] }, isError: false }, 6);
-    const firstTime = renderer.root.findAllByType("time")[0];
-    assert.equal(firstTime.props.dateTime, "2006-01-02T15:04:05.000Z");
-    assert.equal(textContent(firstTime), formatMessageTime(timestamp));
-    assert.equal(renderer.root.findByProps({ "data-status": "done" }).props.className, "tool-status");
-    assert.doesNotMatch(textContent(renderer.root.findByProps({ className: "assistant-body" })), /正在使用工具/);
-
-    await publishPiEvent({ type: "message_start", message: { role: "assistant", timestamp: timestamp + 5_000, content: [] } }, 7);
-    await publishPiEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "已完成" } }, 8);
-    await publishPiEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "已完成" }] } }, 9);
-    assert.deepEqual(renderer.root.findAllByType("time").map((time) => time.props.dateTime), ["2006-01-02T15:04:05.000Z", "2006-01-02T15:04:10.000Z"]);
+  it("ignores late previews and scoped events from the previous identity", async () => {
+    const stale = deferred<Response>();
+    extraFetch = async (url) => url.includes("/files?path=README") ? stale.promise : undefined;
+    await open(); const old = FakeWebSocket.sockets[0];
+    await open("/projects/alpha/sessions/one/files?path=README.md");
+    await open("/projects/alpha/sessions/two/files?path=src%2Fmain.ts");
+    stale.resolve(Response.json({ path: "README.md", content: "STALE PREVIEW" }));
+    await act(async () => { old.publish({ type: "snapshot", snapshot: snapshot("one", { messages: [{ id: "stale", role: "user", text: "STALE MESSAGE", thinking: "", tools: [] }] }) }); await settle(); });
+    assert.doesNotMatch(text(renderer!.root), /STALE PREVIEW|STALE MESSAGE/);
   });
 
-  it("shows KivA Agent branding without a header command button and retains mobile close", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    const header = renderer.root.findByProps({ className: "brand-row" });
-    assert.equal(textContent(header.findByProps({ className: "brand-name" })), "KivA Agent");
-    assert.equal(header.findAllByProps({ "aria-label": "打开命令面板" }).length, 0);
-    assert.deepEqual(header.findAllByType("button").map((button) => button.props["aria-label"]), ["关闭导航"]);
+  it("preserves confirmed identity and ignores cancelled or late create navigation", async () => {
+    const result = deferred<Response>(); extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? result.promise : undefined;
+    await open(); let action!: Promise<void>;
+    await act(() => { action = renderer!.root.findByProps({ className: "project-new-session" }).props.onClick(); });
+    await open("/projects/alpha/files");
+    result.resolve(Response.json({ projectId: "alpha", sessionId: "late", session: session("late") }));
+    await act(async () => { await settle(); await action; });
+    assert.equal(currentHref, "/projects/alpha/files");
+    extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? Response.json({ cancelled: true }) : undefined;
+    await click(renderer!.root.findByProps({ className: "project-new-session" }));
+    assert.equal(currentHref, "/projects/alpha/files");
   });
 
-  it("collapses project sessions without opening the project picker and removes the sidebar context entry", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    const sidebar = renderer.root.findByProps({ className: "sidebar" });
-    assert.ok(sidebar.findAllByType("button").every((button) => textContent(button) !== "运行上下文"));
-    assert.equal(sidebar.findAllByProps({ className: "section-label" }).length, 0, "Active sessions sit directly beneath the project without a redundant heading");
-    assert.equal(sidebar.findAll((node) => textContent(node) === "最近会话").length, 0);
-
-    const projectButton = renderer.root.findByProps({ className: "project-toggle" });
-    assert.equal(projectButton.props["aria-expanded"], true);
-    await act(() => projectButton.props.onClick());
-    assert.equal(renderer.root.findByProps({ id: "project-sessions" }).props.hidden, true);
-    assert.equal(projectButton.props["aria-expanded"], false);
-    assert.equal(renderer.root.findAllByProps({ role: "dialog" }).length, 0);
-    assert.ok(requests.every((request) => !request.url.startsWith("/api/project/directories")));
-
-    const projectRow = renderer.root.findByProps({ className: "project-card" });
-    const controls = projectRow.findAllByType("button");
-    assert.equal(controls.at(-2)?.props["aria-label"], "搜索会话", "Search belongs immediately before the collapse control");
-    const collapseButton = renderer.root.findByProps({ className: "project-collapse" });
-    assert.equal(controls.at(-1), collapseButton);
-    await act(() => collapseButton.props.onClick());
-    assert.equal(renderer.root.findByProps({ id: "project-sessions" }).props.hidden, false);
+  it("retains title-free header, mobile drawer, empty right panel and real directory picker", async () => {
+    await open();
+    const header = renderer!.root.findByProps({ className: "conversation-header" }); assert.equal(text(header), "");
+    await click(renderer!.root.findByProps({ "aria-label": "打开导航" })); assert.match(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
+    await click(renderer!.root.findByProps({ "aria-label": "切换右侧栏" })); assert.equal(renderer!.root.findByProps({ className: "inspector" }).children.length, 0);
+    await click(renderer!.root.findByProps({ "aria-label": "添加项目" }));
+    assert.ok(requests.some((entry) => entry.url.startsWith("/api/project/directories")));
+    await click(button("other")); await click(button("使用此文件夹"));
+    assert.ok(requests.some((entry) => entry.url === "/api/projects" && entry.body?.path === "/repo/other"));
+    assert.equal(currentHref, "/projects/beta/sessions");
   });
 
-  it("expands a collapsed project for search and filters actual session rows", async () => {
-    activeSessions = [
-      { id: "session-code", path: "code.jsonl", name: "修复代码", preview: "检查项目", updatedAt: data.renderedAt },
-      { id: "session-ui", path: "ui.jsonl", name: "UI 设计", preview: "调整侧栏", updatedAt: data.renderedAt },
-    ];
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await act(() => renderer.root.findByProps({ className: "project-toggle" }).props.onClick());
-    await act(() => renderer.root.findByProps({ "aria-label": "搜索会话" }).props.onClick());
-    assert.equal(renderer.root.findByProps({ id: "project-sessions" }).props.hidden, false);
-
-    const input = renderer.root.findByProps({ placeholder: "搜索会话" });
-    await act(() => input.props.onChange({ target: { value: "UI" } }));
-    assert.deepEqual(renderer.root.findAllByProps({ className: "session-item-title" }).map(textContent), ["UI 设计"]);
-
-    await act(() => renderer.root.findByProps({ "aria-label": "搜索会话" }).props.onClick());
-    assert.equal(renderer.root.findAllByProps({ placeholder: "搜索会话" }).length, 0);
-    assert.equal(renderer.root.findAllByProps({ className: "session-item-title" }).length, 2, "Closing search clears the hidden filter");
+  it("preserves model/thinking/context controls and queue/abort in the composer", async () => {
+    await open(); await publish();
+    const form = renderer!.root.findByType("form");
+    assert.deepEqual(form.findByProps({ className: "composer-settings" }).children.map((child) => typeof child === "string" ? child : child.props.className), ["composer-context", "composer-select composer-model", "composer-select composer-thinking"]);
+    await act(async () => renderer!.root.findByProps({ "aria-label": "选择模型" }).props.onChange({ target: { value: JSON.stringify({ provider: "test", id: "test-model" }) } }));
+    await act(async () => renderer!.root.findByProps({ "aria-label": "思考强度" }).props.onChange({ target: { value: "high" } }));
+    await click(renderer!.root.findByProps({ "aria-label": "上下文使用量" }));
+    assert.match(text(renderer!.root.findByProps({ id: "composer-context-details" })), /25%|25,000/);
+    confirm = false; await click(button("压缩上下文")); assert.ok(!commandRequests().some((entry) => entry.body?.type === "compact"));
+    confirm = true; await click(button("压缩上下文"));
+    await publish(snapshot("one", { status: "running", queue: { steering: ["steer one"], followUp: ["follow one"] } }));
+    assert.equal(renderer!.root.findByProps({ "aria-label": "选择模型" }).props.disabled, true);
+    await click(renderer!.root.findByProps({ "aria-label": "清空队列" })); await click(renderer!.root.findByProps({ "aria-label": "停止" }));
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["set_model", "set_thinking", "compact", "clear_queue", "abort"]);
+    assert.ok(commandRequests().every((entry) => entry.url === "/api/projects/alpha/sessions/one/commands"));
   });
 
-  it("creates sessions from the project's plus before search and clears collapsed search filters", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await publishSnapshot(runtimeSnapshot({ messages: [{ id: "previous-message", role: "user", text: "原来的会话", thinking: "", tools: [] }] }));
-    const sidebar = renderer.root.findByProps({ className: "sidebar" });
-    assert.equal(sidebar.findAllByProps({ className: "sidebar-new-session" }).length, 0);
-    assert.equal(sidebar.findAllByType("button").filter((button) => textContent(button).includes("新建会话")).length, 0, "There is no global new-session row");
-    const project = sidebar.findByProps({ className: "project-card" });
-    const createButton = project.findByProps({ className: "project-new-session" });
-    assert.deepEqual(project.findAllByType("button").map((button) => button.props.className), ["project-toggle", "project-new-session", "project-search", "project-collapse"]);
-    assert.equal(createButton.props["aria-label"], "在 kiva-agent 中新建会话");
-    assert.equal(textContent(createButton), "", "The project action is icon-only");
-    assert.equal(createButton.findAllByType("svg").length, 1);
-    assert.equal(createButton.props.disabled, false);
-
-    await act(() => project.findByProps({ className: "project-search" }).props.onClick());
-    await act(() => sidebar.findByProps({ placeholder: "搜索会话" }).props.onChange({ target: { value: "不匹配新会话的过滤词" } }));
-    await act(() => project.findByProps({ className: "project-collapse" }).props.onClick());
-    await act(() => renderer.root.findByProps({ "aria-label": "打开导航" }).props.onClick());
-    activeSessions = [{ id: "new-project-session", path: "new-project-session.jsonl", name: "新会话", preview: "尚未发送消息", updatedAt: data.renderedAt }];
-    await act(() => createButton.props.onClick());
-    assert.equal(requests.filter((request) => request.url === "/api/runtime/command" && request.init?.body === JSON.stringify({ type: "new_session" })).length, 1);
-    assert.equal(sidebar.findByProps({ id: "project-sessions" }).props.hidden, false);
-    assert.equal(sidebar.findAllByProps({ placeholder: "搜索会话" }).length, 0);
-    assert.deepEqual(sidebar.findAllByProps({ className: "session-item-title" }).map(textContent), ["新会话"]);
-    assert.ok(!renderer.root.findAllByType("main")[0].props.className.includes("sidebar-mobile-open"));
-    assert.ok(requests.every((request) => !request.url.startsWith("/api/project/")), "Creation uses the current project's runtime without opening or switching projects");
-    await publishSnapshot(runtimeSnapshot({ session: { id: "new-project-session", name: "新会话", messageCount: 0 } }), 2);
-    assert.equal(renderer.root.findAllByProps({ className: "user-message" }).length, 0);
-    assert.equal(sidebar.findByProps({ className: "session-item selected" }).findByProps({ className: "session-item-title" }).children[0], "新会话");
+  it("renders original timestamps and keeps live tool ownership through event updates", async () => {
+    const timestamp = Date.parse("2006-01-02T15:04:05Z"); await open(); await publish(snapshot("one", { messages: [{ id: "known", timestamp, role: "assistant", text: "History", thinking: "", tools: [] }, { id: "unknown", role: "assistant", text: "Old", thinking: "", tools: [] }] }));
+    const times = renderer!.root.findAllByType("time"); assert.equal(times[0].props.dateTime, "2006-01-02T15:04:05.000Z"); assert.equal(text(times[0]), formatMessageTime(timestamp)); assert.equal(text(times[1]), "时间未知");
+    await publish();
+    const socket = FakeWebSocket.sockets.at(-1)!;
+    await act(() => { socket.publish({ type: "pi_event", event: { type: "message_start", message: { role: "assistant", timestamp } } }); socket.publish({ type: "pi_event", event: { type: "message_end", message: { role: "assistant", content: [] } } }); socket.publish({ type: "pi_event", event: { type: "tool_execution_start", toolCallId: "read", toolName: "read", args: { path: "README.md" } } }); socket.publish({ type: "pi_event", event: { type: "tool_execution_end", toolCallId: "read", result: "result", isError: false } }); });
+    assert.equal(renderer!.root.findAllByProps({ className: "assistant-message" }).length, 1);
+    assert.equal(renderer!.root.findByType("time").props.dateTime, "2006-01-02T15:04:05.000Z");
+    assert.equal(renderer!.root.findByProps({ "data-status": "done" }).props.className, "tool-status");
   });
 
-  it("opens the project's active sessions from file and archived views and disables creation while busy or disconnected", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    const createButton = renderer.root.findByProps({ className: "project-new-session" });
-    assert.equal(createButton.props.disabled, true);
-    await publishSnapshot(runtimeSnapshot({ status: "running" }));
-    assert.equal(createButton.props.disabled, true);
-    await publishSnapshot(runtimeSnapshot(), 2);
-    assert.equal(createButton.props.disabled, false);
-
-    const files = renderer.root.findAllByType("button").find((button) => textContent(button) === "文件");
-    assert.ok(files);
-    await act(() => files.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ className: "workspace-browser" }).length, 1);
-    await act(() => createButton.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ className: "workspace-browser" }).length, 0);
-    const archived = renderer.root.findAllByType("button").find((button) => textContent(button).startsWith("归档"));
-    assert.ok(archived);
-    await act(() => archived.props.onClick());
-    await act(() => createButton.props.onClick());
-    assert.equal(renderer.root.findAllByProps({ className: "section-label" }).length, 0, "Creation returns from archive to the active project sessions");
-    assert.equal(requests.filter((request) => request.init?.body === JSON.stringify({ type: "new_session" })).length, 2);
-    await act(() => FakeWebSocket.latest.onclose?.());
-    assert.equal(createButton.props.disabled, true);
+  it("keeps legacy history read-only and explicitly continues to a confirmed new URL", async () => {
+    sessions[0] = session("one", { legacy: true, executable: false, workspace: undefined });
+    await open(); assert.equal(renderer!.root.findAllByType("textarea").length, 0); assert.match(text(renderer!.root), /不会还原历史代码/); assert.equal(commandRequests().length, 0);
+    await click(button("在独立工作区继续")); assert.equal(currentHref, "/projects/alpha/sessions/continued");
   });
 
-  it("keeps model, thinking and live context controls inside the composer without opening the right panel", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    await publishSnapshot(runtimeSnapshot());
-    const composer = renderer.root.findByProps({ className: "composer" });
-    const settings = composer.findByProps({ className: "composer-settings" });
-    assert.deepEqual(settings.children.map((child) => typeof child === "string" ? child : child.props.className), ["composer-context", "composer-select composer-model", "composer-select composer-thinking"], "Runtime controls are ordered context, model, then thinking");
-    const model = composer.findByProps({ "aria-label": "选择模型" });
-    const thinking = composer.findByProps({ "aria-label": "思考强度" });
-    const thinkingControl = composer.findByProps({ className: "composer-select composer-thinking" });
-    assert.equal(textContent(thinkingControl.findByType("span")), "medium", "Thinking displays only the current level, without a text prefix");
-    assert.deepEqual(thinkingControl.findAllByType("svg").map((icon) => icon.props.className), ["lucide lucide-chevron-down"], "Thinking retains only the dropdown chevron");
-    assert.equal(model.props.disabled, false);
-    assert.equal(thinking.props.value, "medium");
-    await act(() => model.props.onChange({ target: { value: JSON.stringify({ provider: "test", id: "test-model" }) } }));
-    await act(() => thinking.props.onChange({ target: { value: "high" } }));
-    assert.ok(requests.some((request) => request.init?.body === JSON.stringify({ type: "set_model", provider: "test", modelId: "test-model" })));
-    assert.ok(requests.some((request) => request.init?.body === JSON.stringify({ type: "set_thinking", level: "high" })));
-
-    const usage = composer.findByProps({ "aria-label": "上下文使用量" });
-    assert.equal(textContent(usage), "25%");
-    await act(() => usage.props.onClick());
-    const details = composer.findByProps({ id: "composer-context-details" });
-    assert.match(textContent(details), /0\.1234/);
-    assert.equal(composer.findByProps({ role: "progressbar" }).props["aria-valuenow"], 25);
-    const confirmations: string[] = [];
-    Object.assign(window, { confirm: (message: string) => { confirmations.push(message); return false; } });
-    const compact = composer.findAllByType("button").find((button) => textContent(button) === "压缩上下文");
-    assert.ok(compact);
-    await act(() => compact.props.onClick());
-    assert.equal(requests.filter((request) => request.init?.body === JSON.stringify({ type: "compact" })).length, 0);
-    Object.assign(window, { confirm: () => true });
-    await act(() => compact.props.onClick());
-    assert.equal(confirmations.length, 1);
-    assert.ok(requests.some((request) => request.init?.body === JSON.stringify({ type: "compact" })));
-    const context = runtimeSnapshot().context;
-    assert.ok(context);
-    await publishSnapshot(runtimeSnapshot({ thinkingLevel: "high", context: { ...context, tokens: 50_000, percent: 50 } }), 2);
-    assert.equal(thinking.props.value, "high");
-    assert.equal(textContent(usage), "50%");
-    assert.equal(renderer.root.findAllByProps({ className: "inspector" }).length, 0);
+  it("continues an assistant received in a running snapshot without duplicating it", async () => {
+    await open();
+    await publish(snapshot("one", { status: "running", messages: [{ id: "streaming-owner", role: "assistant", text: "partial", thinking: "", tools: [] }] }));
+    const socket = FakeWebSocket.sockets.at(-1)!;
+    await act(() => { socket.publish({ type: "pi_event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " continued" } } }); socket.publish({ type: "pi_event", event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial continued" }] } } }); });
+    assert.equal(renderer!.root.findAllByProps({ className: "assistant-message" }).length, 1);
+    assert.match(text(renderer!.root.findByProps({ className: "assistant-body" })), /partial continued/);
+    await act(() => socket.publish({ type: "pi_event", event: { type: "message_start", message: { role: "assistant", timestamp: 123 } } }));
+    assert.equal(renderer!.root.findAllByProps({ className: "assistant-message" }).length, 2, "A later assistant start still gets its own row");
   });
 
-  it("shows unknown context before a snapshot and disables model and thinking during a run or disconnect", async () => {
-    await act(() => { renderer = create(createElement(KivaWorkbench, { data })); });
-    const composer = renderer.root.findByProps({ className: "composer" });
-    const model = composer.findByProps({ "aria-label": "选择模型" });
-    const thinking = composer.findByProps({ "aria-label": "思考强度" });
-    assert.equal(model.props.disabled, true);
-    assert.equal(thinking.props.disabled, true);
-    const usage = composer.findByProps({ "aria-label": "上下文使用量" });
-    assert.equal(textContent(usage), "—");
-    await act(() => usage.props.onClick());
-    assert.match(textContent(composer.findByProps({ id: "composer-context-details" })), /等待首次请求/);
-    assert.equal(composer.findAllByType("button").find((button) => textContent(button) === "压缩上下文")?.props.disabled, true);
+  it("loads cold runtime controls only by explicit action and scopes extension responses", async () => {
+    currentSnapshot = snapshot("one", { models: [], thinkingLevels: [] });
+    await open(); await publish(); assert.equal(commandRequests().length, 0);
+    await click(button("加载模型与运行设置"));
+    await publish(snapshot("one", { uiRequest: { id: "extension-one", method: "confirm", title: "Extension confirmation" } }));
+    await click(button("取消"));
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["initialize", "extension_ui_response"]);
+    assert.equal(commandRequests()[1].body?.id, "extension-one"); assert.equal(commandRequests()[1].body?.cancelled, true);
+  });
 
-    await publishSnapshot(runtimeSnapshot({ status: "running" }));
-    assert.equal(model.props.disabled, true);
-    assert.equal(thinking.props.disabled, true);
-    await publishSnapshot(runtimeSnapshot(), 2);
-    assert.equal(model.props.disabled, false);
-    await act(() => FakeWebSocket.latest.onclose?.());
-    assert.equal(model.props.disabled, true);
-    assert.equal(thinking.props.disabled, true);
+  it("rejects duplicate selected paths and missing resources without showing another preview", async () => {
+    await open("/projects/alpha/sessions/one/files?path=README.md&path=src%2Fmain.ts");
+    assert.match(text(renderer!.root), /重复的 path 参数/); assert.ok(!requests.some((entry) => entry.url.includes("/files?")));
+    await open("/projects/alpha/sessions/one?sessionId=two"); assert.match(text(renderer!.root), /资源标识只能出现在路径中/);
+    extraFetch = async (url) => url === "/api/projects/alpha/sessions/missing" ? Response.json({ error: "Session not found" }, { status: 404 }) : undefined;
+    await open("/projects/alpha/sessions/missing"); assert.match(text(renderer!.root), /Session not found/); assert.equal(renderer!.root.findAllByType("textarea").length, 0);
+  });
+
+  it("reuses collection pages and preserves stable session URLs across archives", async () => {
+    sessions = [session("archived", { collection: "archived", executable: false }), session("trashed", { collection: "trash", executable: false })];
+    await open("/projects/alpha/archive");
+    const archived = renderer!.root.findAllByType("a").find((node) => node.props.href === "/projects/alpha/sessions/archived")!; assert.ok(archived);
+    await open("/projects/alpha/trash"); assert.ok(renderer!.root.findAllByType("a").some((node) => node.props.href === "/projects/alpha/sessions/trashed"));
+  });
+
+  it("defaults cleanup checked, blocks dirty cleanup, and sends unchecked history-only choice", async () => {
+    preview.workspace.state = "dirty"; preview.workspace.localChanges = ["?? work.txt"];
+    await open(); await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session one" })); await click(button("删除"));
+    const checkbox = renderer!.root.findByProps({ type: "checkbox" }); assert.equal(checkbox.props.checked, true); assert.equal(button("删除会话").props.disabled, true);
+    await act(() => checkbox.props.onChange({ target: { checked: false } })); assert.equal(button("删除会话").props.disabled, false);
+    await click(button("删除会话"));
+    assert.ok(requests.some((entry) => entry.url.endsWith("/actions") && entry.body?.confirmation === "target-state-token" && entry.body.removeWorktree === false));
+  });
+
+  it("keeps exact target visible on busy preview and reports raw partial deletion truthfully", async () => {
+    extraFetch = async (url) => url.endsWith("/deletion-preview") ? Response.json({ error: "Task is busy" }, { status: 409 }) : undefined;
+    await open(); await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session one" })); await click(button("删除"));
+    assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /one.*\/worktrees\/one/s); assert.equal(button("删除会话").props.disabled, true);
+    extraFetch = async (url) => url.endsWith("/actions") ? Response.json({ status: "partial", history: "retained", workspace: "removed", error: "history move failed" }) : undefined;
+    await click(button("重新检查")); await click(button("删除会话"));
+    assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 1); assert.match(text(renderer!.root), /history move failed/); assert.equal(button("删除会话").props.disabled, true);
+  });
+
+  it("resumes a persisted partial deletion from trash with its original cleanup choice", async () => {
+    const deletion = { operationId: "original-operation", status: "partial" as const, history: "trashed" as const, workspace: "removed" as const, removeWorktree: true, error: "cleanup metadata failed" };
+    sessions = [session("one", { collection: "trash", executable: false, deletion, workspace: { ...session("one").workspace!, state: "removed" } })];
+    preview = { ...preview, collection: "trash", workspace: { ...preview.workspace, state: "removed" } };
+    Object.assign(preview, { deletion });
+    await open("/projects/alpha/trash");
+    await click(renderer!.root.findAllByProps({ "aria-label": "会话操作 Session one" })[0]);
+    await click(button("重试删除"));
+    assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /original-operation.*历史 trashed，工作区 removed/s);
+    assert.equal(renderer!.root.findAllByProps({ type: "checkbox" }).length, 0);
+    await click(button("删除会话"));
+    const command = requests.find((entry) => entry.url.endsWith("/actions"))!;
+    assert.equal(command.body?.removeWorktree, true); assert.equal(command.body?.confirmation, "target-state-token");
+    assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
   });
 });

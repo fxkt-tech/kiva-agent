@@ -6,33 +6,42 @@ import { SessionCatalog } from "@/server/session-catalog";
 import { installationRoot, workspaceRegistry } from "@/server/workspace-registry";
 
 function git(repoRoot: string, args: string[]) {
-  return spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" }).stdout.trimEnd();
+  return spawnSync("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }).stdout ?? "";
 }
 
-export function getBootstrapData(): BootstrapData {
-  const repoRoot = workspaceRegistry.activeRoot();
-  const status = git(repoRoot, ["-c", "core.quotepath=false", "status", "--porcelain=v1"]);
-  const trackedFiles = git(repoRoot, ["ls-files", "--cached", "--others", "--exclude-standard"]);
-  const files = trackedFiles ? trackedFiles.split("\n").slice(0, 1_000) : listFiles(repoRoot);
-  const changes = status ? status.split("\n").map((line) => {
-    const value = line.slice(3);
-    return { status: line.slice(0, 2).trim() || "M", path: value.includes(" -> ") ? value.slice(value.lastIndexOf(" -> ") + 4) : value };
-  }) : [];
-  const sessions = new SessionCatalog(repoRoot).list("active").slice(0, 30);
-  const modelConfigFound = existsSync(join(installationRoot, ".kiva", "agent", "models.json"));
+export function getBootstrapData(repoRoot = workspaceRegistry.activeRoot(), options: { installationRoot?: string; recentProjects?: string[]; historyRoot?: string } = {}): BootstrapData {
+  const status = git(repoRoot, ["status", "--porcelain=v1", "-z", "--", "."]);
+  const prefix = git(repoRoot, ["rev-parse", "--show-prefix"]).replace(/\r?\n$/, "");
+  const trackedFiles = git(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  const files = trackedFiles ? trackedFiles.split("\0").filter(Boolean).slice(0, 1_000) : listFiles(repoRoot);
+  const changes: BootstrapData["project"]["changes"] = [];
+  const records = status.split("\0");
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record.length < 4) continue;
+    const state = record.slice(0, 2);
+    // Porcelain -z emits the destination first, followed by a separate source
+    // record for copies/renames. Paths can contain Unicode, arrows or newlines.
+    const destination = record.slice(3);
+    const source = /[RC]/.test(state) ? records[++index] : undefined;
+    if (destination.startsWith(prefix)) changes.push({ status: state.trim() || "M", path: destination.slice(prefix.length) });
+    else if (source?.startsWith(prefix) && state.includes("R")) changes.push({ status: "D", path: source.slice(prefix.length) });
+  }
+  const sessions = new SessionCatalog(options.historyRoot ?? repoRoot).list("active").slice(0, 30);
+  const modelConfigFound = existsSync(join(options.installationRoot ?? installationRoot, ".kiva", "agent", "models.json"));
   return {
     renderedAt: new Date().toISOString(),
     project: {
       name: basename(repoRoot),
       path: repoRoot,
-      branch: git(repoRoot, ["branch", "--show-current"]) || "detached",
+      branch: git(repoRoot, ["branch", "--show-current"]).trim() || "detached",
       dirtyFiles: changes.length,
       files,
       changes,
     },
     runtime: { piVersion: "1.3.0", modelConfigFound, status: modelConfigFound ? "ready" : "needs-model" },
     sessions,
-    recentProjects: workspaceRegistry.recent(),
+    recentProjects: options.recentProjects ?? workspaceRegistry.recent(),
   };
 }
 

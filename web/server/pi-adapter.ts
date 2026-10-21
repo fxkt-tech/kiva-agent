@@ -1,14 +1,15 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient, type JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RuntimeAdapter } from "./runtime-hub";
 import type { RuntimeImage } from "../shared/runtime-types";
+import type { ExecutionDescriptor } from "../shared/workspace-contract";
 
-export function createPiAdapter(repoRoot: string, installationRoot = repoRoot): RuntimeAdapter {
+export function createPiAdapter(descriptor: ExecutionDescriptor): RuntimeAdapter {
+  const { installationRoot, historyRoot: sessionDir, executionRoot, sessionId, sessionFile, workspaceNotice } = descriptor;
   const agentDir = join(installationRoot, ".kiva", "agent");
-  const sessionDir = join(repoRoot, ".kiva", "sessions");
-  const npmCacheDir = join(repoRoot, ".kiva", "cache", "npm");
+  const npmCacheDir = join(dirname(sessionDir), "cache", "npm");
   for (const path of [agentDir, sessionDir, npmCacheDir]) mkdirSync(path, { recursive: true });
 
   const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -19,8 +20,10 @@ export function createPiAdapter(repoRoot: string, installationRoot = repoRoot): 
   );
   const client = new RpcClient({
     cliPath,
-    cwd: repoRoot,
-    args: existsSync(kivaExtension) ? ["--extension", kivaExtension] : [],
+    cwd: executionRoot,
+    args: ["--session-dir", sessionDir, ...(sessionFile ? ["--session", sessionFile] : ["--session-id", sessionId]),
+      ...(existsSync(kivaExtension) ? ["--extension", kivaExtension] : []),
+      ...(workspaceNotice ? ["--append-system-prompt", workspaceNotice] : [])],
     env: {
       ...env,
       PI_CODING_AGENT_DIR: agentDir,
@@ -30,7 +33,13 @@ export function createPiAdapter(repoRoot: string, installationRoot = repoRoot): 
   });
 
   return {
-    start: () => client.start(),
+    start: async () => {
+      if (sessionFile) verifyTranscript(sessionFile);
+      await client.start();
+      const state = await client.getState();
+      if (state.sessionId !== sessionId) { await client.stop(); throw new Error(`Pi session identity mismatch: expected ${sessionId}, received ${state.sessionId}`); }
+      if (state.sessionFile && existsSync(state.sessionFile)) verifyTranscript(state.sessionFile);
+    },
     stop: () => client.stop(),
     onEvent: (listener) => client.onEvent((event: JsonAgentSessionEvent) => listener(event)),
     getState: () => client.getState(),
@@ -52,6 +61,12 @@ export function createPiAdapter(repoRoot: string, installationRoot = repoRoot): 
     clearQueue: () => client.clearQueue().then((queue) => ({ steering: [...queue.steering], followUp: [...queue.followUp] })),
     compact: () => client.compact(),
   };
+
+  function verifyTranscript(path: string) {
+    const header = JSON.parse(readFileSync(path, "utf8").split("\n", 1)[0]) as { type?: string; id?: string; cwd?: string };
+    if (header.type !== "session" || header.id !== sessionId || typeof header.cwd !== "string" || realpathSync(header.cwd) !== realpathSync(executionRoot)
+      || (sessionFile && resolve(path) !== resolve(sessionFile))) throw new Error("Pi transcript identity or execution directory does not match the owned workspace");
+  }
 }
 
 function piImages(images?: RuntimeImage[]) {

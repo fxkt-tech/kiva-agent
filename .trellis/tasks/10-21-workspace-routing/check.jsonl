@@ -4,3 +4,4 @@
 {"file": ".trellis/tasks/10-21-workspace-routing/worktree-deletion.md", "reason": "Verify optional worktree removal cannot target another resource, discard unapproved files or misrepresent history/workspace recovery."}
 {"file": ".trellis/tasks/10-21-workspace-routing/design.md", "reason": "Check actual URL/state/transport/execution ownership and non-destructive compatibility against the final design."}
 {"file": ".trellis/tasks/10-21-workspace-routing/implement.md", "reason": "Require all acceptance and real browser/worktree identity gates, not only build/typecheck success."}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Verify scoped resource identity and safe execution/lifecycle contracts across all layers"}

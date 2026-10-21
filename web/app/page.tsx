@@ -1,8 +1,7 @@
-import { KivaWorkbenchClient } from "@/components/kiva-workbench-client";
-import { getBootstrapData } from "@/server/bootstrap";
+import { RestoreRoute } from "@/features/workspace/restore-route";
 
 export const dynamic = "force-dynamic";
 
 export default function Home() {
-  return <KivaWorkbenchClient data={getBootstrapData()} />;
+  return <RestoreRoute />;
 }

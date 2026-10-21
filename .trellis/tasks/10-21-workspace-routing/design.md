@@ -1,6 +1,6 @@
 # Workspace routing and isolated execution design
 
-Status: ready for final planning review. Implements PRD R01–R15 / AC01–AC11 after subsequent user approval only. No task activation or business-code changes are authorized by this document.
+Status: implemented and verified on 2026-10-21 following the user's explicit start request. Implements PRD R01–R15 / AC01–AC11; see verification.md. The user subsequently confirmed the work commit; no push is authorized.
 
 ## 1. Architecture and ownership
 

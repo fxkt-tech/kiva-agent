@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { BootstrapData } from "@/shared/types";
+import type { ReactNode } from "react";
 
 const ClientWorkbench = dynamic(
   () => import("@/components/kiva-workbench").then((module) => module.KivaWorkbench),
@@ -11,6 +11,6 @@ const ClientWorkbench = dynamic(
   },
 );
 
-export function KivaWorkbenchClient({ data }: { data: BootstrapData }) {
-  return <ClientWorkbench data={data} />;
+export function KivaWorkbenchClient({ children }: { children: ReactNode }) {
+  return <ClientWorkbench>{children}</ClientWorkbench>;
 }

@@ -6,7 +6,7 @@ Give every project, session and workspace section a reliable URL and independent
 
 ## Authorization and planning status
 
-Task creation, planning, and committing/pushing these planning artifacts are authorized. All product decisions below have converged; this document is ready for final review, not implementation approval. The latest decision selects dirty-worktree protection A: block worktree removal until local changes are handled or cleanup is unchecked. No business code, session runtime, managed worktree or session branch has been changed by this planning task. Task activation and business-code implementation still require subsequent explicit approval; the request to commit/push planning documents does not provide that approval.
+Implementation approved on 2026-10-21 by the explicit request `.trellis/tasks/10-21-workspace-routing，开始实现`. The selected behavior and acceptance criteria remain authoritative. Implementation and verification have now passed; see verification.md. Worktree/branch/history mutation during verification was confined to newly created temporary fixtures, with no paid prompts or user-server restarts. The user subsequently confirmed the work commit with `可以`; commit and bookkeeping are authorized, with no push.
 
 ## Confirmed background
 
@@ -69,4 +69,4 @@ Task creation, planning, and committing/pushing these planning artifacts are aut
 
 ## Artifact and review status
 
-Product decisions have converged; there are no blocking product questions. design.md owns architecture/contracts/migration, implement.md owns ordered slices/validation, and research.md plus worktree-deletion.md preserve evidence and lifecycle detail. The coordinated task remains in planning because its route/runtime/workspace changes form one safe cutover, not independent releases. Final-summary review and a subsequent explicit approval are still required before task.py start or business-code edits.
+Product decisions have converged; there are no blocking product questions. design.md owns architecture/contracts/migration, implement.md owns ordered slices/validation, and research.md plus worktree-deletion.md preserve planning evidence and lifecycle detail. This task was activated after explicit implementation approval, and the coordinated route/runtime/workspace cutover has passed code and browser checks. verification.md records the acceptance evidence and approved commit scope.

@@ -2,8 +2,8 @@
   "id": "workspace-routing",
   "name": "workspace-routing",
   "title": "Project/session routing and workspace modularization",
-  "description": "Plan real project/session URLs and modular pages with concurrent per-session Pi owners, independent Git worktrees and safe optional delete-time cleanup while preserving the Web UI.",
-  "status": "planning",
+  "description": "Implement real project/session URLs and modular pages with concurrent per-session Pi owners, independent Git worktrees and safe optional delete-time cleanup while preserving the Web UI.",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "kiva-web",
@@ -12,7 +12,7 @@
   "assignee": "Justyer",
   "createdAt": "2026-10-21",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat/workspace-routing",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Product decisions converged. PRD, design and implementation plan are ready for final review. The user authorized committing/pushing planning documents only. Task remains planning; business-code implementation is not approved.",
+  "notes": "Implementation approved and completed on 2026-10-21 on feat/workspace-routing. Full Trellis review has no unresolved code findings. pnpm typecheck/test (5 CLI + 100 Web)/web:build, diff check, context validation and real browser/Pi/no-prompt gates passed; see verification.md. Only isolated temporary fixtures were mutated, and both test servers were stopped. User confirmed the 73-path work commit with '可以'; work commit and archive/journal bookkeeping authorized, no push. Separate Next development-generated next-env.d.ts change is preserved outside the approved commit.",
   "meta": {}
 }

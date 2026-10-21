@@ -36,10 +36,24 @@ describe("RuntimeEventStream", () => {
     assert.equal(stream.needsResync({ streamId: "stream-a", since: 0 }), true);
     assert.equal(stream.needsResync({ streamId: "stream-a", since: 1 }), false);
     assert.deepEqual(stream.resyncEvent(), {
+      protocol: 1,
+      projectId: "",
+      sessionId: "",
       streamId: "stream-a",
       seq: 3,
       event: { type: "runtime_reset" },
       resync: true,
     });
+  });
+
+  it("rotates only its own incarnation and rejects future/cross-incarnation cursors", () => {
+    const stream = new RuntimeEventStream(2, "old", { projectId: "project-a", sessionId: "session-a" });
+    stream.publish({ type: "runtime_reset" });
+    assert.equal(stream.needsResync({ streamId: "old", since: 10 }), true);
+    stream.rotate();
+    const next = stream.publish({ type: "error", message: "scoped recovery" });
+    assert.notEqual(next.streamId, "old"); assert.equal(next.seq, 1);
+    assert.equal(next.projectId, "project-a"); assert.equal(next.sessionId, "session-a");
+    assert.equal(stream.needsResync({ streamId: "old", since: 1 }), true);
   });
 });

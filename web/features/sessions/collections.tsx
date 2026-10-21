@@ -1,0 +1,124 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Archive, MoreHorizontal, Pencil, RotateCcw, Trash2, X } from "lucide-react";
+import type { SessionResource, DeletionPreview, DeletionOutcome, SessionCollection } from "@/shared/workspace-contract";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { mutate, resourceApi, sessionUrl, useResource, projectUrl } from "@/features/workspace/resources";
+import { ResourceState, useWorkspace } from "@/features/workspace/shell";
+
+function relativeTime(value: string, renderedAt: string) {
+  const minutes = Math.max(0, Math.round((Date.parse(renderedAt) - Date.parse(value)) / 60_000));
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟`;
+  if (minutes < 1_440) return `${Math.floor(minutes / 60)} 小时`;
+  return `${Math.floor(minutes / 1_440)} 天`;
+}
+
+export interface Collections { active: SessionResource[]; archived: SessionResource[]; trash: SessionResource[] }
+export function useCollections(projectId: string, version = 0) { return useResource<Collections>(`/api${projectUrl(projectId)}/sessions`, version); }
+
+export function SessionRows({ projectId, sessions, loading, error }: { projectId: string; sessions: SessionResource[]; loading?: boolean; error?: string }) {
+  const { route, navigate, refresh, bootstrap } = useWorkspace();
+  const [menu, setMenu] = useState<string>();
+  const [deleting, setDeleting] = useState<SessionResource>();
+  const [actionError, setActionError] = useState<string>();
+  useEffect(() => { setMenu(undefined); setDeleting(undefined); setActionError(undefined); }, [route.projectId, route.sessionId, route.section]);
+  useEffect(() => {
+    const close = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setMenu(undefined); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
+  async function act(session: SessionResource, body: object) {
+    setActionError(undefined);
+    try { await mutate(`${resourceApi({ projectId, sessionId: session.id })}/actions`, body); setMenu(undefined); refresh(); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+  if (error) return <p className="resource-error">{error}</p>;
+  return <div className="session-rows">
+    {sessions.map((session) => {
+      const recovering = session.deletion && session.deletion.status !== "complete";
+      return <div className="session-item-wrap" key={session.id}>
+        <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, bootstrap?.renderedAt ?? session.updatedAt)}</span></a>
+        <button className="session-more" aria-label={`会话操作 ${session.name}`} onClick={() => setMenu((value) => value === session.id ? undefined : session.id)}><MoreHorizontal size={14} /></button>
+        {menu === session.id && <div className="session-menu">
+          {recovering ? <button className="danger" onClick={() => { setDeleting(session); setMenu(undefined); }}><RotateCcw size={12} />重试删除</button> : <>
+            {session.collection === "active" ? <><button onClick={() => { const name = window.prompt("新的会话名称", session.name)?.trim(); if (name) void act(session, { type: "rename", name }); }}><Pencil size={12} />重命名</button><button onClick={() => void act(session, { type: "archive" })}><Archive size={12} />归档</button></> : <button onClick={() => void act(session, { type: session.collection === "trash" ? "restore_deleted" : "restore" })}><RotateCcw size={12} />{session.collection === "trash" ? "恢复删除" : "恢复"}</button>}
+            {session.collection !== "trash" && <button className="danger" onClick={() => { setDeleting(session); setMenu(undefined); }}><Trash2 size={12} />删除</button>}
+          </>}
+        </div>}
+      </div>;
+    })}
+    {!sessions.length && <p className="sidebar-summary">{loading ? "正在读取会话…" : "还没有会话。"}</p>}{actionError && <p className="resource-error" role="alert">{actionError}</p>}
+    {deleting && <DeleteSessionDialog key={deleting.id} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting(undefined); refresh(); }} />}
+  </div>;
+}
+
+export function SessionCollectionFeature({ projectId, collection }: { projectId: string; collection: SessionCollection }) {
+  const { version, project, projectLoading, projectError } = useWorkspace();
+  const result = useCollections(projectId, version);
+  if (projectError || result.error) return <ResourceState error={projectError ?? result.error} />;
+  if (projectLoading || !result.data) return <ResourceState />;
+  return <div className="collection-page"><div className="workspace-browser-heading"><p>{collection === "archived" ? "已归档" : collection === "trash" ? "最近删除" : "会话"}</p><span>{project?.name}</span></div><SessionRows projectId={projectId} sessions={result.data[collection]} /><p className="workspace-location">恢复历史不会重建已删除的工作文件。保留的分支与工作区状态以会话详情为准。</p></div>;
+}
+
+export function DeleteSessionDialog({ session, onClose, onDeleted }: { session: SessionResource; onClose(): void; onDeleted(): void }) {
+  const [preview, setPreview] = useState<DeletionPreview & { deletion?: DeletionOutcome }>();
+  const [outcome, setOutcome] = useState<DeletionOutcome>();
+  const [removeWorktree, setRemoveWorktree] = useState(true);
+  const [error, setError] = useState<string>();
+  const [pending, setPending] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const mounted = useRef(true);
+  const endpoint = resourceApi({ projectId: session.projectId, sessionId: session.id });
+  useEffect(() => {
+    mounted.current = true;
+    let disposed = false;
+    setPreview(undefined); setError(undefined);
+    void mutate<DeletionPreview>(`${endpoint}/deletion-preview`, {}).then((result) => {
+      if (disposed) return;
+      if (result.projectId !== session.projectId || result.sessionId !== session.id) throw new Error("删除预览标识不匹配");
+      setPreview(result);
+    }).catch((cause: unknown) => { if (!disposed) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { disposed = true; mounted.current = false; };
+  }, [endpoint, previewVersion]);
+  useEffect(() => {
+    const close = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape" && !pending) onClose(); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [pending, onClose]);
+  const owned = preview ? !["none", "removed"].includes(preview.workspace.state) : Boolean(session.workspace && session.workspace.state !== "removed");
+  const retry = preview?.deletion ?? outcome ?? (session.deletion?.status !== "complete" ? session.deletion : undefined);
+  const selectedRemoval = retry ? retry.removeWorktree : owned && removeWorktree;
+  const cleanupBlocked = selectedRemoval && owned && preview?.workspace.state !== "clean";
+  async function confirm() {
+    if (!preview || cleanupBlocked) return;
+    setPending(true); setError(undefined);
+    try {
+      const outcome = await mutate<DeletionOutcome>(`${endpoint}/actions`, { type: "delete", confirmation: preview.confirmation, removeWorktree: selectedRemoval });
+      if (outcome.status !== "complete") {
+        setOutcome(outcome);
+        setError(`删除尚未完成：历史 ${outcome.history}，工作区 ${outcome.workspace}。${outcome.error ?? "请重新检查状态后重试。"}`);
+        setPreview(undefined);
+        return;
+      }
+      onDeleted();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (mounted.current) setPending(false); }
+  }
+  return <div className="dialog-backdrop" role="presentation">
+    <section className="project-dialog delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-session-title">
+      <div className="project-dialog-heading"><h2 id="delete-session-title">删除“{session.name}”</h2><button aria-label="取消删除" disabled={pending} onClick={onClose}><X size={16} /></button></div>
+      <p>会话历史将移入可恢复的回收站。正在运行或等待输入的任务必须先结束。</p>
+      <dl className="deletion-details"><dt>会话</dt><dd>{session.id}</dd><dt>工作区</dt><dd>{preview?.workspace.treeRoot ?? session.workspace?.treeRoot ?? "旧会话：原项目目录不会被删除"}</dd><dt>分支</dt><dd>{preview?.workspace.branch ?? session.workspace?.branch ?? "—"}</dd><dt>状态</dt><dd>{preview ? preview.workspace.state === "dirty" ? "含本地改动" : preview.workspace.state === "clean" ? "空闲 · 工作区干净" : preview.workspace.message ?? preview.workspace.state : error ? "无法确认，删除已阻止" : "正在检查任务和工作区状态…"}</dd></dl>
+      {owned && <label className="delete-worktree-option"><input type="checkbox" checked={selectedRemoval} disabled={pending || Boolean(retry)} onChange={(event) => setRemoveWorktree(event.target.checked)} />同时删除对应的工作区</label>}
+      {retry && <p className="workspace-location">正在恢复删除操作 {retry.operationId}：历史 {retry.history}，工作区 {retry.workspace}。沿用原选择：{retry.removeWorktree ? "同时清理工作区" : "保留工作区"}。{retry.error}</p>}
+      {preview && preview.workspace.localChanges.length > 0 && <pre className="deletion-changes">{preview.workspace.localChanges.join("\n")}</pre>}
+      {preview && cleanupBlocked && <p className="resource-error">工作区包含本地内容或状态不可确认。处理后重试，或取消勾选以保留文件。</p>}
+      <p className="workspace-location">{preview?.recovery ?? "历史恢复不会重建已删除的工作文件；分支引用会保留。"}</p>
+      {error && <p className="resource-error" role="alert">{error}</p>}
+      <div className="project-dialog-actions"><Button variant="ghost" disabled={pending} onClick={onClose}>取消</Button>{error && <Button variant="ghost" disabled={pending} onClick={() => setPreviewVersion((value) => value + 1)}>重新检查</Button>}<Button disabled={!preview || cleanupBlocked || pending} onClick={() => void confirm()}>{pending ? "正在删除…" : "删除会话"}</Button></div>
+    </section>
+  </div>;
+}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, it } from "node:test";
@@ -59,5 +59,19 @@ describe("SessionCatalog", () => {
   it("rejects paths outside its managed roots", () => {
     const { catalog } = fixture();
     assert.throws(() => catalog.archive("../../outside.jsonl"), /invalid session path/i);
+  });
+
+  it("rejects symlink targets and ancestors for transcript mutations", () => {
+    const { root, catalog } = fixture();
+    const canonical = realpathSync(root);
+    const outside = join(canonical, "outside"); mkdirSync(outside);
+    writeFileSync(join(outside, "external.jsonl"), "external data");
+    const sessions = join(canonical, ".kiva", "sessions");
+    symlinkSync(outside, join(sessions, "escaped"));
+    symlinkSync(join(outside, "external.jsonl"), join(sessions, "alias.jsonl"));
+    assert.throws(() => catalog.archive("escaped/external.jsonl"), /symlink/);
+    assert.throws(() => catalog.archive("alias.jsonl"), /symlink/);
+    assert.equal(readFileSync(join(outside, "external.jsonl"), "utf8"), "external data");
+    assert.equal(catalog.list("active").length, 1);
   });
 });

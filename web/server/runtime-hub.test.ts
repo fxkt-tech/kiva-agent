@@ -176,6 +176,96 @@ describe("RuntimeHub", () => {
     ]);
   });
 
+  it("reconciles a snapshot ahead of delayed message validation without duplicate history or replayed user starts", async () => {
+    const fake = createAdapter();
+    const committed: unknown[] = [];
+    let streaming = false, blockNextState = false, releaseValidation!: () => void;
+    const validationGate = new Promise<void>((resolve) => { releaseValidation = resolve; });
+    const originalState = fake.adapter.getState;
+    fake.adapter.getState = async () => {
+      if (blockNextState) { blockNextState = false; await validationGate; }
+      return { ...await originalState(), isStreaming: streaming, messageCount: committed.length };
+    };
+    fake.adapter.getMessages = async () => [...committed];
+    fake.adapter.prompt = async (text) => {
+      const user = { role: "user", content: text, timestamp: 123 };
+      committed.push(user); streaming = true; blockNextState = true;
+      fake.emit({ type: "agent_start" });
+      fake.emit({ type: "message_start", message: user });
+      fake.emit({ type: "message_end", message: user });
+      fake.emit({ type: "message_start", message: { role: "assistant", content: [], timestamp: 456 } });
+      return "started";
+    };
+    const hub = new RuntimeHub(() => fake.adapter, 60_000, { projectId: "project", sessionId: "session-1" });
+    const events: import("../shared/runtime-types").RuntimeEvent[] = [];
+    hub.subscribe((event) => events.push(event));
+    try {
+      await hub.execute({ type: "initialize" });
+      await hub.execute({ type: "prompt", message: "one transcript row" });
+      assert.equal(hub.passiveSnapshot()?.messages.filter((message) => message.role === "user").length, 1);
+      releaseValidation();
+      await waitFor(() => hub.passiveSnapshot()?.messages.length === 2);
+      const snapshot = hub.passiveSnapshot()!;
+      assert.equal(snapshot.messages.filter((message) => message.role === "user").length, 1);
+      assert.equal(snapshot.messages[0].timestamp, 123);
+      assert.equal(events.filter((event) => event.type === "pi_event" && (event.event as { type: string; message?: { role: string } }).type === "message_start" && (event.event as { message?: { role: string } }).message?.role === "user").length, 0);
+
+      // A snapshot during streaming must keep the partial assistant and tool
+      // progress, including after unrelated queue events and reconnect reads.
+      fake.emit({ type: "tool_execution_start", toolCallId: "tool-race", toolName: "read", args: { path: "file.txt" } });
+      fake.emit({ type: "tool_execution_update", toolCallId: "tool-race", partialResult: { content: [{ type: "text", text: "partial output" }] } });
+      fake.emit({ type: "queue_update", steering: [], followUp: [] });
+      await waitFor(() => hub.passiveSnapshot()?.messages[1]?.tools[0]?.result === "partial output");
+      const reconnect = await hub.snapshot();
+      assert.equal(reconnect.messages.length, 2);
+      assert.equal(reconnect.messages[1].tools[0].result, "partial output");
+      assert.equal(reconnect.messages[1].tools[0].status, "running");
+    } finally { releaseValidation(); await hub.stop(); }
+  });
+
+  it("keeps distinct identical user messages at the same timestamp as separate event ordinals", async () => {
+    const fake = createAdapter();
+    const committed: unknown[] = [];
+    fake.adapter.getMessages = async () => [...committed];
+    fake.adapter.prompt = async (text) => {
+      const user = { role: "user", content: text, timestamp: 123 };
+      committed.push(user);
+      fake.emit({ type: "message_start", message: user }); fake.emit({ type: "message_end", message: user });
+      return "handled";
+    };
+    const hub = new RuntimeHub(() => fake.adapter, 60_000, { projectId: "project", sessionId: "session-1" });
+    try {
+      await hub.execute({ type: "prompt", message: "same" });
+      await new Promise((resolve) => setImmediate(resolve));
+      await hub.execute({ type: "prompt", message: "same" });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(hub.passiveSnapshot()?.messages.length, 2);
+      assert.deepEqual(hub.passiveSnapshot()?.messages.map((message) => message.text), ["same", "same"]);
+    } finally { await hub.stop(); }
+  });
+
+  it("drops transient tool ownership when a settled history replaces the live baseline", async () => {
+    const fake = createAdapter();
+    let streaming = true;
+    let history: unknown[] = [];
+    const originalState = fake.adapter.getState;
+    fake.adapter.getState = async () => ({ ...await originalState(), isStreaming: streaming, messageCount: history.length });
+    fake.adapter.getMessages = async () => [...history];
+    const hub = new RuntimeHub(() => fake.adapter);
+    try {
+      await hub.snapshot();
+      fake.emit({ type: "message_start", message: { role: "assistant", content: [], timestamp: 123 } });
+      fake.emit({ type: "tool_execution_start", toolCallId: "previous-tool", toolName: "read" });
+      fake.emit({ type: "tool_execution_end", toolCallId: "previous-tool", result: { content: [{ type: "text", text: "old output" }] } });
+      await waitFor(() => hub.passiveSnapshot()?.messages[0]?.tools[0]?.status === "done");
+      history = [{ role: "assistant", content: [{ type: "text", text: "Compacted history" }], timestamp: 456 }];
+      streaming = false;
+      const snapshot = await hub.snapshot();
+      assert.equal(snapshot.messages[0].text, "Compacted history");
+      assert.deepEqual(snapshot.messages[0].tools, [], "old tool ordinals must not attach to the new history baseline");
+    } finally { await hub.stop(); }
+  });
+
   it("controls models, thinking, compaction, and running message queues", async () => {
     const fake = createAdapter();
     const hub = new RuntimeHub(() => fake.adapter);

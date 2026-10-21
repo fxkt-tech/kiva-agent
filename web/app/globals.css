@@ -151,6 +151,41 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px
 
 .conversation { position: relative; display: grid; min-width: 0; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
 .conversation.is-empty { grid-template-rows: minmax(130px, 1fr) auto minmax(70px, 1fr); }
+.session-feature { display: grid; min-width: 0; min-height: 0; grid-row: 1 / -1; grid-template-rows: minmax(0, 1fr) auto; }
+.session-feature.is-empty { grid-template-rows: minmax(130px, 1fr) auto minmax(70px, 1fr); }
+.session-feature.read-only-session { grid-template-rows: minmax(0, 1fr); }
+.project-groups { min-height: 0; flex: 1; overflow: auto; }
+.project-group { margin-bottom: 10px; }
+.session-rows { min-width: 0; padding: 0 8px 8px; }
+a.nav-item, a.session-item, a.project-directory-row, a.brand-home { text-decoration: none; }
+a.brand-home { color: inherit; }
+.resource-state { display: grid; grid-row: 1 / -1; min-width: 0; align-content: center; justify-items: center; gap: 12px; padding: 72px 24px 24px; color: var(--muted-foreground); text-align: center; overflow-wrap: anywhere; }
+.resource-error { color: var(--danger); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.project-groups > .resource-error, .session-rows > .resource-error { margin: 12px; }
+.workspace-feedback { position: absolute; z-index: 25; top: 56px; right: 24px; left: 24px; padding: 12px 16px; border: 1px solid var(--strong-border); border-radius: 8px; background: var(--card); color: var(--danger); box-shadow: var(--shadow); }
+.session-workspace-notice { display: grid; gap: 5px; margin-bottom: 24px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; color: var(--muted-foreground); font-size: 11px; line-height: 1.7; }
+.session-workspace-notice p { margin: 0; }
+.session-workspace-notice code, .workspace-location, .workspace-preview-placeholder > code { font-family: var(--font-code); overflow-wrap: anywhere; }
+.session-workspace-notice .button { justify-self: start; }
+.runtime-initialize { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 11px; }
+.workspace-location { margin: 16px 24px; color: var(--muted-foreground); font-size: 11px; line-height: 1.8; }
+.projects-page, .collection-page { min-width: 0; min-height: 0; grid-row: 1 / -1; overflow: auto; padding-top: 56px; }
+.projects-page { padding: 92px 32px 32px; }
+.projects-page h2 { margin: 0; font-size: 24px; font-weight: 550; }
+.projects-page > p { color: var(--muted-foreground); }
+.project-directory-list { display: grid; max-width: 680px; gap: 8px; margin: 24px 0; }
+.project-directory-row { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 9px; color: var(--foreground); }
+.project-directory-row:hover { background: var(--hover); }
+.project-directory-row > div { display: grid; min-width: 0; gap: 6px; }
+.project-directory-row code { color: var(--muted-foreground); font-family: var(--font-code); font-size: 11px; overflow-wrap: anywhere; }
+.collection-page > .session-rows { max-width: 768px; margin: 20px auto; }
+.deletion-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; margin: 20px 0; font-size: 12px; line-height: 1.7; }
+.deletion-details dt { color: var(--muted-foreground); }
+.deletion-details dd { margin: 0; font-family: var(--font-code); overflow-wrap: anywhere; }
+.delete-worktree-option { display: flex; align-items: center; gap: 8px; margin: 18px 0; font-size: 12px; }
+.delete-worktree-option input { accent-color: var(--primary); }
+.deletion-changes { max-height: 140px; overflow: auto; padding: 12px; border-radius: 7px; background: var(--subtle); font-family: var(--font-code); font-size: 11px; }
+.delete-dialog .workspace-location { margin: 16px 0; }
 /* Only the floating controls intercept input; content scrolls and clicks beneath the header. */
 .conversation-header { position: absolute; z-index: 20; inset: 0 0 auto; display: flex; height: 56px; min-width: 0; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 24px; background: transparent; pointer-events: none; }
 .conversation-header > button { pointer-events: auto; }
