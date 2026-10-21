@@ -1,23 +1,36 @@
 import { join } from "node:path";
-import { ModelRuntime, readStoredCredential, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
+import type { Credential } from "@earendil-works/pi-ai";
 import type { ModelCatalog, ModelConfiguration } from "../shared/model-configuration";
 import { WorkspaceError } from "../shared/workspace-contract";
+import { noWriteModelsStore } from "./provider-configuration";
+import { isRecord, ownValue, readSettingsFile } from "./settings-files";
 
 /** Installation-owned options, independent of a Pi process or session identity. */
 async function loadModels(installationRoot: string) {
   const agentDir = join(installationRoot, ".kiva", "agent");
+  const [, authentication] = await Promise.all([readSettingsFile(installationRoot, "models.json"), readSettingsFile(installationRoot, "auth.json")]).catch(() => { throw new WorkspaceError("models_unavailable", "无法读取模型配置，请检查 models.json 和认证配置。", 409); });
   const readOnly = async (): Promise<never> => { throw new Error("Model discovery cannot modify credentials or model caches"); };
   const runtime = await ModelRuntime.create({
     modelsPath: join(agentDir, "models.json"),
     allowModelNetwork: false,
     credentials: {
-      read: async (provider) => readStoredCredential(provider, join(agentDir, "auth.json")),
+      // Pi's read-only auth checks retain existing ambient/provider support.
+      // Give them presence-only keys, never resolve stored command/templates.
+      read: async (provider): Promise<Credential | undefined> => {
+        const raw = ownValue(authentication.value, provider);
+        if (!isRecord(raw)) return;
+        if (raw.type === "oauth") return { type: "oauth", access: "configured", refresh: "configured", expires: Number.MAX_SAFE_INTEGER };
+        if (raw.type !== "api_key") return;
+        const env = isRecord(raw.env) && Object.values(raw.env).every((value) => typeof value === "string") ? raw.env as Record<string, string> : undefined;
+        return { type: "api_key", ...(typeof raw.key === "string" && raw.key ? { key: "configured" } : {}), ...(env ? { env } : {}) };
+      },
       list: async () => [],
       modify: readOnly,
       delete: readOnly,
     },
-    modelsStore: { read: async () => undefined, write: readOnly, delete: readOnly },
+    modelsStore: noWriteModelsStore,
   });
   if (runtime.getError()) throw new Error("无法读取模型配置，请检查安装目录中的 .kiva/agent/models.json 和认证配置。");
   return runtime.getAvailableSnapshot();

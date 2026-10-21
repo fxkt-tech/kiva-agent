@@ -11,7 +11,7 @@ export interface RuntimeRepository {
   rename(projectId: string, sessionId: string, name: string): unknown;
   updateControls(projectId: string, sessionId: string, controls: SessionControls): unknown;
 }
-interface Owner { hub: RuntimeHub; descriptor: ExecutionDescriptor; lastUsed: number; unsubscribe: () => void }
+interface Owner { hub: RuntimeHub; descriptor: ExecutionDescriptor; lastUsed: number; unsubscribe: () => void; generation: number; transitioningProviders: Map<string, number>; controlPending: number }
 
 /** The custom HTTP server constructs the only manager. Reads and subscriptions never acquire owners. */
 export class RuntimeManager {
@@ -21,6 +21,8 @@ export class RuntimeManager {
   private revisions = new Map<string, number>();
   private transcripts = new Map<string, string>();
   private allocation: Promise<void> = Promise.resolve();
+  private admission: Promise<void> = Promise.resolve();
+  private configurationGeneration = 0;
   private stopping = false;
 
   constructor(private readonly repository: RuntimeRepository,
@@ -48,7 +50,10 @@ export class RuntimeManager {
 
   async command(scope: RuntimeScope, command: RuntimeCommand) {
     if (command.type === "new_session" || command.type === "switch_session") throw new WorkspaceError("identity_change_forbidden", "Create or continue a resource instead of switching a runtime", 400, scope);
-    const { pending } = await this.lock(scope, async () => {
+    const initialOwner = this.owners.get(key(scope));
+    const queueAction = command.type === "steer" || command.type === "follow_up";
+    const bypass = !!initialOwner && (["abort", "clear_queue", "extension_ui_response", "rename_session"].includes(command.type) || queueAction && !initialOwner.hub.isIdle());
+    const accept = () => this.lock(scope, async () => {
       if (this.stopping) throw new WorkspaceError("stopping", "Server is shutting down", 503, scope);
       const read = await this.repository.read(scope.projectId, scope.sessionId);
       if (command.type === "rename_session") {
@@ -59,7 +64,24 @@ export class RuntimeManager {
         // Legacy and dormant metadata changes must not start a process.
         return { pending: (owner && owner.hub.lifecycle() !== "quarantined" ? owner.hub.execute(command) : Promise.resolve({ accepted: true as const })).then(async (result) => { await this.notifyResource(scope); return result; }) };
       }
-      const owner = await this.acquire(scope, read);
+      let owner = this.owners.get(key(scope));
+      if (bypass && !owner) throw new WorkspaceError("session_changed", "会话运行状态已变化，请重试。", 409, scope);
+      // A queue action chosen while running may wait on scope acceptance until
+      // the owner settles. It must not create new idle work outside admission.
+      if (bypass && queueAction && owner?.hub.isIdle()) throw new WorkspaceError("session_changed", "会话已空闲，请重新发送消息。", 409, scope);
+      // A configuration save never stops running work. Refresh stale catalogs only
+      // at the next explicit safe owner action, preserving the existing stream.
+      if (!bypass && owner && owner.generation !== this.configurationGeneration && owner.hub.isIdle()) {
+        if (owner.controlPending) throw new WorkspaceError("session_busy", "模型设置正在保存，请稍后重试。", 409, scope);
+        await this.release(scope, owner);
+        owner = undefined;
+      }
+      owner ??= await this.acquire(scope, read);
+      const acceptedOwner = owner;
+      const transition = command.type === "set_model" || command.type === "set_configuration" ? command.provider : undefined;
+      const controls = command.type === "set_model" || command.type === "set_thinking" || command.type === "set_configuration";
+      if (controls) owner.controlPending++;
+      if (transition) owner.transitioningProviders.set(transition, (owner.transitioningProviders.get(transition) ?? 0) + 1);
       owner.lastUsed = Date.now();
       this.bump(scope);
       const pending = owner.hub.execute(command).then(async (result) => {
@@ -75,20 +97,40 @@ export class RuntimeManager {
           if (this.owners.get(key(scope)) === owner && owner.hub.lifecycle() === "dormant") await this.release(scope, owner);
         });
         throw error;
+      }).finally(() => {
+        if (controls) acceptedOwner.controlPending--;
+        if (transition) { const count = (acceptedOwner.transitioningProviders.get(transition) ?? 1) - 1; if (count) acceptedOwner.transitioningProviders.set(transition, count); else acceptedOwner.transitioningProviders.delete(transition); }
       });
       return { pending };
     });
+    // Abort/queue/UI responses for an existing owner cannot wait behind a
+    // credential-file lock. These actions do not acquire or refresh a catalog.
+    const { pending } = await (bypass ? accept() : this.admit(accept));
     // The lifecycle lock protects acceptance, never a model run or a long RPC.
     return pending;
   }
 
   revision(scope: RuntimeScope) { return String(this.revisions.get(key(scope)) ?? 0); }
 
+  async withProviderMutation<T>(providerId: string, operation: () => Promise<T>): Promise<T> {
+    return this.admit(async () => {
+      if (this.stopping) throw new WorkspaceError("stopping", "Server is shutting down", 503);
+      for (const owner of this.owners.values()) {
+        const current = owner.hub.passiveSnapshot()?.model?.provider;
+        const affected = current === undefined || current === providerId || owner.transitioningProviders.has(providerId);
+        if (affected && (!owner.hub.isIdle() || owner.controlPending)) throw new WorkspaceError("provider_busy", "此提供方仍有运行、等待或排队中的任务，请结束后重试。", 409);
+      }
+      const result = await operation();
+      this.configurationGeneration += 1;
+      return result;
+    });
+  }
+
   async withIdle<T>(scope: RuntimeScope, operation: (lifecycleRevision: string) => T | Promise<T>): Promise<T> {
     return this.lock(scope, async () => {
       await this.repository.read(scope.projectId, scope.sessionId);
       const owner = this.owners.get(key(scope));
-      if (owner && !owner.hub.isIdle()) throw new WorkspaceError("session_busy", "Finish or stop the running task, queued work and extension requests before changing its lifecycle", 409, scope, { lifecycle: owner.hub.lifecycle() });
+      if (owner && (!owner.hub.isIdle() || owner.controlPending)) throw new WorkspaceError("session_busy", "Finish or stop the running task, queued work and extension requests before changing its lifecycle", 409, scope, { lifecycle: owner.hub.lifecycle() });
       if (owner) await this.release(scope, owner);
       const result = await operation(this.revision(scope));
       this.bump(scope);
@@ -100,7 +142,7 @@ export class RuntimeManager {
   async preview<T>(scope: RuntimeScope, operation: (lifecycleRevision: string) => T | Promise<T>) {
     return this.lock(scope, async () => {
       const owner = this.owners.get(key(scope));
-      if (owner && !owner.hub.isIdle()) throw new WorkspaceError("session_busy", "Finish or stop the task before deleting this session", 409, scope, { lifecycle: owner.hub.lifecycle() });
+      if (owner && (!owner.hub.isIdle() || owner.controlPending)) throw new WorkspaceError("session_busy", "Finish or stop the task before deleting this session", 409, scope, { lifecycle: owner.hub.lifecycle() });
       return operation(this.revision(scope));
     });
   }
@@ -138,7 +180,7 @@ export class RuntimeManager {
       const already = this.owners.get(key(scope));
       if (already) return already;
       if (this.owners.size >= this.capacity) {
-        const idle = [...this.owners.entries()].filter(([, owner]) => owner.hub.isIdle()).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+        const idle = [...this.owners.entries()].filter(([, owner]) => owner.hub.isIdle() && !owner.controlPending).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
         if (!idle) throw new WorkspaceError("runtime_capacity", "All execution slots are busy; finish another task and retry", 503, scope, { capacity: this.capacity });
         await this.release(idToScope(idle[0]), idle[1]);
       }
@@ -171,7 +213,7 @@ export class RuntimeManager {
         if (event.type === "runtime_reset") stream.rotate();
         stream.publish(event);
       });
-      const owner = { hub, descriptor, lastUsed: Date.now(), unsubscribe };
+      const owner = { hub, descriptor, lastUsed: Date.now(), unsubscribe, generation: this.configurationGeneration, transitioningProviders: new Map<string, number>(), controlPending: 0 };
       this.owners.set(key(scope), owner);
       this.transcripts.set(transcript, key(scope));
       return owner;
@@ -204,6 +246,13 @@ export class RuntimeManager {
     await previous;
     try { return await operation(); }
     finally { unlock(); if (this.locks.get(id) === current) this.locks.delete(id); }
+  }
+  private async admit<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.admission;
+    let unlock!: () => void;
+    this.admission = new Promise<void>((resolve) => { unlock = resolve; });
+    await previous;
+    try { return await operation(); } finally { unlock(); }
   }
 }
 function key(scope: RuntimeScope) { return `${scope.projectId}/${scope.sessionId}`; }

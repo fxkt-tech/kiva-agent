@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Toast } from "@/components/ui/toast";
 import { useRuntime } from "@/lib/use-runtime";
+import { useWebPreferences } from "@/lib/web-preferences";
+import { getSendShortcutHint, shortcutRegistry, shouldSendFromKeydown } from "@/lib/shortcuts";
 import type { RuntimeAttachment, RuntimeSnapshot } from "@/shared/runtime-types";
 import type { ModelConfiguration } from "@/shared/model-configuration";
 import type { SessionResource } from "@/shared/workspace-contract";
@@ -24,13 +26,14 @@ function resizeComposerInput(input: HTMLTextAreaElement) {
 
 export function Composer({ projectId, session, runtime, emptyConversation }: { projectId: string; session?: SessionResource; runtime: ReturnType<typeof useRuntime>; emptyConversation: boolean }) {
   const { drafts, createSession, project, refresh, modelCatalog, updateModelCatalog, modelsLoading, modelsError } = useWorkspace();
+  const { preferences } = useWebPreferences();
   const key = drafts.key(projectId, session?.id);
   const current = useSyncExternalStore(drafts.subscribe, () => drafts.read(key), () => drafts.read(key));
   const draft = current.text;
   const attachments = current.attachments;
   const setDraft = (text: string) => drafts.update(key, { text });
   const setAttachments = (change: RuntimeAttachment[] | ((items: RuntimeAttachment[]) => RuntimeAttachment[])) => drafts.update(key, (value) => ({ ...value, attachments: typeof change === "function" ? change(value.attachments) : change }));
-  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
+  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">(() => preferences.conversation.queueMode);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [contextOpen, setContextOpen] = useState(false);
@@ -73,11 +76,12 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   useEffect(() => {
     const close = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") { setContextOpen(false); setCommandOpen(false); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen(true); }
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
+  useEffect(() => shortcutRegistry.register("openCommands", { run: () => setCommandOpen(true), available: () => Boolean(runtime.snapshot?.commands.length) }), [runtime.snapshot?.commands.length]);
+  useEffect(() => shortcutRegistry.register("focusComposer", { run: () => textInput.current?.focus(), available: () => Boolean(textInput.current) }), []);
   useEffect(() => {
     if (!contextOpen) return;
     const outside = (event: globalThis.PointerEvent) => { if (event.target instanceof Node && !contextControl.current?.contains(event.target)) setContextOpen(false); };
@@ -119,9 +123,12 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   function changeDraft(value: string) { setDraft(value); const query = /^\/([^\s]*)$/.exec(value); if (query) { setCommandOpen(true); setCommandQuery(query[1]); } }
   function chooseCommand(name: string) { setDraft(`/${name} `); setCommandOpen(false); setCommandQuery(""); }
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (event.repeat) {
+      if (shouldSendFromKeydown({ ...event, repeat: false }, preferences.shortcuts.sendMode, composing.current)) event.preventDefault();
+      return;
+    }
+    if (!shouldSendFromKeydown(event, preferences.shortcuts.sendMode, composing.current)) return;
     event.preventDefault();
-    if (event.repeat) return;
     const form = event.currentTarget.form;
     const submitter = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
     if (form && submitter && !submitter.disabled) form.requestSubmit(submitter);
@@ -171,7 +178,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
               <div className="composer-send-actions">{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" className="composer-send" aria-label="发送消息" disabled={(!draft.trim() && !attachments.length) || pending || modelSaving || (!session && project?.capability.state !== "ready") || (Boolean(session) && !runtime.connected)}><ArrowUp size={17} /></Button></div>
             </div>
           </form>
-          <div className="composer-note">{session && <span className="composer-connection-status" data-state={runtime.connectionStatus} role="status" aria-label="当前会话后端连接" aria-live="polite" aria-atomic="true" title={`当前会话后端连接：${CONNECTION_LABELS[runtime.connectionStatus]}`}><span className="composer-connection-dot" aria-hidden="true" />{CONNECTION_LABELS[runtime.connectionStatus]}</span>}<span className="composer-project-context"><SquareTerminal size={11} />本地<span>·</span><GitBranch size={11} /><span>{session?.workspace?.branch ?? (project?.capability.state === "ready" ? project.capability.branch : "—")}</span></span><span className="composer-keyboard-hint">Enter 发送 · Shift+Enter 换行</span></div>
+          <div className="composer-note">{session && <span className="composer-connection-status" data-state={runtime.connectionStatus} role="status" aria-label="当前会话后端连接" aria-live="polite" aria-atomic="true" title={`当前会话后端连接：${CONNECTION_LABELS[runtime.connectionStatus]}`}><span className="composer-connection-dot" aria-hidden="true" />{CONNECTION_LABELS[runtime.connectionStatus]}</span>}<span className="composer-project-context"><SquareTerminal size={11} />本地<span>·</span><GitBranch size={11} /><span>{session?.workspace?.branch ?? (project?.capability.state === "ready" ? project.capability.branch : "—")}</span></span><span className="composer-keyboard-hint">{getSendShortcutHint(preferences.shortcuts.sendMode)}</span></div>
           {emptyConversation && <div className="suggestions"><button type="button" onClick={() => setDraft("解释当前代码结构")}><FileCode2 size={13} />了解代码库</button><button type="button" onClick={() => setDraft("检查最近的代码变更")}><GitBranch size={13} />检查代码变更</button><button type="button" onClick={() => setDraft("规划下一个功能")}><Wrench size={13} />规划一个功能</button></div>}
         </div>
 </>;

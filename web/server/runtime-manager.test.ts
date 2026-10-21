@@ -27,6 +27,127 @@ const a = { projectId: "project", sessionId: "session-a" }, b = { projectId: "pr
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("RuntimeManager scoped ownership", () => {
+  it("excludes provider commits from new command acceptance but delivers unrelated abort immediately", async () => {
+    const f = fixture(); let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+    await f.manager.command(a, { type: "initialize" });
+    const running = f.manager.command(a, { type: "prompt", message: "hold-rpc" });
+    try {
+      while (!f.adapters.has("project/session-a")) await turn();
+      await turn();
+      const owner = f.adapters.get("project/session-a")!;
+      const saving = f.manager.withProviderMutation("unrelated", async () => { entered(); await gate; });
+      await started;
+      let accepted = false;
+      const pending = f.manager.command(b, { type: "initialize" }).then(() => { accepted = true; });
+      await turn(); assert.equal(accepted, false);
+      await Promise.race([f.manager.command(a, { type: "abort" }), new Promise<never>((_, reject) => { setTimeout(() => reject(new Error("Abort blocked behind configuration write")), 1000).unref(); })]);
+      await running;
+      assert.equal(owner.stops(), 0, "provider commit must not stop unrelated busy owner");
+      release(); await saving; await pending;
+      const events: RuntimeWireEvent[] = [], unsubscribe = await f.manager.subscribe(a, (event) => events.push(event));
+      const stream = events.at(-1)?.streamId;
+      await f.manager.read(a); assert.equal(owner.stops(), 0, "passive reads do not refresh");
+      await f.manager.command(a, { type: "initialize" });
+      assert.equal(owner.stops(), 1); assert.notEqual(f.adapters.get("project/session-a"), owner);
+      assert.ok(events.every((event) => event.streamId === stream)); unsubscribe();
+    } finally { release(); await running.catch(() => {}); await f.manager.stop(); }
+  });
+
+  it("blocks affected work, pending provider transitions, queues, retries, compaction and extension input", async () => {
+    for (const event of [
+      { type: "queue_update", steering: ["queued"], followUp: [] },
+      { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10 },
+      { type: "auto_compaction_start", reason: "threshold" },
+      { type: "extension_ui_request", id: "waiting", method: "confirm", title: "Waiting" },
+    ]) {
+      const f = fixture();
+      try {
+        await f.manager.command(a, { type: "initialize" }); f.adapters.get("project/session-a")!.emit(event); await turn();
+        let writes = 0;
+        await assert.rejects(f.manager.withProviderMutation("fixture", async () => { writes++; }), (error: unknown) => (error as { code: string }).code === "provider_busy");
+        assert.equal(writes, 0);
+      } finally { await f.manager.stop(); }
+    }
+    const f = fixture(); let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+    try {
+      await f.manager.command(a, { type: "initialize" });
+      const adapter = f.adapters.get("project/session-a")!.adapter, setModel = adapter.setModel;
+      adapter.getAvailableModels = async () => [{ provider: "new-provider", id: "target", reasoning: true, contextWindow: 1000 }];
+      adapter.setModel = async (provider, id) => { entered(); await gate; await setModel(provider, id); };
+      const pending = f.manager.command(a, { type: "set_configuration", provider: "new-provider", modelId: "target", thinkingLevel: "high" });
+      await started;
+      await assert.rejects(f.manager.withProviderMutation("new-provider", async () => {}), (error: unknown) => (error as { code: string }).code === "provider_busy");
+      release(); await pending;
+    } finally { release(); await f.manager.stop(); }
+  });
+
+  it("admits a prompt before a racing edit and does not invalidate idle catalogs for a rejected write", async () => {
+    const f = fixture();
+    try {
+      await f.manager.command(a, { type: "initialize" }); const owner = f.adapters.get("project/session-a")!;
+      await assert.rejects(f.manager.withProviderMutation("unrelated", async () => { throw new Error("disk refused"); }), /disk refused/);
+      await f.manager.command(a, { type: "initialize" }); assert.equal(owner.stops(), 0);
+      const prompt = f.manager.command(a, { type: "prompt", message: "run before edit" });
+      let writes = 0;
+      const edit = f.manager.withProviderMutation("fixture", async () => { writes++; });
+      await prompt;
+      await assert.rejects(edit, (error: unknown) => (error as { code: string }).code === "provider_busy");
+      assert.equal(writes, 0); assert.equal(owner.stops(), 0);
+    } finally { await f.manager.stop(); }
+  });
+
+  it("does not let idle steering/follow-up enqueue through a same-provider save admission barrier", async () => {
+    for (const type of ["steer", "follow_up"] as const) {
+      const f = fixture(); let release!: () => void, entered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+      try {
+        await f.manager.command(a, { type: "initialize" }); const owner = f.adapters.get("project/session-a")!;
+        const saving = f.manager.withProviderMutation("fixture", async () => { entered(); await gate; }); await started;
+        let queued = false; const queue = f.manager.command(a, { type, message: "after configuration commit" }).then(() => { queued = true; });
+        await turn(); assert.equal(queued, false); assert.deepEqual((await f.manager.read(a)).snapshot.queue, { steering: [], followUp: [] });
+        release(); await saving; await queue;
+        assert.equal(owner.stops(), 1, "stale idle owner refreshes before enqueue");
+        assert.notEqual(f.adapters.get("project/session-a"), owner);
+      } finally { release(); await f.manager.stop(); }
+    }
+  });
+
+  it("reloads a stale cross-provider catalog before selecting a newly added model without replacing resource identity", async () => {
+    const f = fixture(), adapters: ReturnType<typeof createDeterministicAdapter>[] = []; let configured = false;
+    const manager = new RuntimeManager(f.repository, (descriptor) => {
+      const value = createDeterministicAdapter(descriptor), models = value.adapter.getAvailableModels;
+      const visible = configured;
+      value.adapter.getAvailableModels = async () => [...await models(), ...(visible ? [{ provider: "added-provider", id: "new-model", contextWindow: 1000, reasoning: false }] : [])];
+      adapters.push(value); return value.adapter;
+    }, 4, 60_000);
+    try {
+      await manager.command(a, { type: "initialize" }); const original = adapters[0];
+      await manager.withProviderMutation("added-provider", async () => { configured = true; });
+      assert.equal(original.stops(), 0); await manager.read(a); assert.equal(adapters.length, 1);
+      await manager.command(a, { type: "set_model", provider: "added-provider", modelId: "new-model" });
+      const read = await manager.read(a);
+      assert.equal(original.stops(), 1); assert.equal(adapters.length, 2); assert.equal(read.session.id, a.sessionId);
+      assert.deepEqual(read.snapshot.model, { provider: "added-provider", id: "new-model" });
+      assert.equal(f.records.size, 1);
+    } finally { await manager.stop(); await f.manager.stop(); }
+  });
+
+  it("keeps model-control persistence inside provider busy and lifecycle safety checks", async () => {
+    const f = fixture(); let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+    const update = f.repository.updateControls;
+    f.repository.updateControls = async (...args) => { entered(); await gate; return update(...args); };
+    try {
+      await f.manager.command(a, { type: "initialize" });
+      const saving = f.manager.command(a, { type: "set_thinking", level: "high" }); await started;
+      await assert.rejects(f.manager.withProviderMutation("fixture", async () => {}), (error: unknown) => (error as { code: string }).code === "provider_busy");
+      await assert.rejects(f.manager.withIdle(a, async () => {}), /Finish or stop/);
+      release(); await saving;
+      await f.manager.withProviderMutation("fixture", async () => {});
+    } finally { release(); await f.manager.stop(); }
+  });
   it("keeps cold reads and multiple subscriptions passive, then shares one owner across tabs", async () => {
     const f = fixture();
     const one: RuntimeWireEvent[] = [], two: RuntimeWireEvent[] = [];

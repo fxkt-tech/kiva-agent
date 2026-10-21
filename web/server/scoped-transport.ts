@@ -8,8 +8,11 @@ import type { RuntimeManager } from "./runtime-manager";
 import { getBootstrapData } from "./bootstrap";
 import { readProjectDiff, readProjectFile } from "./workspace-files";
 import { listWorkspaceDirectories } from "./workspace-directories";
-import { readModelCatalog, readModelDefaults, saveModelDefaults } from "./model-catalog";
+import { readModelDefaults } from "./model-catalog";
 import { isModelConfiguration } from "../shared/model-configuration";
+import { isProviderId, isSaveCredentialInput, isSaveDefaultsInput, isSaveProviderInput } from "../shared/installation-settings";
+import { InstallationSettingsService } from "./installation-settings";
+import { parseSettingsJson } from "./settings-files";
 
 export interface ScopedTransportOptions {
   registry: WorkspaceRegistry;
@@ -22,7 +25,7 @@ export interface ScopedTransportOptions {
 export function createScopedTransport({ registry, repository, manager, allowedOrigins }: ScopedTransportOptions) {
   const allowed = (request: IncomingMessage) => !request.headers.origin || allowedOrigins.includes(request.headers.origin);
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
-  let settingsWrite = Promise.resolve();
+  const settings = new InstallationSettingsService(registry.installationRoot, manager);
 
   return {
     allowed,
@@ -34,6 +37,30 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         if (request.method !== "GET" && !allowed(request)) throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
         for (const name of ["path", "collection", "projectId", "sessionId"]) if (url.searchParams.getAll(name).length > 1) throw new WorkspaceError("duplicate_parameter", `Duplicate ${name} parameter`, 400);
         if (url.searchParams.has("projectId") || url.searchParams.has("sessionId")) throw new WorkspaceError("invalid_identity", "Resource identity belongs in the route", 400);
+        if (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/")) {
+          if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "安装设置不接受查询参数。", 400);
+          const path = url.pathname;
+          if (path === "/api/settings" && request.method === "GET") sendJson(response, 200, await settings.read());
+          else if (path === "/api/settings/models" && request.method === "GET") sendJson(response, 200, await settings.catalog());
+          else if (path === "/api/settings/defaults" && request.method === "POST") {
+            const body = await readSettingsObject(request);
+            if (!isSaveDefaultsInput(body)) throw new WorkspaceError("invalid_configuration", "请同时选择模型和思考强度，并重新加载设置后重试。", 400);
+            sendJson(response, 200, await settings.saveDefaults({ provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel }, body.revision));
+          } else if (path === "/api/settings/providers" && request.method === "POST") {
+            const body = await readSettingsObject(request);
+            if (!isSaveProviderInput(body)) throw new WorkspaceError("invalid_provider", "提供方配置无效，请检查接口、地址和模型字段。", 400);
+            sendJson(response, 200, await settings.saveProvider(body.definition, body.revision));
+          } else {
+            const credential = /^\/api\/settings\/providers\/([^/]+)\/credential$/.exec(path);
+            if (credential && request.method === "POST") {
+              const id = decodeURIComponent(credential[1]), body = await readSettingsObject(request);
+              if (!isProviderId(id) || !isSaveCredentialInput(body)) throw new WorkspaceError("invalid_credential", "API Key 格式无效；不支持命令、变量或多行内容。", 400);
+              sendJson(response, 200, await settings.saveCredential(id, body.apiKey, body.revision));
+            } else if (["/api/settings", "/api/settings/models", "/api/settings/defaults", "/api/settings/providers"].includes(path) || credential) methodNotAllowed();
+            else throw new WorkspaceError("endpoint_not_found", "设置接口不存在。", 404);
+          }
+          return true;
+        }
         if (url.pathname === "/api/project/directories" && request.method === "GET") {
           sendJson(response, 200, listWorkspaceDirectories(url.searchParams.get("path") ?? registry.installationRoot)); return true;
         }
@@ -61,16 +88,14 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           return true;
         }
         if (parts.length === 4 && parts[3] === "models") {
-          if (request.method === "GET") sendJson(response, 200, await readModelCatalog(registry.installationRoot));
+          if (request.method === "GET") sendJson(response, 200, await settings.catalog());
           else if (request.method === "POST") {
             const body = await readObject(request);
             if (!isModelConfiguration(body) || (body.sessionId !== undefined && typeof body.sessionId !== "string")) throw new WorkspaceError("invalid_configuration", "请同时选择模型和思考强度。", 400, { projectId });
             const selection = { provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel };
             const scope = body.sessionId === undefined ? undefined : { projectId, sessionId: decodeResourceId(body.sessionId) };
             // Serialize complete pair saves across projects/tabs sharing this installation.
-            const pending = settingsWrite.then(() => saveModelDefaults(registry.installationRoot, selection, scope ? async () => { await manager.command(scope, { type: "set_configuration", ...selection }); } : undefined));
-            settingsWrite = pending.then(() => {}, () => {});
-            sendJson(response, 200, await pending);
+            sendJson(response, 200, await settings.saveDefaults(selection, undefined, scope ? async () => { await manager.command(scope, { type: "set_configuration", ...selection }); } : undefined));
           } else methodNotAllowed();
           return true;
         }
@@ -163,6 +188,13 @@ function creationInput(body: Record<string, unknown>): CreateSessionInput {
   return { operationId: body.operationId as string | undefined, name: body.name as string | undefined };
 }
 function methodNotAllowed(): never { throw new WorkspaceError("method_not_allowed", "Method is not allowed", 405); }
+async function readSettingsObject(request: IncomingMessage): Promise<Record<string, unknown>> {
+  if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] ?? "")) throw new WorkspaceError("invalid_content_type", "设置保存需要 JSON 请求。", 415);
+  const chunks: Buffer[] = []; let size = 0;
+  for await (const chunk of request) { const buffer = Buffer.from(chunk); size += buffer.length; if (size > 256_000) throw new WorkspaceError("body_too_large", "设置请求过大。", 413); chunks.push(buffer); }
+  try { return parseSettingsJson(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new WorkspaceError("invalid_json", "设置请求格式无效或包含重复字段。", 400); }
+}
 async function readObject(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []; let size = 0;
   for await (const chunk of request) { const buffer = Buffer.from(chunk); size += buffer.length; if (size > 30_000_000) throw new WorkspaceError("body_too_large", "Request body is too large", 413); chunks.push(buffer); }

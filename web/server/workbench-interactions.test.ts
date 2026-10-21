@@ -17,6 +17,9 @@ import type { RuntimeSnapshot } from "../shared/runtime-types";
 import type { ModelConfiguration } from "../shared/model-configuration";
 import type { DeletionPreview, SessionResource, ProjectResource } from "../shared/workspace-contract";
 import { formatMessageTime } from "../shared/message-time";
+import { webPreferences } from "../lib/web-preferences";
+import { isMacPlatform } from "../lib/shortcuts";
+import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY } from "../shared/web-preferences";
 
 const p: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capability: { state: "ready", repositoryRoot: "/repo", commonDirectory: "/repo/.git", projectSubdirectory: "", head: "base", branch: "main" } };
 function session(id: string, overrides: Partial<SessionResource> = {}): SessionResource {
@@ -91,20 +94,22 @@ describe("routed workspace features", () => {
     Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:9495" } });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {}, getItem() { return null; } } });
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
+    webPreferences.destroy(); webPreferences.resetGroup("appearance"); webPreferences.resetGroup("conversation"); webPreferences.resetGroup("shortcuts");
     globalThis.fetch = async (input, init) => {
       const url = String(input); const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined; requests.push({ url, body });
       const custom = await extraFetch?.(url, init); if (custom) return custom;
       if (url === "/api/projects" && init?.method === "POST") { const project = body.path === p.path ? p : { ...p, id: "beta", path: body.path }; visibleProjects = [project, ...visibleProjects.filter((item) => item.id !== project.id)]; return Response.json({ project }); }
       if (url === "/api/projects") return Response.json({ projects: visibleProjects });
+      if (url === "/api/settings") return Response.json({ revision: "settings_revision_1234", canAddProvider: true, providers: [], versions: { app: "0.1.0", pi: "1.3.0" }, check: { status: "ok", checkedAt: "2026-10-21T12:00:00.000Z" } });
       if (/^\/api\/projects\/(alpha|beta)\/actions$/.test(url)) { const projectId = url.split("/")[3]; visibleProjects = visibleProjects.filter((item) => item.id !== projectId); return Response.json({ projectId, projects: visibleProjects }); }
       if (url === "/api/projects/alpha") return Response.json({ project: p, bootstrap });
       if (url === "/api/projects/beta") return Response.json({ project: { ...p, id: "beta" }, bootstrap });
-      if (/^\/api\/projects\/(alpha|beta)\/models$/.test(url)) {
+      if (url === "/api/settings/models" || /^\/api\/projects\/(alpha|beta)\/models$/.test(url)) {
         if (body) {
           defaults = { provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel };
           if (body.sessionId) { currentSnapshot = { ...currentSnapshot, model: { provider: body.provider, id: body.modelId }, thinkingLevel: body.thinkingLevel }; FakeWebSocket.sockets.at(-1)?.publish({ type: "snapshot", snapshot: currentSnapshot }); }
         }
-        return Response.json({ defaults, models: [{ ...snapshot().models[0], thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "alternate-model", thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "plain-model", reasoning: false, thinkingLevels: ["off"] }] });
+        return Response.json({ revision: "catalog_revision_1234", defaults, models: [{ ...snapshot().models[0], thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "alternate-model", thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "plain-model", reasoning: false, thinkingLevels: ["off"] }] });
       }
       if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: session("created") });
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
@@ -123,6 +128,7 @@ describe("routed workspace features", () => {
   });
   afterEach(async () => {
     if (renderer) await act(() => renderer!.unmount());
+    webPreferences.destroy();
     globalThis.fetch = originalFetch;
     for (const [name, value] of [["WebSocket", originalWebSocket], ["window", originalWindow], ["location", originalLocation], ["sessionStorage", originalStorage]] as const) { if (value !== undefined) Object.defineProperty(globalThis, name, { configurable: true, value }); else Reflect.deleteProperty(globalThis, name); }
   });
@@ -229,7 +235,7 @@ describe("routed workspace features", () => {
     assert.equal(text(connection()), "连接中");
     await act(() => FakeWebSocket.sockets[0].onopen?.());
     assert.equal(text(connection()), "已连接");
-    assert.ok(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("model catalog unavailable")));
+    assert.ok(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("无法读取模型列表")));
     await act(() => FakeWebSocket.sockets[0].onclose?.({ code: 1008 }));
     assert.equal(text(connection()), "已断开");
     assert.equal(commandRequests().length, 0);
@@ -410,7 +416,7 @@ describe("routed workspace features", () => {
     const modelAlert = renderer!.root.findByProps({ "data-slot": "alert" });
     assert.equal(modelAlert.props.role, "alert");
     assert.equal(modelAlert.props["data-variant"], "error");
-    assert.match(text(modelAlert), /模型列表加载失败.*API endpoint not found/);
+    assert.match(text(modelAlert), /模型列表加载失败.*无法读取模型列表/);
     assert.equal(modelAlert.findAllByType("svg").length, 1);
     assert.equal(commandRequests().length, 0);
     await open("/projects/alpha/files?path=README.md");
@@ -566,18 +572,117 @@ describe("routed workspace features", () => {
   it("brands the dynamic Pi version in the sidebar and retains the cold fallback", async () => {
     extraFetch = async (url) => url === "/api/projects/alpha" ? Response.json({ project: p, bootstrap: { ...bootstrap, runtime: { ...bootstrap.runtime, piVersion: "2.3.4" } } }) : undefined;
     await open();
-    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "Powered By Pi 2.3.4");
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置Powered By Pi 2.3.4");
     assert.equal(renderer!.root.findAllByProps({ className: "status-dot" }).length, 0);
     extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta" } }) : undefined;
     await open("/projects/beta/sessions");
-    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "Powered By Pi 1.3.0");
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置Powered By Pi 1.3.0");
+  });
+
+  it("opens installation settings from no-project and conversation routes without losing a draft or running commands", async () => {
+    visibleProjects = [];
+    await open("/projects");
+    const settingsButton = () => renderer!.root.findByProps({ "aria-label": "设置" });
+    await click(settingsButton());
+    assert.equal(renderer!.root.findByProps({ "aria-labelledby": "settings-title" }).props["aria-modal"], "true");
+    assert.equal(currentHref, "/projects"); assert.equal(FakeWebSocket.sockets.length, 0);
+    await click(renderer!.root.findByProps({ "aria-label": "关闭设置" }));
+    visibleProjects = [p]; await open(); await publish();
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "draft survives settings" } }));
+    await click(settingsButton()); await click(renderer!.root.findByProps({ id: "settings-tab-conversation" }));
+    await click(renderer!.root.findByProps({ "aria-label": "关闭设置" }));
+    assert.equal(renderer!.root.findByType("textarea").props.value, "draft survives settings");
+    assert.equal(currentHref, "/projects/alpha/sessions/one"); assert.equal(commandRequests().length, 0);
+    assert.equal(requests.filter((entry) => entry.body).length, 0);
+  });
+
+  it("does not fabricate creation errors on the project root and retains real errors only in their project scope", async () => {
+    visibleProjects = [];
+    await open("/projects");
+    assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
+    await act(() => renderer!.unmount()); renderer = undefined;
+    visibleProjects = [p];
+    await open("/projects");
+    assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
+    extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? Response.json({ error: "creation failed fixture" }, { status: 500 }) : undefined;
+    await open("/projects/alpha/sessions");
+    await click(renderer!.root.findByProps({ "aria-label": "在 Alpha 中新建会话" }));
+    assert.match(text(renderer!.root.findByProps({ className: "workspace-feedback" })), /创建会话失败creation failed fixture/);
+    await open("/projects"); assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
+    await open("/projects/beta/sessions"); assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
+    await open("/projects/alpha/sessions"); assert.match(text(renderer!.root.findByProps({ className: "workspace-feedback" })), /creation failed fixture/);
+  });
+
+  it("initializes and synchronizes theme on the no-project route without first opening a dialog or conversation", async () => {
+    visibleProjects = [];
+    webPreferences.destroy();
+    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const attributes = new Map<string, string>(); let writes = 0;
+    const stored = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "dark" } });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: { getItem: () => stored, setItem() { writes++; } } });
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: { setAttribute(name: string, value: string) { attributes.set(name, value); }, removeAttribute(name: string) { attributes.delete(name); } }, querySelector() { return null; } } });
+    try {
+      assert.equal(events.get("storage")?.size ?? 0, 0);
+      await open("/projects");
+      assert.equal(attributes.get("data-theme"), "dark"); assert.equal(events.get("storage")?.size, 1);
+      assert.equal(renderer!.root.findAllByType("textarea").length, 0); assert.equal(renderer!.root.findAllByProps({ className: "settings-dialog" }).length, 0);
+      const light = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "light" } });
+      await act(() => { for (const listener of events.get("storage") ?? []) listener({ key: WEB_PREFERENCES_KEY, newValue: light }); });
+      assert.equal(attributes.get("data-theme"), "light", "an already-open root page must follow another tab's saved choice");
+      await act(() => { for (const listener of events.get("storage") ?? []) listener({ key: WEB_PREFERENCES_KEY, newValue: JSON.stringify(DEFAULT_WEB_PREFERENCES) }); });
+      assert.equal(attributes.has("data-theme"), false); assert.equal(writes, 0, "cross-tab changes do not echo writes");
+      assert.equal(requests.filter((entry) => entry.body).length, 0);
+    } finally {
+      webPreferences.destroy();
+      if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument); else Reflect.deleteProperty(globalThis, "document");
+    }
+  });
+
+  it("uses saved Mod+Enter send mode, preserves native newlines and initializes queue mode only once", async () => {
+    webPreferences.update("shortcuts", { sendMode: "mod-enter" });
+    webPreferences.update("conversation", { queueMode: "follow_up" });
+    await open(); await publish(snapshot("one", { status: "running" }));
+    assert.equal(renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.value, "follow_up");
+    await act(() => renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.onChange({ target: { value: "steer" } }));
+    await act(() => webPreferences.update("conversation", { queueMode: "follow_up" }));
+    assert.equal(renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.value, "steer", "preference updates must not overwrite current composer selection");
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "mod-enter message" } }));
+    async function key(mod = false, shiftKey = false, isComposing = false) {
+      let prevented = false;
+      const submitter = { disabled: renderer!.root.findByProps({ "aria-label": "发送消息" }).props.disabled };
+      let submission = Promise.resolve();
+      await act(async () => {
+        renderer!.root.findByType("textarea").props.onKeyDown({ key: "Enter", metaKey: isMacPlatform() && mod, ctrlKey: !isMacPlatform() && mod, shiftKey, altKey: false, repeat: false, nativeEvent: { isComposing, keyCode: 13 }, preventDefault() { prevented = true; }, currentTarget: { form: { querySelector: () => submitter, requestSubmit() { submission = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); } } } });
+        await submission; await settle();
+      }); return prevented;
+    }
+    assert.equal(await key(), false); assert.equal(await key(true, true), false); assert.equal(await key(true, false, true), false);
+    assert.equal(commandRequests().length, 0); assert.equal(await key(true), true);
+    assert.equal(commandRequests().at(-1)?.body?.type, "steer");
+    assert.match(text(renderer!.root.findByProps({ className: "composer-keyboard-hint" })), /(Command|Ctrl)\+Enter 发送 · Enter 换行/);
+  });
+
+  it("initializes message disclosures from preferences and preserves manual state through streaming and later preference changes", async () => {
+    webPreferences.update("conversation", { thinkingExpanded: true, toolsExpanded: true });
+    await open();
+    const message = { id: "with-details", role: "assistant" as const, text: "Response", thinking: "Reason", streaming: true, tools: [{ id: "tool", name: "read", status: "running" as const, args: { path: "a" } }] };
+    await publish(snapshot("one", { messages: [message] }));
+    const thinking = () => renderer!.root.findByProps({ className: "thinking-block" });
+    const tool = () => renderer!.root.findByProps({ className: "tool-card tool-details" });
+    assert.equal(thinking().props.open, true); assert.equal(tool().props.open, true);
+    await act(() => { thinking().props.onToggle({ currentTarget: { open: false } }); tool().props.onToggle({ currentTarget: { open: false } }); });
+    await publish(snapshot("one", { messages: [{ ...message, thinking: "Reason continues", text: "Response continues" }] }));
+    assert.equal(thinking().props.open, false); assert.equal(tool().props.open, false);
+    await act(() => webPreferences.update("conversation", { thinkingExpanded: true, toolsExpanded: true }));
+    assert.equal(thinking().props.open, false); assert.equal(tool().props.open, false);
+    assert.equal(commandRequests().length, 0);
   });
 
   it("keeps registry errors in the sidebar Alert without a misleading footer connection label", async () => {
     extraFetch = async (url) => url === "/api/projects" ? Response.json({ error: "registry unavailable" }, { status: 503 }) : undefined;
     await open(); await publish();
     const footer = renderer!.root.findByProps({ className: "sidebar-footer" });
-    assert.equal(text(footer), "Powered By Pi 1.3.0");
+    assert.equal(text(footer), "设置Powered By Pi 1.3.0");
     assert.doesNotMatch(text(footer), /本地工作区|连接异常/);
     assert.equal(footer.findAll((node) => typeof node.props.className === "string" && node.props.className.split(/\s+/).includes("status-dot")).length, 0);
     assert.ok(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("项目列表加载失败registry unavailable")));

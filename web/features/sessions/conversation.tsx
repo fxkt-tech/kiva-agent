@@ -8,6 +8,7 @@ import { Alert } from "@/components/ui/alert";
 import { ExtensionDialog } from "@/components/extension-dialog";
 import { MessageContent } from "@/components/message-content";
 import { useRuntime } from "@/lib/use-runtime";
+import { useWebPreferences } from "@/lib/web-preferences";
 import { formatMessageTime, normalizeMessageTimestamp } from "@/shared/message-time";
 import type { SessionRuntimeRead } from "@/shared/runtime-types";
 import type { SessionResource } from "@/shared/workspace-contract";
@@ -22,6 +23,7 @@ export function SessionFeature({ projectId, sessionId }: { projectId: string; se
 }
 
 function Conversation({ projectId, sessionId }: { projectId: string; sessionId?: string }) {
+  const { preferences } = useWebPreferences();
   const { project, projectError, projectLoading, version, refresh, openProjectPicker, navigate, locationKey, navigationCurrent } = useWorkspace();
   const target = sessionId ? { projectId, sessionId } : undefined;
   const detail = useResource<SessionRuntimeRead>(target ? resourceApi(target) : undefined, version);
@@ -56,7 +58,7 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setContinuing(false); }
   }
-  return <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session")}>
+  return <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session", preferences.appearance.wrapCode && "conversation-wrap-code")} style={{ "--conversation-font-size": `${preferences.appearance.conversationFontSize}px` } as React.CSSProperties}>
     <MessageViewport className="message-scroll"><div className="message-column">
       {session && <Alert variant={quarantined || !session.executable ? "warning" : "info"} title={quarantined ? "运行时已隔离" : session.legacy ? "旧会话 · 只读" : "会话工作区"} className="session-workspace-notice">
         {quarantined && <p>运行时会话标识发生变化，已停止接受操作。请检查运行状态后显式恢复。</p>}

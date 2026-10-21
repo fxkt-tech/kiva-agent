@@ -2,10 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, SquareTerminal, Trash2, X } from "lucide-react";
+import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, SquareTerminal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { shortcutRegistry } from "@/lib/shortcuts";
+import { useWebPreferences } from "@/lib/web-preferences";
+import { SettingsDialog } from "@/features/settings/dialog";
+import { useInstallationModels } from "@/features/settings/use-installation-models";
+import type { InstallationModelCatalog } from "@/shared/installation-settings";
 import type { BootstrapData } from "@/shared/types";
 import type { ModelCatalog } from "@/shared/model-configuration";
 import type { ProjectResource, RemoveProjectResult, SessionResource } from "@/shared/workspace-contract";
@@ -21,7 +26,7 @@ interface WorkspaceContextValue {
   navigate(href: string, replace?: boolean): void; drafts: DraftStore; version: number; refresh(): void;
   createSession(projectId: string): Promise<SessionResource | undefined>; openProjectPicker(): void;
   projectLoading: boolean; projectError?: string;
-  modelCatalog?: ModelCatalog; modelsLoading: boolean; modelsError?: string; updateModelCatalog(data: ModelCatalog): void;
+  modelCatalog?: InstallationModelCatalog; modelsLoading: boolean; modelsError?: string; updateModelCatalog(data: ModelCatalog): void;
   navigationCurrent(source: string): boolean; locationKey: string;
 }
 const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined);
@@ -40,6 +45,8 @@ export function RoutedWorkspaceShell({ children }: { children: ReactNode }) {
 }
 
 export function WorkspaceShell({ children, pathname, search = "", navigate }: { children: ReactNode; pathname: string; search?: string; navigate(href: string, replace?: boolean): void }) {
+  // Theme and storage-event ownership must exist even on /projects with no composer.
+  useWebPreferences();
   const route = useMemo(() => parseWorkspaceRoute(pathname), [pathname]);
   const query = useMemo(() => new URLSearchParams(search), [search]);
   const queryError = query.has("projectId") || query.has("sessionId") ? "资源标识只能出现在路径中" : query.getAll("q").length > 1 ? "重复的 q 参数" : undefined;
@@ -51,6 +58,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const [drafts] = useState(() => new DraftStore());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pending, setPending] = useState<string[]>([]);
   const creating = useRef(new Set<string>());
   const removing = useRef(new Set<string>());
@@ -61,13 +69,14 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const operations = useRef(new Map<string, string>());
   const registry = useResource<{ projects: ProjectResource[] }>("/api/projects", version);
   const current = useResource<{ project: ProjectResource; bootstrap?: BootstrapData }>(route.projectId ? `/api${projectUrl(route.projectId)}` : undefined, version);
-  const modelCatalog = useResource<ModelCatalog>(route.projectId ? `/api${projectUrl(route.projectId)}/models` : undefined, version);
+  const modelCatalog = useInstallationModels(version);
   const project = current.data && current.data.project.id === route.projectId ? current.data.project : undefined;
   const projectError = current.error ?? (current.data && current.data.project.id !== route.projectId ? "返回的项目标识与 URL 不匹配" : undefined);
   const projects = registry.data?.projects ?? [];
   useEffect(() => { for (const item of registry.data?.projects ?? []) hidden.current.delete(item.id); }, [registry.data]);
   const refresh = useCallback(() => setVersion((value) => value + 1), []);
   const openProjectPicker = useCallback(() => { setMobileSidebarOpen(false); setPickerOpen(true); }, []);
+  const openSettings = useCallback(() => { setMobileSidebarOpen(false); setSettingsOpen(true); }, []);
   const createSession = useCallback(async (projectId: string) => {
     if (creating.current.has(projectId) || removing.current.has(projectId) || hidden.current.has(projectId)) return;
     creating.current.add(projectId);
@@ -112,11 +121,13 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   useEffect(() => {
     const shortcut = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") { setPickerOpen(false); setMobileSidebarOpen(false); }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && route.projectId && !removingProject) { event.preventDefault(); void createSession(route.projectId); }
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [route.projectId, createSession, removingProject]);
+  }, []);
+  useEffect(() => shortcutRegistry.attach(window), []);
+  useEffect(() => shortcutRegistry.register("openSettings", { run: openSettings }), [openSettings]);
+  useEffect(() => shortcutRegistry.register("newSession", { run: () => { if (route.projectId) void createSession(route.projectId); }, available: () => Boolean(route.projectId && project?.capability.state === "ready" && !removingProject && !pickerOpen && !settingsOpen && !creating.current.has(route.projectId) && !removing.current.has(route.projectId)) }), [route.projectId, project?.capability.state, removingProject, pickerOpen, settingsOpen, createSession]);
   const base = route.projectId ? projectUrl(route.projectId) : "/projects";
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
   const context: WorkspaceContextValue = { route, query, project, projects, bootstrap: current.data?.bootstrap, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
@@ -130,15 +141,16 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
         </nav>
         <div className="sidebar-project-heading"><span>项目</span><button aria-label="添加项目" title="打开本地项目" onClick={openProjectPicker}><Plus size={14} /></button></div>
         <div className="project-groups">{projects.map((item) => <ProjectGroup key={item.id} project={item} pending={pending.includes(item.id)} removing={pendingRemovals.includes(item.id)} onRemove={() => setRemovingProject(item)} />)}{registry.error && <Alert variant="error" title="项目列表加载失败" className="sidebar-alert">{registry.error}</Alert>}</div>
-        <div className="sidebar-footer"><div className="runtime-line"><span className="ml-auto">Powered By Pi {current.data?.bootstrap?.runtime.piVersion ?? "1.3.0"}</span></div></div>
+        <div className="sidebar-footer"><div className="runtime-line"><button type="button" className="sidebar-settings" onClick={openSettings} aria-haspopup="dialog" aria-label="设置"><Settings size={15} aria-hidden="true" /><span>设置</span></button><span className="sidebar-attribution">Powered By Pi {current.data?.bootstrap?.runtime.piVersion ?? "1.3.0"}</span></div></div>
       </aside>
       <section className="conversation">
         <Button variant="ghost" size="icon" className="workspace-navigation-toggle" aria-label="打开导航" title="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={17} /></Button>
-        {error?.projectId === route.projectId && <div className="workspace-feedback"><Alert variant="error" title="创建会话失败" onDismiss={() => setError(undefined)}>{error?.message}</Alert></div>}
+        {error && error.projectId === route.projectId && <div className="workspace-feedback"><Alert variant="error" title="创建会话失败" onDismiss={() => setError(undefined)}>{error.message}</Alert></div>}
         {queryError ? <ResourceState error={queryError} /> : children}
       </section>
       {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
       {removingProject && <RemoveProjectDialog key={removingProject.id} project={removingProject} onClose={() => setRemovingProject(undefined)} onConfirm={() => removeProject(removingProject.id)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} catalog={modelCatalog.data} modelsLoading={modelCatalog.loading} modelsError={modelCatalog.error} onCatalog={modelCatalog.replace} onReloadCatalog={modelCatalog.reload} />}
     </main>
   </WorkspaceContext.Provider>;
 }

@@ -133,7 +133,7 @@ Wrong: `GET jsonl -> resource() -> SDK projection -> JSON.stringify(messages)`. 
 
 ### 1. Scope / trigger
 
-The combined model/thinking picker saves one installation-wide default pair for new sessions while preserving the settings of other existing sessions. It does not introduce browser preference persistence or an active-project singleton.
+The combined model/thinking picker saves one installation-wide default pair for new sessions while preserving the settings of other existing sessions. This pair remains in Pi settings, never browser preference storage or an active-project singleton. The global settings dialog's installation endpoints, separate browser preferences, provider credentials and safe runtime refresh are governed by [Global Web Settings](./global-settings.md).
 
 ### 2. Signatures
 

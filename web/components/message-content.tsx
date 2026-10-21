@@ -2,6 +2,7 @@
 
 import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { useState } from "react";
+import { useWebPreferences } from "@/lib/web-preferences";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Brain, Check, ChevronRight, CircleX, Copy, LoaderCircle, Wrench } from "lucide-react";
@@ -20,8 +21,10 @@ const codeTheme: PrismTheme = {
 };
 
 export function MessageContent({ message }: { message: ChatMessage }) {
+  const { preferences } = useWebPreferences();
+  const [thinkingOpen, setThinkingOpen] = useState(() => preferences.conversation.thinkingExpanded);
   return <>
-    {message.thinking && <details className="thinking-block">
+    {message.thinking && <details className="thinking-block" open={thinkingOpen} onToggle={(event) => setThinkingOpen(event.currentTarget.open)}>
       <summary><Brain size={13} />思考过程<ChevronRight size={13} className="thinking-chevron" /></summary>
       <div className="thinking-copy"><Markdown>{message.thinking}</Markdown></div>
     </details>}
@@ -58,9 +61,11 @@ function Markdown({ children }: { children: string }) {
 }
 
 function ToolCard({ tool }: { tool: ToolActivity }) {
+  const { preferences } = useWebPreferences();
+  const [open, setOpen] = useState(() => preferences.conversation.toolsExpanded);
   const statusLabel = tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成";
   const icon = tool.status === "running" ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : tool.status === "error" ? <CircleX size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />;
-  return <details className="tool-card tool-details">
+  return <details className="tool-card tool-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>
       <Wrench size={13} className="tool-icon" aria-hidden="true" />
       <span className="tool-summary" title={tool.name}>{tool.name}</span>

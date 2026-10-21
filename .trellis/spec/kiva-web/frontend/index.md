@@ -22,6 +22,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 | [Workspace Visual System](./visual-system.md) | Codex-style tokens, local Geist typography, responsive layout, Markdown and UI verification | Documented |
 | [Scoped Workspace Resources](./workspace-routing.md) | URL identity, passive reads, isolated session execution, scoped events/drafts and safe cleanup | Documented |
+| [Global Web Settings](./global-settings.md) | Browser preferences/shortcuts, settings modal, safe provider credentials, installation endpoints and runtime refresh | Documented |
 
 ---
 
