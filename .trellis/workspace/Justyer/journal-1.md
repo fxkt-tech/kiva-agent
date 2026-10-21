@@ -28,3 +28,25 @@ Refined project-local sidebar creation/search/collapse, moved live model/thinkin
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Implement scoped workspace routing and isolated sessions
+<!-- trellis-session: v=2 fp=d459314334d670a8 -->
+
+**Date**: 2026-10-21
+**Task**: Implement scoped workspace routing and isolated sessions
+**Branch**: `feat/workspace-routing`
+
+### Summary
+
+Implemented stable project/session URLs, passive resource repositories, independent pinned Git worktrees, bounded concurrent Pi owners, scoped HTTP/WebSocket transport, tab-local drafts, and safe recoverable deletion. Full review and typecheck, 5 CLI plus 100 Web tests, production build, real browser matrix and no-prompt Pi gates passed. Archived workspace-routing after explicit commit approval; no push. Preserved the separate Next-generated next-env.d.ts development import change outside all task commits.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5014d504de330a0dd253d4027fb721b19b8d7cd8` | feat(web): route project resources and isolate session workspaces |
+
+### Status
+
+[OK] **Completed**
