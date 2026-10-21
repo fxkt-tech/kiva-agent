@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { formatShortcutBinding, shortcutBindingFromEvent, validateShortcutBinding } from "@/lib/shortcuts";
 import { useWebPreferences, webPreferences } from "@/lib/web-preferences";
 import type { ShortcutAction, WebPreferences } from "@/shared/web-preferences";
@@ -11,7 +13,7 @@ export function SettingRow({ title, description, children }: { title: string; de
   return <div className="settings-row"><div className="settings-row-copy"><strong>{title}</strong>{description && <p>{description}</p>}</div><div className="settings-row-control">{children}</div></div>;
 }
 export function SettingToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange(value: boolean): void }) {
-  return <button className="settings-switch" type="button" role="switch" aria-label={label} aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
+  return <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />;
 }
 export function GroupReset({ group }: { group: keyof Pick<WebPreferences, "appearance" | "conversation" | "shortcuts"> }) {
   return <div className="settings-group-reset"><Button type="button" size="sm" variant="outline" onClick={() => webPreferences.resetGroup(group)}>恢复本组默认</Button></div>;
@@ -19,8 +21,8 @@ export function GroupReset({ group }: { group: keyof Pick<WebPreferences, "appea
 export function AppearancePanel() {
   const { preferences: { appearance } } = useWebPreferences();
   return <><div className="settings-section-heading"><h3>外观</h3><p>仅保存在此浏览器，所有项目共用。</p></div>
-    <SettingRow title="主题" description="跟随系统时，会自动响应系统外观变化。"><select aria-label="主题" value={appearance.theme} onChange={(event) => webPreferences.update("appearance", { theme: event.target.value as typeof appearance.theme })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></SettingRow>
-    <SettingRow title="会话字号" description="只调整消息内容，不改变导航和代码字体。"><select aria-label="会话字号" value={appearance.conversationFontSize} onChange={(event) => webPreferences.update("appearance", { conversationFontSize: Number(event.target.value) as 14 | 16 | 18 })}><option value={14}>14 px</option><option value={16}>16 px</option><option value={18}>18 px</option></select></SettingRow>
+    <SettingRow title="主题" description="跟随系统时，会自动响应系统外观变化。"><Select aria-label="主题" value={appearance.theme} options={[{ value: "system", label: "跟随系统" }, { value: "light", label: "浅色" }, { value: "dark", label: "深色" }]} onValueChange={(theme) => { if (theme) webPreferences.update("appearance", { theme }); }} /></SettingRow>
+    <SettingRow title="会话字号" description="只调整消息内容，不改变导航和代码字体。"><Select aria-label="会话字号" value={appearance.conversationFontSize} options={[{ value: 14, label: "14 px" }, { value: 16, label: "16 px" }, { value: 18, label: "18 px" }]} onValueChange={(conversationFontSize) => { if (conversationFontSize) webPreferences.update("appearance", { conversationFontSize }); }} /></SettingRow>
     <SettingRow title="代码自动换行" description="应用于会话中的代码和工具输出，不改变原始 JSONL。"><SettingToggle label="代码自动换行" checked={appearance.wrapCode} onChange={(wrapCode) => webPreferences.update("appearance", { wrapCode })} /></SettingRow><GroupReset group="appearance" />
   </>;
 }
@@ -29,7 +31,7 @@ export function ConversationPanel() {
   return <><div className="settings-section-heading"><h3>会话</h3><p>展开偏好用于新显示的内容，已手动展开或折叠的内容保持不变。</p></div>
     <SettingRow title="默认展开思考过程"><SettingToggle label="默认展开思考过程" checked={conversation.thinkingExpanded} onChange={(thinkingExpanded) => webPreferences.update("conversation", { thinkingExpanded })} /></SettingRow>
     <SettingRow title="默认展开工具详情"><SettingToggle label="默认展开工具详情" checked={conversation.toolsExpanded} onChange={(toolsExpanded) => webPreferences.update("conversation", { toolsExpanded })} /></SettingRow>
-    <SettingRow title="运行中追加消息" description="作为新输入框的默认选项，不修改现有队列或手动选择。"><select aria-label="默认消息队列模式" value={conversation.queueMode} onChange={(event) => webPreferences.update("conversation", { queueMode: event.target.value as "steer" | "follow_up" })}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select></SettingRow><GroupReset group="conversation" />
+    <SettingRow title="运行中追加消息" description="作为新输入框的默认选项，不修改现有队列或手动选择。"><Select aria-label="默认消息队列模式" value={conversation.queueMode} options={[{ value: "steer", label: "立即纠正" }, { value: "follow_up", label: "完成后追加" }]} onValueChange={(queueMode) => { if (queueMode) webPreferences.update("conversation", { queueMode }); }} /></SettingRow><GroupReset group="conversation" />
   </>;
 }
 const actions: { id: ShortcutAction; name: string; description: string }[] = [
@@ -43,7 +45,7 @@ export function ShortcutsPanel() {
   const [recording, setRecording] = useState<ShortcutAction>();
   const [error, setError] = useState<string>();
   return <><div className="settings-section-heading"><h3>快捷键</h3><p>点击组合键后按下新组合。Esc 取消录制；部分系统或浏览器快捷键无法捕获。</p></div>
-    <SettingRow title="发送消息"><select aria-label="发送消息快捷键" value={shortcuts.sendMode} onChange={(event) => webPreferences.update("shortcuts", { sendMode: event.target.value as "enter" | "mod-enter" })}><option value="enter">Enter 发送</option><option value="mod-enter">{formatShortcutBinding({ key: "Enter", mod: true, shift: false, alt: false })} 发送</option></select></SettingRow>
+    <SettingRow title="发送消息"><Select aria-label="发送消息快捷键" value={shortcuts.sendMode} options={[{ value: "enter", label: "Enter 发送" }, { value: "mod-enter", label: `${formatShortcutBinding({ key: "Enter", mod: true, shift: false, alt: false })} 发送` }]} onValueChange={(sendMode) => { if (sendMode) webPreferences.update("shortcuts", { sendMode }); }} /></SettingRow>
     {actions.map((action) => <SettingRow key={action.id} title={action.name} description={action.description}><div className="settings-shortcut-actions"><button type="button" data-shortcut-recorder="true" className="settings-shortcut-recorder" aria-label={`录制${action.name}快捷键`} aria-pressed={recording === action.id} onClick={() => { setRecording(action.id); setError(undefined); }} onBlur={() => setRecording((current) => current === action.id ? undefined : current)} onKeyDown={(event) => {
       if (recording !== action.id) return;
       event.preventDefault(); event.stopPropagation();

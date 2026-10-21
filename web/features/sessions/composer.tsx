@@ -5,6 +5,11 @@ import { ArrowUp, Clock3, Command, FileCode2, GitBranch, Paperclip, SquareTermin
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Toast } from "@/components/ui/toast";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useRuntime } from "@/lib/use-runtime";
 import { useWebPreferences } from "@/lib/web-preferences";
 import { getSendShortcutHint, shortcutRegistry, shouldSendFromKeydown } from "@/lib/shortcuts";
@@ -37,6 +42,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [contextOpen, setContextOpen] = useState(false);
+  const [compactOpen, setCompactOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [confirmed, setConfirmed] = useState<{ configuration: ModelConfiguration; snapshot?: RuntimeSnapshot }>();
@@ -44,7 +50,6 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   const [sendError, setSendError] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const textInput = useRef<HTMLTextAreaElement>(null);
-  const contextControl = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const running = runtime.status === "running";
   const models = modelCatalog?.models ?? [];
@@ -71,23 +76,11 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
     observer.observe(input);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => { composing.current = false; setContextOpen(false); setCommandOpen(false); setSendError(undefined); }, [key]);
+  useEffect(() => { composing.current = false; setContextOpen(false); setCompactOpen(false); setCommandOpen(false); setSendError(undefined); }, [key]);
   useEffect(() => { if (!hasContextUsage) setContextOpen(false); }, [hasContextUsage]);
-  useEffect(() => {
-    const close = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") { setContextOpen(false); setCommandOpen(false); }
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, []);
+  useEffect(() => { if (compactOpen) return shortcutRegistry.block("compaction"); }, [compactOpen]);
   useEffect(() => shortcutRegistry.register("openCommands", { run: () => setCommandOpen(true), available: () => Boolean(runtime.snapshot?.commands.length) }), [runtime.snapshot?.commands.length]);
   useEffect(() => shortcutRegistry.register("focusComposer", { run: () => textInput.current?.focus(), available: () => Boolean(textInput.current) }), []);
-  useEffect(() => {
-    if (!contextOpen) return;
-    const outside = (event: globalThis.PointerEvent) => { if (event.target instanceof Node && !contextControl.current?.contains(event.target)) setContextOpen(false); };
-    window.addEventListener("pointerdown", outside);
-    return () => window.removeEventListener("pointerdown", outside);
-  }, [contextOpen]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if ((!draft.trim() && !attachments.length) || pending || modelSaving) return;
@@ -123,6 +116,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   function changeDraft(value: string) { setDraft(value); const query = /^\/([^\s]*)$/.exec(value); if (query) { setCommandOpen(true); setCommandQuery(query[1]); } }
   function chooseCommand(name: string) { setDraft(`/${name} `); setCommandOpen(false); setCommandQuery(""); }
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && commandOpen) { event.preventDefault(); setCommandOpen(false); return; }
     if (event.repeat) {
       if (shouldSendFromKeydown({ ...event, repeat: false }, preferences.shortcuts.sendMode, composing.current)) event.preventDefault();
       return;
@@ -133,14 +127,14 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
     const submitter = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
     if (form && submitter && !submitter.disabled) form.requestSubmit(submitter);
   }
-  function compactSession() { if (window.confirm("压缩会调用当前模型生成会话摘要。确定继续吗？")) void runtime.compact(); }
+  const compactDisabled = running || !runtime.connected || !runtime.snapshot?.context;
   return <>
         <div className="composer-wrap">
           {sendError && sendError !== runtime.error && <Alert variant="error" title="消息或附件处理失败" className="composer-alert" onDismiss={() => setSendError(undefined)}>{sendError}</Alert>}
           {savedNotice != null && <Toast key={savedNotice} message="模型设置已保存" onDismiss={() => setSavedNotice(undefined)} />}
           {modelsError && <Alert variant="error" title="模型列表加载失败" className="composer-alert"><p>{modelsError}</p><div className="alert-actions"><Button type="button" size="sm" variant="outline" onClick={refresh}>重新加载</Button></div></Alert>}
-          {commandOpen && <div className="command-palette">
-            <div className="command-search"><Command size={14} /><input autoFocus value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} placeholder="搜索命令、技能和模板" /></div>
+          {commandOpen && <div className="command-palette" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setCommandOpen(false); textInput.current?.focus(); } }}>
+            <div className="command-search"><Command size={14} /><Input autoFocus value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} aria-label="搜索命令、技能和模板" placeholder="搜索命令、技能和模板" /></div>
             <div className="command-list">{visibleCommands.length ? visibleCommands.map((command) => <button type="button" key={`${command.source}:${command.name}`} onClick={() => chooseCommand(command.name)}><span>/{command.name}</span><small>{command.description ?? "无说明"}</small><em>{command.source === "skill" ? "技能" : command.source === "prompt" ? "模板" : "扩展"}</em></button>) : <p>没有匹配的命令</p>}</div>
           </div>}
           {(runtime.snapshot?.queue.steering.length || runtime.snapshot?.queue.followUp.length) ? <div className="queue-panel">
@@ -153,25 +147,26 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
           </div> : null}
           <form className="composer" onSubmit={submit}>
             {attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`}>{attachment.kind === "image" ? <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="" /> : <span className="attachment-file"><FileCode2 size={14} /></span>}<span>{attachment.name}</span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
-            <textarea ref={textInput} value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 KivA 你想完成什么…"} rows={1} />
+            <Textarea ref={textInput} value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 KivA 你想完成什么…"} rows={1} />
             <div className="composer-actions">
               <div className="composer-input-actions">
                 <input ref={fileInput} className="sr-only" type="file" accept={ATTACHMENT_ACCEPT} multiple onChange={attachImages} />
                 <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Paperclip size={17} /></Button>
-                {running && <select className="composer-mode" aria-label="消息队列模式" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select>}
+                {running && <Select className="composer-mode" size="sm" aria-label="消息队列模式" value={queueMode} options={[{ value: "steer", label: "立即纠正" }, { value: "follow_up", label: "完成后追加" }]} onValueChange={(mode) => { if (mode) setQueueMode(mode); }} />}
               </div>
               <div className="composer-settings">
-                {hasContextUsage && <div className="composer-context" ref={contextControl}>
-                  <button type="button" className="composer-context-trigger" aria-label="上下文剩余量" aria-expanded={contextOpen} aria-controls="composer-context-details" title={`剩余 ${remainingLabel}，点击查看使用详情`} onClick={() => setContextOpen((value) => !value)}>
+                {hasContextUsage && <div className="composer-context"><Popover open={contextOpen} onOpenChange={setContextOpen}>
+                  <PopoverTrigger render={<button type="button" className="composer-context-trigger" aria-label="上下文剩余量" aria-controls="composer-context-details" title={`剩余 ${remainingLabel}，点击查看使用详情`} />}>
                     <svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><circle className="context-ring-value" cx="10" cy="10" r="7" pathLength="100" strokeDasharray={`${remainingPercent} 100`} /></svg><span>{remainingLabel}</span>
-                  </button>
-                  {contextOpen && <div id="composer-context-details" className="composer-context-popover" role="region" aria-label="上下文详情">
+                  </PopoverTrigger>
+                  <PopoverContent id="composer-context-details" className="composer-context-popover" side="top" align="end" role="region" aria-label="上下文详情">
                     <div className="context-heading"><strong>上下文使用量</strong><span>{formatPercent(runtime.snapshot?.context?.percent)}</span></div>
                     <div className="context-track" role="progressbar" aria-label="上下文使用百分比" aria-valuemin={0} aria-valuemax={100} aria-valuenow={runtime.snapshot?.context?.percent == null ? undefined : contextPercent}><span style={{ width: `${contextPercent}%` }} /></div>
                     <div className="context-details"><span>{formatTokens(runtime.snapshot?.context?.tokens)} tokens</span><span>{runtime.snapshot?.context ? `${formatTokens(runtime.snapshot.context.contextWindow)} 上限` : "等待首次请求"}</span></div>
                     {runtime.snapshot?.context && <div className="context-details"><span>累计 {formatTokens(runtime.snapshot.context.total)}</span><span>${runtime.snapshot.context.cost.toFixed(4)}</span></div>}
-                    <Button type="button" variant="ghost" size="sm" className="compact-button" disabled={running || !runtime.connected || !runtime.snapshot?.context} onClick={compactSession}>压缩上下文</Button>
-                  </div>}
+                    <Button type="button" variant="ghost" size="sm" className="compact-button" disabled={compactDisabled} onClick={() => { setContextOpen(false); setCompactOpen(true); }}>压缩上下文</Button>
+                  </PopoverContent>
+                </Popover>
                 </div>}
                 <ModelSettings projectId={projectId} sessionId={session?.id} models={models} selection={selection} loading={modelsLoading} disabled={running || pending || modelSaving || (Boolean(session) && !runtime.connected)} onPending={setModelSaving} onSaved={(catalog) => { updateModelCatalog(catalog); if (session && catalog.defaults) setConfirmed({ configuration: catalog.defaults, snapshot: runtime.snapshot }); setSavedNotice((value) => (value ?? 0) + 1); refresh(); }} />
               </div>
@@ -181,6 +176,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
           <div className="composer-note">{session && <span className="composer-connection-status" data-state={runtime.connectionStatus} role="status" aria-label="当前会话后端连接" aria-live="polite" aria-atomic="true" title={`当前会话后端连接：${CONNECTION_LABELS[runtime.connectionStatus]}`}><span className="composer-connection-dot" aria-hidden="true" />{CONNECTION_LABELS[runtime.connectionStatus]}</span>}<span className="composer-project-context"><SquareTerminal size={11} />本地<span>·</span><GitBranch size={11} /><span>{session?.workspace?.branch ?? (project?.capability.state === "ready" ? project.capability.branch : "—")}</span></span><span className="composer-keyboard-hint">{getSendShortcutHint(preferences.shortcuts.sendMode)}</span></div>
           {emptyConversation && <div className="suggestions"><button type="button" onClick={() => setDraft("解释当前代码结构")}><FileCode2 size={13} />了解代码库</button><button type="button" onClick={() => setDraft("检查最近的代码变更")}><GitBranch size={13} />检查代码变更</button><button type="button" onClick={() => setDraft("规划下一个功能")}><Wrench size={13} />规划一个功能</button></div>}
         </div>
+        <ConfirmDialog open={compactOpen} onOpenChange={setCompactOpen} title="压缩上下文？" description="压缩会调用当前模型生成会话摘要。确定继续吗？" confirmLabel="压缩上下文" confirmDisabled={compactDisabled} onConfirm={() => { if (compactDisabled) return; setCompactOpen(false); setContextOpen(false); void runtime.compact(); }} />
 </>;
 }
 

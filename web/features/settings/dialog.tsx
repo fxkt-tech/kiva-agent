@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { createPortal } from "react-dom";
 import { Info, Keyboard, MessageSquare, Palette, Settings2, X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Toast } from "@/components/ui/toast";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { useWebPreferences } from "@/lib/web-preferences";
@@ -12,7 +13,7 @@ import type { InstallationModelCatalog, InstallationSettings, ProviderSaveResult
 import { AppearancePanel, ConversationPanel, SettingRow, ShortcutsPanel } from "./preferences-panels";
 import { DefaultsEditor, ProvidersEditor } from "./models-panel";
 import { settingsApi } from "./api";
-import { restoreSettingsFocus, settingsTabStops } from "./focus";
+import { restoreSettingsFocus } from "./focus";
 
 const categories = [
   { id: "appearance", name: "外观", icon: Palette }, { id: "shortcuts", name: "快捷键", icon: Keyboard },
@@ -32,10 +33,9 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
   const [reloadVersion, setReloadVersion] = useState(0);
   const [notice, setNotice] = useState<{ id: number; message: string }>();
   const readRevision = useRef(0);
-  const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
-  const keepButton = useRef<HTMLButtonElement>(null);
-  const latest = useRef({ forms, onClose, discard }); latest.current = { forms, onClose, discard };
+  const [previousFocus] = useState(() => typeof document === "undefined" ? null : document.activeElement);
+  const latest = useRef({ forms, onClose }); latest.current = { forms, onClose };
   const pending = Object.values(forms).some((form) => form.pending);
   const onState = useCallback((form: string, dirty: boolean, saving: boolean) => setForms((current) => current[form]?.dirty === dirty && current[form]?.pending === saving ? current : { ...current, [form]: { dirty, pending: saving } }), []);
   const showNotice = useCallback((message: string) => setNotice((current) => ({ id: (current?.id ?? 0) + 1, message })), []);
@@ -44,7 +44,6 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
     if (Object.values(latest.current.forms).some((form) => form.dirty)) setDiscard(true);
     else latest.current.onClose();
   }
-  const closeRequest = useRef(requestClose); closeRequest.current = requestClose;
   useEffect(() => {
     const controller = new AbortController();
     const revision = ++readRevision.current;
@@ -56,34 +55,7 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
     readRevision.current += 1; setSettings(result.settings); setLoading(false); setError(undefined);
     if (result.catalog) onCatalog(result.catalog);
   }, [onCatalog]);
-  useEffect(() => {
-    const unblock = shortcutRegistry.block("settings");
-    const previous = typeof document === "undefined" ? null : document.activeElement;
-    const overflow = typeof document === "undefined" ? undefined : document.body.style.overflow;
-    if (typeof document !== "undefined") document.body.style.overflow = "hidden";
-    closeButton.current?.focus();
-    const keydown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        event.preventDefault(); event.stopPropagation();
-        if (latest.current.discard) setDiscard(false); else closeRequest.current();
-      }
-      if (event.key !== "Tab" || !dialog.current || typeof document === "undefined") return;
-      const scope = dialog.current.querySelector<HTMLElement>("[role='alertdialog']") ?? dialog.current;
-      const controls = settingsTabStops(scope);
-      if (!controls.length) { event.preventDefault(); dialog.current.focus(); return; }
-      const first = controls[0], last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !scope.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
-    };
-    window.addEventListener("keydown", keydown);
-    return () => {
-      unblock(); window.removeEventListener("keydown", keydown);
-      if (typeof document !== "undefined") document.body.style.overflow = overflow ?? "";
-      if (typeof document !== "undefined" && typeof HTMLElement !== "undefined") restoreSettingsFocus(previous, document);
-    };
-  }, []);
-  useEffect(() => { if (discard) keepButton.current?.focus(); else if (typeof document !== "undefined" && !dialog.current?.contains(document.activeElement)) closeButton.current?.focus(); }, [discard]);
+  useEffect(() => shortcutRegistry.block("settings"), []);
   function categoryKeys(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
@@ -92,10 +64,11 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
     setCategory(categories[next].id); event.currentTarget.querySelector<HTMLButtonElement>(`#settings-tab-${categories[next].id}`)?.focus();
   }
   const reload = useCallback(() => { setReloadVersion((value) => value + 1); onReloadCatalog(); }, [onReloadCatalog]);
-  const content = <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
-    <section ref={dialog} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-busy={pending} tabIndex={-1}>
-      <header className="settings-heading"><h2 id="settings-title">设置</h2><button ref={closeButton} type="button" aria-label="关闭设置" disabled={pending} onClick={requestClose}><X size={17} /></button></header>
-      <div className="settings-layout" hidden={discard}>
+  return <>
+    <Dialog open onOpenChange={(open, details) => { if (!open) { details.cancel(); requestClose(); } }}>
+    <DialogContent className="settings-dialog" showCloseButton={false} initialFocus={closeButton} finalFocus={() => { if (typeof document !== "undefined") restoreSettingsFocus(previousFocus, document); return false; }} aria-labelledby="settings-title" aria-busy={pending}>
+      <header className="settings-heading"><DialogTitle id="settings-title">设置</DialogTitle><button ref={closeButton} type="button" aria-label="关闭设置" disabled={pending} onClick={requestClose}><X size={17} /></button></header>
+      <div className="settings-layout">
         <div className="settings-category-list" role="tablist" aria-label="设置分类" onKeyDown={categoryKeys}>{categories.map(({ id, name, icon: Icon }) => <button key={id} type="button" role="tab" id={`settings-tab-${id}`} aria-selected={category === id} aria-controls={`settings-panel-${id}`} tabIndex={category === id ? 0 : -1} onClick={() => setCategory(id)}><Icon size={15} aria-hidden="true" />{name}</button>)}</div>
         <div className="settings-content">
           {persistenceError && <Alert title="偏好未持久保存" variant="warning"><p>{persistenceError}</p></Alert>}
@@ -106,11 +79,11 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
           <section role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" hidden={category !== "about"}><AboutPanel settings={settings} loading={loading} error={error} onReload={reload} onNotice={showNotice} /></section>
         </div>
       </div>
-      {discard && <div className="settings-discard" role="alertdialog" aria-labelledby="settings-discard-title" aria-describedby="settings-discard-description"><h3 id="settings-discard-title">放弃未保存的修改？</h3><p id="settings-discard-description">模型、提供方或 API Key 的未保存内容将被清除。已经自动保存的浏览器偏好不受影响。</p><div className="settings-form-actions"><Button ref={keepButton} variant="ghost" onClick={() => setDiscard(false)}>继续编辑</Button><Button onClick={onClose}>放弃修改</Button></div></div>}
-    </section>
-    {notice && <Toast key={notice.id} message={notice.message} onDismiss={() => setNotice(undefined)} />}
-  </div>;
-  return typeof document !== "undefined" ? createPortal(content, document.body) : content;
+      {notice && <Toast key={notice.id} message={notice.message} onDismiss={() => setNotice(undefined)} />}
+      <ConfirmDialog open={discard} onOpenChange={setDiscard} title="放弃未保存的修改？" description="模型、提供方或 API Key 的未保存内容将被清除。已经自动保存的浏览器偏好不受影响。" cancelLabel="继续编辑" confirmLabel="放弃修改" onConfirm={onClose} />
+    </DialogContent>
+    </Dialog>
+  </>;
 }
 
 function AboutPanel({ settings, loading, error, onReload, onNotice }: { settings?: InstallationSettings; loading: boolean; error?: string; onReload(): void; onNotice(message: string): void }) {

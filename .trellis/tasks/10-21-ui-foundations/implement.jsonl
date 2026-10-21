@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/kiva-web/frontend/visual-system.md", "reason": "Palette, focus, layout, feedback, scrolling and browser contracts"}
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Settings scope, dirty/pending, credential and focus contracts"}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Scoped resources and action semantics"}
+{"file": ".trellis/tasks/10-21-ui-foundations/design.md", "reason": "Approved component interfaces and ownership"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse and narrow layer ownership"}

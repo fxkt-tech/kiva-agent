@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, FileJson2, X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { resourceApi, useResource } from "@/features/workspace/resources";
 import type { SessionResource } from "@/shared/workspace-contract";
 import type { SessionJsonlDocument } from "@/shared/session-jsonl";
@@ -79,31 +79,9 @@ export function SessionJsonlDialog({ session, onClose, returnFocus }: { session:
   const data = validationError ? undefined : result.data;
   const error = result.error ?? validationError;
   const id = useId();
-  const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   useEffect(() => { setTab("rendered"); setVersion(0); }, [session.projectId, session.id]);
-  useEffect(() => {
-    const previous = returnFocus ?? (typeof document !== "undefined" ? document.activeElement : undefined);
-    closeButton.current?.focus();
-    const owner = dialog.current?.ownerDocument;
-    const containFocus = (event: FocusEvent) => { if (event.target && !dialog.current?.contains(event.target as Node)) closeButton.current?.focus(); };
-    owner?.addEventListener("focusin", containFocus);
-    return () => {
-      owner?.removeEventListener("focusin", containFocus);
-      if (previous && "focus" in previous && previous.isConnected) (previous as HTMLElement).focus();
-    };
-  }, [returnFocus]);
-  function keys(event: KeyboardEvent<HTMLElement>) {
-    event.stopPropagation();
-    if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
-    if (event.key !== "Tab") return;
-    const controls = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]') ?? [])].filter((node) => node.tabIndex >= 0 && !node.closest("[hidden]"));
-    if (!controls.length) { event.preventDefault(); dialog.current?.focus(); return; }
-    const first = controls[0]; const last = controls.at(-1)!;
-    const active = dialog.current?.ownerDocument.activeElement;
-    if (event.shiftKey ? active === first || !dialog.current?.contains(active ?? null) : active === last || !dialog.current?.contains(active ?? null)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
-  }
   function tabKeys(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     let next: number;
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") next = 1 - index;
@@ -112,9 +90,9 @@ export function SessionJsonlDialog({ session, onClose, returnFocus }: { session:
     else return;
     event.preventDefault(); event.stopPropagation(); setTab(next === 0 ? "rendered" : "raw"); tabButtons.current[next]?.focus();
   }
-  const content = <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialog} className="project-dialog session-jsonl-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} tabIndex={-1} onKeyDown={keys}>
-      <div className="project-dialog-heading"><div className="jsonl-heading-copy"><h2 id={`${id}-title`}>会话 JSONL</h2><p className="jsonl-session-name" title={session.name}>{session.name}</p></div><button ref={closeButton} type="button" aria-label="关闭 JSONL" onClick={onClose}><X size={16} /></button></div>
+  return <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+    <DialogContent className="project-dialog session-jsonl-dialog" initialFocus={closeButton} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false}>
+      <div className="project-dialog-heading"><div className="jsonl-heading-copy"><DialogTitle>会话 JSONL</DialogTitle><DialogDescription className="jsonl-session-name" title={session.name}>{session.name}</DialogDescription></div><button ref={closeButton} type="button" aria-label="关闭 JSONL" onClick={onClose}><X size={16} /></button></div>
       <div className="jsonl-toolbar"><div className="jsonl-tabs" role="tablist" aria-label="JSONL 显示方式">{(["rendered", "raw"] as const).map((value, index) => <button ref={(node) => { tabButtons.current[index] = node; }} type="button" role="tab" id={`${id}-${value}-tab`} aria-controls={`${id}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} key={value} onClick={() => setTab(value)} onKeyDown={(event) => tabKeys(event, index)}>{value === "rendered" ? "渲染视图" : "原始文本"}</button>)}</div>{data && <span className="jsonl-meta" title={data.fileName}>{data.fileName ?? "尚未创建 JSONL 文件"} · {size(data.bytes)}{data.truncated ? ` / ${size(data.totalBytes)}` : ""}</span>}</div>
       {data?.truncated && <Alert variant="warning" title="仅显示 JSONL 的部分内容" className="jsonl-notice">文件共 {size(data.totalBytes)}，当前只读取前 {size(data.bytes)}。末行可能不完整；原文件未修改。</Alert>}
       <div className="jsonl-content">
@@ -123,8 +101,6 @@ export function SessionJsonlDialog({ session, onClose, returnFocus }: { session:
           <div className="jsonl-tab-panel" role="tabpanel" id={`${id}-raw-panel`} aria-labelledby={`${id}-raw-tab`} hidden={tab !== "raw"} tabIndex={0}><pre className="jsonl-raw" aria-label="JSONL 原始文本">{data.content}</pre>{!data.content && <p className="jsonl-empty">此会话还没有 JSONL 记录</p>}</div>
         </>}
       </div>
-    </section>
-  </div>;
-  // The mobile sidebar is transformed; a fixed child would otherwise be sidebar-sized.
-  return typeof document !== "undefined" && document.body ? createPortal(content, document.body) : content;
+    </DialogContent>
+  </Dialog>;
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { Highlight, type PrismTheme } from "prism-react-renderer";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useWebPreferences } from "@/lib/web-preferences";
-import ReactMarkdown from "react-markdown";
+import { useStreamingText } from "@/lib/use-streaming-text";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Brain, Check, ChevronRight, CircleX, Copy, LoaderCircle, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,55 +21,58 @@ const codeTheme: PrismTheme = {
   ],
 };
 
-export function MessageContent({ message }: { message: ChatMessage }) {
+export const MessageContent = memo(function MessageContent({ message }: { message: ChatMessage }) {
   const { preferences } = useWebPreferences();
   const [thinkingOpen, setThinkingOpen] = useState(() => preferences.conversation.thinkingExpanded);
+  const text = useStreamingText(message.text, message.streaming === true);
+  const thinking = useStreamingText(message.thinking, message.streaming === true);
   return <>
     {message.thinking && <details className="thinking-block" open={thinkingOpen} onToggle={(event) => setThinkingOpen(event.currentTarget.open)}>
       <summary><Brain size={13} />思考过程<ChevronRight size={13} className="thinking-chevron" /></summary>
-      <div className="thinking-copy"><Markdown>{message.thinking}</Markdown></div>
+      <div className="thinking-copy"><Markdown>{thinking}</Markdown></div>
     </details>}
     {(message.text || (!message.tools.length && message.streaming)) && <div className={cn("markdown-body", message.streaming && "streaming-text")}>
-      {message.text ? <Markdown>{message.text}</Markdown> : <p>正在思考…</p>}
+      {message.text ? <Markdown>{text}</Markdown> : <p>正在思考…</p>}
     </div>}
     {message.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
   </>;
-}
+});
 
-function Markdown({ children }: { children: string }) {
-  return <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    components={{
-      pre({ children: preChildren }) {
-        return <div className="markdown-pre">{preChildren}</div>;
-      },
-      code({ className, children: codeChildren, ...props }) {
-        const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
-        const code = String(codeChildren).replace(/\n$/, "");
-        if (!language) return <code className={className} {...props}>{codeChildren}</code>;
-        return <Highlight theme={codeTheme} code={code} language={language}>
-          {({ className: highlightClass, style, tokens, getLineProps, getTokenProps }) => <pre className={`${highlightClass} code-block`} style={style}>
-            <div className="code-language">{language}</div>
-            {tokens.map((line, index) => <div key={index} {...getLineProps({ line })}>
-              <span className="line-number">{index + 1}</span>
-              {line.map((token, tokenIndex) => <span key={tokenIndex} {...getTokenProps({ token })} />)}
-            </div>)}
-          </pre>}
-        </Highlight>;
-      },
-    }}
-  >{children}</ReactMarkdown>;
-}
+const markdownComponents: Components = {
+  pre({ children: preChildren }) {
+    return <div className="markdown-pre">{preChildren}</div>;
+  },
+  code({ className, children: codeChildren, ...props }) {
+    const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
+    const code = String(codeChildren).replace(/\n$/, "");
+    if (!language) return <code className={className} {...props}>{codeChildren}</code>;
+    return <Highlight theme={codeTheme} code={code} language={language}>
+      {({ className: highlightClass, style, tokens, getLineProps, getTokenProps }) => <pre className={`${highlightClass} code-block`} style={style}>
+        <div className="code-language">{language}</div>
+        {tokens.map((line, index) => <div key={index} {...getLineProps({ line })}>
+          <span className="line-number">{index + 1}</span>
+          {line.map((token, tokenIndex) => <span key={tokenIndex} {...getTokenProps({ token })} />)}
+        </div>)}
+      </pre>}
+    </Highlight>;
+  },
+};
 
-function ToolCard({ tool }: { tool: ToolActivity }) {
+const Markdown = memo(function Markdown({ children }: { children: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{children}</ReactMarkdown>;
+});
+
+const ToolCard = memo(function ToolCard({ tool }: { tool: ToolActivity }) {
   const { preferences } = useWebPreferences();
   const [open, setOpen] = useState(() => preferences.conversation.toolsExpanded);
+  const command = tool.args && typeof tool.args === "object" && "command" in tool.args && typeof tool.args.command === "string" ? tool.args.command : undefined;
+  const summary = command ? `${tool.name} · ${command}` : tool.name;
   const statusLabel = tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成";
   const icon = tool.status === "running" ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : tool.status === "error" ? <CircleX size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />;
   return <details className="tool-card tool-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>
       <Wrench size={13} className="tool-icon" aria-hidden="true" />
-      <span className="tool-summary" title={tool.name}>{tool.name}</span>
+      <span className="tool-summary" title={summary}>{summary}</span>
       <span className="tool-status" data-status={tool.status} role="img" aria-label={statusLabel} title={statusLabel}>{icon}</span>
       <ChevronRight size={14} className="tool-chevron" />
     </summary>
@@ -77,7 +81,7 @@ function ToolCard({ tool }: { tool: ToolActivity }) {
       {tool.result && <ToolValue label="输出" value={tool.result} />}
     </div>
   </details>;
-}
+});
 
 function ToolValue({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);

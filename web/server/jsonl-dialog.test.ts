@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { SessionJsonlDialog } from "../features/sessions/session-jsonl-dialog";
+import { installUiMocks } from "./helpers/mock-ui";
 import type { SessionJsonlDocument } from "../shared/session-jsonl";
 import type { SessionResource } from "../shared/workspace-contract";
+
+installUiMocks();
+const { SessionJsonlDialog } = await import("../features/sessions/session-jsonl-dialog");
+const { Dialog, DialogContent } = await import("../components/ui/dialog");
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -53,43 +57,38 @@ describe("session JSONL dialog", () => {
     assert.equal(renderer!.root.findAll((node) => Boolean(node.props.dangerouslySetInnerHTML)).length, 0);
   });
 
-  it("supports tab keyboard controls, Escape, explicit close and backdrop-only closing", async () => {
+  it("supports tab keyboard controls, shared dismissal requests, explicit close and backdrop-only closing", async () => {
     await open(); let prevented = 0; let stopped = 0;
     const key = (value: string) => ({ key: value, preventDefault() { prevented += 1; }, stopPropagation() { stopped += 1; } });
     await act(() => tab("渲染视图").props.onKeyDown(key("ArrowRight")));
     assert.equal(tab("原始文本").props["aria-selected"], true); assert.equal(tab("原始文本").props.tabIndex, 0);
     await act(() => tab("原始文本").props.onKeyDown(key("Home")));
     assert.equal(tab("渲染视图").props["aria-selected"], true);
-    await act(() => renderer!.root.findByProps({ role: "dialog" }).props.onKeyDown(key("Escape")));
-    assert.equal(closed, 1); assert.equal(prevented, 3); assert.equal(stopped, 3);
+    assert.equal(prevented, 2); assert.equal(stopped, 2);
+    await act(() => renderer!.root.findByType(Dialog).props.onOpenChange(true)); assert.equal(closed, 0);
+    await act(() => renderer!.root.findByType(Dialog).props.onOpenChange(false)); assert.equal(closed, 1);
     await act(() => renderer!.root.findByProps({ "aria-label": "关闭 JSONL" }).props.onClick()); assert.equal(closed, 2);
-    const backdrop = renderer!.root.findByProps({ className: "dialog-backdrop" });
+    const backdrop = renderer!.root.findAllByType("div").find((node) => node.props.className === "ui-dialog-overlay")!;
     await act(() => backdrop.props.onMouseDown({ target: "inside", currentTarget: "outside" })); assert.equal(closed, 2);
     await act(() => backdrop.props.onMouseDown({ target: "outside", currentTarget: "outside" })); assert.equal(closed, 3);
   });
 
-  it("focuses close, traps forward/backward Tab and restores the trigger on unmount", async () => {
-    const listeners = new Map<string, (event: { target: unknown }) => void>();
-    const owner = { activeElement: null as unknown, addEventListener(name: string, listener: (event: { target: unknown }) => void) { listeners.set(name, listener); }, removeEventListener(name: string) { listeners.delete(name); } };
-    function control() { return { tabIndex: 0, isConnected: true, closest() { return null; }, focus() { owner.activeElement = this; } }; }
-    const close = control(); const last = control(); const opener = control();
-    const root = { ownerDocument: owner, contains(node: unknown) { return [close, last].includes(node as typeof close); }, querySelectorAll() { return [close, last]; } };
+  it("delegates initial close-button focus and connected trigger restoration to the shared dialog", async () => {
+    const close = { isConnected: true };
+    const opener = { isConnected: true };
     globalThis.fetch = async () => Response.json(document(""));
     await act(async () => { renderer = create(createElement(SessionJsonlDialog, { session: session(), onClose, returnFocus: opener as unknown as HTMLElement }), { createNodeMock: (element) => {
       const props = element.props as Record<string, unknown>;
-      if (props.role === "dialog") return root;
       if (props["aria-label"] === "关闭 JSONL") return close;
       return null;
     } }); await settle(); });
-    assert.equal(owner.activeElement, close);
-    const keys = renderer!.root.findByProps({ role: "dialog" }).props.onKeyDown;
-    let prevented = 0;
-    const event = (shiftKey: boolean) => ({ key: "Tab", shiftKey, preventDefault() { prevented += 1; }, stopPropagation() {} });
-    await act(() => keys(event(true))); assert.equal(owner.activeElement, last);
-    await act(() => keys(event(false))); assert.equal(owner.activeElement, close); assert.equal(prevented, 2);
-    opener.focus(); await act(() => listeners.get("focusin")?.({ target: opener })); assert.equal(owner.activeElement, close);
-    await act(() => renderer!.unmount()); renderer = undefined;
-    assert.equal(owner.activeElement, opener); assert.equal(listeners.size, 0);
+    const content = renderer!.root.findByType(DialogContent);
+    assert.equal(content.props.initialFocus.current, close);
+    assert.equal(content.props.finalFocus("keyboard"), opener);
+    assert.equal(content.props.showCloseButton, false);
+    assert.equal(content.props.onKeyDown, undefined, "the feature does not install a competing focus trap or Escape handler");
+    opener.isConnected = false;
+    assert.equal(content.props.finalFocus("keyboard"), false, "removed triggers are never focused");
   });
 
   it("shows loading, rejects a wrong scope and retries ordinary read failures", async () => {

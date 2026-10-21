@@ -37,7 +37,7 @@ describe("workspace typography", () => {
     for (const family of declarations) {
       assert.ok(["var(--font-ui)", "var(--font-code)", "inherit"].includes(family), `Unmanaged font family: ${family}`);
     }
-    for (const selector of [".code-block", ".tool-summary", ".tool-detail-body pre", ".workspace-preview pre", ".project-dialog form input"]) {
+    for (const selector of [".code-block", ".tool-summary", ".tool-detail-body pre", ".workspace-preview pre", ".project-location .ui-input"]) {
       const rules = stylesheet.split(selector).slice(1).map((part) => part.split("}")[0]);
       assert.ok(rules.some((rule) => rule.includes("font-family: var(--font-code)")), `${selector} must retain Geist Mono`);
     }

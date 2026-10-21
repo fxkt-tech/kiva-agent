@@ -84,7 +84,7 @@ function hasModalOrRecorder(event: ShortcutKeyboardEvent): boolean {
   const target = event.target as (EventTarget & { closest?: (selector: string) => Element | null; ownerDocument?: Document }) | null | undefined;
   if (target?.closest?.("[data-shortcut-recorder]")) return true;
   const owner = target?.ownerDocument ?? (typeof document === "undefined" ? undefined : document);
-  return !!owner?.querySelector('[role="dialog"][aria-modal="true"]');
+  return !!owner?.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
 }
 
 /** One matching/availability owner. Registrations and blockers are scoped by cleanup tokens. */

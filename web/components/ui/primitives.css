@@ -1,0 +1,122 @@
+/* Shared controls use the root semantic palette, including portaled surfaces. */
+.ui-input,
+.ui-textarea,
+.ui-select-trigger,
+.ui-combobox-field {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--strong-border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+
+.ui-input,
+.ui-select-trigger,
+.ui-combobox-field { height: 32px; }
+.ui-input { padding: 5px 9px; }
+.ui-textarea { display: block; min-height: 80px; padding: 8px 9px; resize: vertical; line-height: 1.6; }
+.ui-input::placeholder,
+.ui-textarea::placeholder,
+.ui-combobox-input::placeholder { color: var(--muted-foreground); opacity: 1; }
+.ui-input:focus-visible,
+.ui-textarea:focus-visible,
+.ui-select-trigger:focus-visible,
+.ui-combobox-field:focus-within,
+.ui-switch:focus-visible,
+.ui-checkbox:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+.ui-input[aria-invalid="true"],
+.ui-textarea[aria-invalid="true"],
+.ui-select-trigger[aria-invalid="true"],
+.ui-combobox-field:has([aria-invalid="true"]) { border-color: var(--danger); }
+.ui-input:disabled,
+.ui-textarea:disabled,
+.ui-select-trigger[data-disabled],
+.ui-combobox-field[data-disabled] { cursor: default; background: var(--subtle); color: var(--muted-foreground); opacity: .65; }
+.ui-select-trigger[data-size="sm"],
+.ui-combobox-field[data-size="sm"] { height: 28px; font-size: 12px; }
+
+.ui-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; text-align: left; }
+.ui-select-trigger:not([data-disabled]):hover { border-color: var(--ring); }
+.ui-select-trigger[data-placeholder] { color: var(--muted-foreground); }
+.ui-select-value { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-control-icon { display: inline-flex; flex: none; color: var(--muted-foreground); }
+.ui-control-icon svg { pointer-events: none; }
+.ui-popup-positioner { isolation: isolate; outline: none; }
+.ui-option-popup,
+.ui-dropdown-menu,
+.ui-popover-content {
+  border: 1px solid var(--strong-border);
+  border-radius: 8px;
+  color: var(--foreground);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  outline: none;
+  transform-origin: var(--transform-origin);
+}
+.ui-option-popup { width: var(--anchor-width); min-width: min(140px, calc(100vw - 16px)); max-width: calc(100vw - 16px); overflow: hidden; padding: 4px; }
+.ui-option-list { max-height: min(288px, calc(var(--available-height) - 10px)); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 4px; outline: none; }
+.ui-option { position: relative; display: flex; min-height: 30px; min-width: 0; align-items: center; gap: 8px; padding: 6px 28px 6px 8px; border-radius: 4px; font-size: 13px; line-height: 1.4; cursor: default; user-select: none; outline: none; }
+.ui-option[data-highlighted] { background: var(--hover); }
+.ui-option[data-selected] { font-weight: 500; }
+.ui-option[data-disabled] { opacity: .4; }
+.ui-option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-option-indicator { position: absolute; right: 7px; display: grid; width: 16px; height: 16px; flex: none; place-items: center; }
+.ui-option-empty { padding: 12px 8px; color: var(--muted-foreground); font-size: 12px; }
+.ui-option-empty:empty { display: none; }
+
+.ui-combobox-field { display: flex; align-items: center; gap: 1px; padding-right: 3px; }
+.ui-combobox-input { width: 100%; height: 100%; min-width: 0; flex: 1; padding: 5px 5px 5px 9px; border: 0; border-radius: inherit; background: transparent; color: inherit; text-overflow: ellipsis; font: inherit; }
+.ui-combobox-input:focus-visible,
+.ui-combobox-action:focus-visible { outline: none; box-shadow: none; }
+.ui-combobox-action { display: inline-grid; width: 24px; height: 24px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; }
+.ui-combobox-action:hover:not(:disabled) { background: var(--hover); color: var(--foreground); }
+.ui-combobox-action:disabled { opacity: .45; }
+.ui-spinner { animation: ui-spin .8s linear infinite; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+.ui-switch { position: relative; display: inline-flex; width: 32px; height: 20px; flex: none; align-items: center; padding: 2px; border: 1px solid var(--strong-border); border-radius: 999px; background: var(--hover); cursor: pointer; transition: background-color .12s ease, border-color .12s ease; }
+.ui-switch[data-checked] { border-color: var(--primary); background: var(--primary); }
+.ui-switch-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--muted-foreground); transition: transform .12s ease, background-color .12s ease; }
+.ui-switch-thumb[data-checked] { transform: translateX(12px); background: var(--primary-foreground); }
+.ui-switch[data-size="sm"] { width: 28px; height: 18px; }
+.ui-switch[data-size="sm"] .ui-switch-thumb { width: 12px; height: 12px; }
+.ui-switch[data-size="sm"] .ui-switch-thumb[data-checked] { transform: translateX(10px); }
+.ui-switch[data-disabled] { cursor: default; opacity: .45; }
+.ui-checkbox { display: inline-grid; width: 16px; height: 16px; flex: none; place-items: center; padding: 0; border: 1px solid var(--strong-border); border-radius: 4px; background: var(--background); color: var(--primary-foreground); cursor: pointer; }
+.ui-checkbox[data-checked],
+.ui-checkbox[data-indeterminate] { border-color: var(--primary); background: var(--primary); }
+.ui-checkbox[data-disabled] { cursor: default; opacity: .45; }
+.ui-checkbox-indicator { display: grid; place-items: center; }
+
+.ui-dialog-overlay { position: fixed; inset: 0; background: var(--overlay); }
+.ui-dialog-content { position: fixed; top: 50%; left: 50%; display: flex; width: min(440px, calc(100vw - 32px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 32px); min-width: 0; min-height: 0; flex-direction: column; gap: 16px; overflow-y: auto; padding: 20px; transform: translate(-50%, -50%); border: 1px solid var(--strong-border); border-radius: 12px; color: var(--foreground); background: var(--card); box-shadow: var(--shadow); outline: none; font-size: 13px; }
+.ui-dialog-header { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding-right: 22px; }
+.ui-dialog-title { margin: 0; font-size: 16px; line-height: 1.5; font-weight: 600; letter-spacing: -.02em; }
+.ui-dialog-description { margin: 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.ui-dialog-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.ui-dialog-close { position: absolute; top: 10px; right: 10px; }
+.ui-popover-content { width: 280px; max-width: calc(100vw - 16px); max-height: var(--available-height); overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+.ui-dropdown-menu { min-width: 160px; max-width: calc(100vw - 16px); max-height: var(--available-height); overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+.ui-dropdown-menu-item { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 12px; line-height: 1.5; user-select: none; outline: none; cursor: default; }
+.ui-dropdown-menu-item svg { width: 14px; height: 14px; flex: none; }
+.ui-dropdown-menu-item[data-highlighted] { color: var(--foreground); background: var(--hover); }
+.ui-dropdown-menu-item[data-variant="destructive"] { color: var(--danger); }
+.ui-dropdown-menu-item[data-variant="destructive"][data-highlighted] { background: color-mix(in srgb, var(--danger) 9%, var(--card)); }
+.ui-dropdown-menu-item[data-disabled] { opacity: .4; }
+.ui-dropdown-menu-separator { height: 1px; margin: 4px -4px; background: var(--border); }
+
+@media (max-width: 720px) {
+  .ui-dialog-content { max-height: calc(100dvh - 16px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-input, .ui-textarea, .ui-select-trigger, .ui-combobox-field, .ui-switch, .ui-switch-thumb { transition: none; }
+  .ui-spinner { animation: none; }
+}

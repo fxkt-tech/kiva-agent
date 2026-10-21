@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
-import { restoreSettingsFocus, settingsTabStops } from "../features/settings/focus";
+import { restoreSettingsFocus } from "../features/settings/focus";
 
 // Minimal DOM seam: deliberately retain layout boxes for closed disclosures/drawers,
 // so passing these tests requires semantic visibility checks, not a rectangle shortcut.
@@ -8,9 +8,7 @@ class ElementFixture {
   children: ElementFixture[] = [];
   parentElement: ElementFixture | null = null;
   isConnected = true;
-  tabIndex = 0;
   rendered = true;
-  disabled = false;
   focusSucceeds = true;
   className = "";
   attributes = new Set<string>();
@@ -25,16 +23,6 @@ class ElementFixture {
   }
   contains(node: ElementFixture | null): boolean { return node === this || this.children.some((child) => child.contains(node)); }
   getClientRects() { return this.rendered ? [{}] : []; }
-  matches(selector: string) {
-    assert.equal(selector, ":disabled");
-    return this.disabled || Boolean(this.parentElement?.tagName === "FIELDSET" && this.parentElement.disabled);
-  }
-  querySelectorAll(selector: string) {
-    assert.match(selector, /summary/);
-    const all = this.children.flatMap((child) => [child, ...child.descendants()]);
-    return all.filter((child) => ["BUTTON", "INPUT", "SELECT", "TEXTAREA", "A", "SUMMARY"].includes(child.tagName) || child.hasAttribute("tabindex"));
-  }
-  descendants(): ElementFixture[] { return this.children.flatMap((child) => [child, ...child.descendants()]); }
   focus() { if (this.focusSucceeds) this.ownerDocument.activeElement = this; }
   element() { return this as unknown as HTMLElement; }
 }
@@ -52,21 +40,16 @@ afterEach(() => {
   else Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: originalHTMLElement });
 });
 
-it("settings Tab boundaries include summaries but exclude closed, hidden, disabled and negative-tabindex controls", () => {
-  const doc = new DocumentFixture(), scope = new ElementFixture("SECTION", doc);
-  const close = scope.append(new ElementFixture("BUTTON", doc));
-  const hiddenPanel = scope.append(new ElementFixture("SECTION", doc)); hiddenPanel.attributes.add("hidden"); hiddenPanel.append(new ElementFixture("INPUT", doc));
-  const details = scope.append(new ElementFixture("DETAILS", doc));
+it("settings focus restoration skips closed disclosure descendants while retaining the visible summary", () => {
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: ElementFixture });
+  const doc = new DocumentFixture(); doc.navigation = new ElementFixture("BUTTON", doc);
+  const details = new ElementFixture("DETAILS", doc);
   const summary = details.append(new ElementFixture("SUMMARY", doc));
-  details.append(new ElementFixture("INPUT", doc));
-  const negative = scope.append(new ElementFixture("BUTTON", doc)); negative.tabIndex = -1;
-  const fieldset = scope.append(new ElementFixture("FIELDSET", doc)); fieldset.disabled = true; fieldset.append(new ElementFixture("INPUT", doc));
-  const hidden = scope.append(new ElementFixture("A", doc)); hidden.style.visibility = "hidden";
-  const absent = scope.append(new ElementFixture("INPUT", doc)); absent.rendered = false;
-  const stops = settingsTabStops(scope.element());
-  assert.deepEqual(stops, [close, summary]);
+  const input = details.append(new ElementFixture("INPUT", doc));
+  restoreSettingsFocus(input.element(), doc.document()); assert.equal(doc.activeElement, doc.navigation);
+  restoreSettingsFocus(summary.element(), doc.document()); assert.equal(doc.activeElement, summary);
   details.attributes.add("open");
-  assert.deepEqual(settingsTabStops(scope.element()), [close, summary, details.children[1]]);
+  restoreSettingsFocus(input.element(), doc.document()); assert.equal(doc.activeElement, input);
 });
 
 it("mobile settings focus restores navigation even during the closed drawer's visibility transition", () => {

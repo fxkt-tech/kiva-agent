@@ -2,12 +2,20 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createElement, useState } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { SettingsDialog } from "../features/settings/dialog";
+import { installUiMocks } from "./helpers/mock-ui";
 import { settingsApi } from "../features/settings/api";
 import { useInstallationModels } from "../features/settings/use-installation-models";
 import { shortcutRegistry } from "../lib/shortcuts";
 import { webPreferences } from "../lib/web-preferences";
 import type { InstallationModelCatalog, InstallationSettings } from "../shared/installation-settings";
+
+// Business state uses the public control contracts; browser coverage owns portal/focus behavior.
+installUiMocks();
+const { SettingsDialog } = await import("../features/settings/dialog");
+const { Dialog } = await import("../components/ui/dialog");
+const { Select } = await import("../components/ui/select");
+const { Combobox } = await import("../components/ui/combobox");
+const { Switch } = await import("../components/ui/switch");
 
 const original = { fetch: globalThis.fetch, window: globalThis.window, navigator: globalThis.navigator };
 const catalog: InstallationModelCatalog = { revision: "catalog_revision_1234", defaults: { provider: "fixture", modelId: "smart", thinkingLevel: "medium" }, models: [ { provider: "fixture", id: "smart", reasoning: true, contextWindow: 100000, thinkingLevels: ["off", "medium", "high"] }, { provider: "fixture", id: "plain", reasoning: false, contextWindow: 100000, thinkingLevels: ["off"] } ] };
@@ -32,9 +40,16 @@ describe("global settings dialog", () => {
   const events = new Map<string, Set<(event: unknown) => void>>();
   const root = () => renderer!.root;
   const button = (label: string) => root().findAllByType("button").find((node) => text(node) === label)!;
-  const field = (label: string) => root().findAll((node) => ["input", "select"].includes(String(node.type)) && node.props["aria-label"] === label)[0];
+  const field = (label: string) => root().findAll((node) => (node.type === "input" || node.type === Select || node.type === Combobox) && (node.props["aria-label"] === label || node.props.label === label))[0];
   async function click(node: ReactTestInstance) { assert.ok(node, "expected control exists"); await act(async () => { node.props.onClick({ preventDefault() {}, stopPropagation() {} }); await settle(); }); }
-  async function change(label: string, value: string) { await act(async () => { field(label).props.onChange({ target: { value } }); await settle(); }); }
+  async function change(label: string, value: string) { await act(async () => {
+    const control = field(label);
+    if (control.props.onValueChange) {
+      const option = control.props.options.find((option: { value: string | number }) => String(option.value) === value);
+      control.props.onValueChange(option?.value ?? value);
+    } else control.props.onChange({ target: { value } });
+    await settle();
+  }); }
   async function open() {
     function Harness() { const [models, setModels] = useState(catalog); return createElement(SettingsDialog, { catalog: models, modelsLoading: false, onCatalog: setModels, onReloadCatalog() {}, onClose() { closes++; } }); }
     await act(async () => { renderer = create(createElement(Harness)); await settle(); });
@@ -88,7 +103,8 @@ describe("global settings dialog", () => {
   });
 
   it("auto-saves preferences with per-group reset and keeps only browser-safe fields", async () => {
-    await open(); await change("主题", "dark"); await change("会话字号", "18"); await click(root().findByProps({ role: "switch", "aria-label": "代码自动换行" }));
+    await open(); await change("主题", "dark"); await change("会话字号", "18");
+    await act(() => { const control = root().findAllByType(Switch).find((node) => node.props["aria-label"] === "代码自动换行")!; control.props.onCheckedChange(!control.props.checked); });
     await click(root().findByProps({ id: "settings-tab-conversation" })); await change("默认消息队列模式", "follow_up");
     assert.equal(webPreferences.getSnapshot().preferences.appearance.theme, "dark");
     assert.equal(webPreferences.getSnapshot().preferences.conversation.queueMode, "follow_up");
@@ -157,9 +173,10 @@ describe("global settings dialog", () => {
     const gate = deferred<Response>(); extra = async (path) => path === "/api/settings/defaults" ? gate.promise : undefined;
     await act(async () => { button("保存默认模型").props.onClick(); await settle(); });
     assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, true);
-    await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "Escape", preventDefault() {}, stopPropagation() {} }); });
-    const backdrop = root().findByProps({ className: "settings-backdrop" }); const target = {};
-    await act(() => backdrop.props.onMouseDown({ target, currentTarget: target })); assert.equal(closes, 0);
+    for (const reason of ["escape-key", "outside-press"]) {
+      await act(() => root().findByType(Dialog).props.onOpenChange(false, { reason, cancel() {} }));
+      assert.equal(closes, 0);
+    }
     await act(async () => { button("正在保存…").props.onClick(); await settle(); }); assert.equal(requests.filter((item) => item.body).length, 1);
     await act(async () => { gate.resolve(Response.json({ ...catalog, revision: "catalog_confirmed_1234", defaults: { ...catalog.defaults!, thinkingLevel: "high" } })); await settle(); });
     assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
@@ -291,7 +308,7 @@ describe("global settings dialog", () => {
     await click(button("重新加载配置") ?? button("检查后端"));
     await click(button("保存提供方")); assert.equal(field("API 地址").props.value, "https://changed.test/v1");
     await act(async () => { gate.resolve(Response.json(metadata())); await settle(); });
-    assert.equal(field("API 地址").props.value, "https://changed.test/v1"); assert.equal(field("选择提供方").findAllByType("option").find((node) => node.props.value === "fixture")?.children.join(""), "fixture · 已配置");
+    assert.equal(field("API 地址").props.value, "https://changed.test/v1"); assert.equal(field("选择提供方").props.options.find((option: { value: string }) => option.value === "fixture")?.label, "fixture · 已配置");
   });
 });
 

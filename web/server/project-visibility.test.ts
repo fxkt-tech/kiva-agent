@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { WorkspaceShell, useWorkspace } from "../features/workspace/shell";
+import { installUiMocks } from "./helpers/mock-ui";
 import type { ProjectResource } from "../shared/workspace-contract";
+
+installUiMocks();
+const { WorkspaceShell, useWorkspace } = await import("../features/workspace/shell");
+const { Dialog } = await import("../components/ui/dialog");
 
 const alpha: ProjectResource = { id: "alpha", name: "Alpha <script>", path: "/repo/alpha", capability: { state: "ready", repositoryRoot: "/repo/alpha", commonDirectory: "/repo/alpha/.git", projectSubdirectory: "", head: "base", branch: "main" } };
 const beta: ProjectResource = { ...alpha, id: "beta", name: "Beta", path: "/repo/beta" };
@@ -29,10 +33,17 @@ describe("project presentation removal", () => {
   }
   async function open(next = "/projects/alpha/sessions/one") { await act(async () => { render(next); await settle(); }); }
   async function click(node: ReactTestInstance) { await act(async () => { node.props.onClick({ button: 0, preventDefault() {}, stopPropagation() {} }); await settle(); }); }
-  const labelled = (label: string) => renderer!.root.findByProps({ "aria-label": label });
+  const labelled = (label: string) => renderer!.root.findAllByType("button").find((node) => node.props["aria-label"] === label)!;
   const button = (label: string) => renderer!.root.findAllByType("button").find((node) => text(node) === label)!;
+  const menuItem = (label: string) => renderer!.root.findAllByProps({ role: "menuitem" }).find((node) => text(node) === label)!;
   const removals = () => requests.filter((entry) => entry.url.endsWith("/actions"));
-  async function requestRemoval(project = alpha) { await click(labelled(`项目操作 ${project.name}`)); await click(button("移除")); }
+  async function requestRemoval(project = alpha) {
+    if (!renderer!.root.findAllByProps({ role: "menu" }).length) await click(labelled(`项目操作 ${project.name}`));
+    await click(menuItem("移除"));
+  }
+  async function requestDismiss() {
+    await act(() => renderer!.root.findByType(Dialog).props.onOpenChange(false, { reason: "escape-key", cancel() {} }));
+  }
   beforeEach(() => {
     projects = [alpha, beta]; renderer = undefined; requests = []; customFetch = undefined; events.clear();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -77,7 +88,7 @@ describe("project presentation removal", () => {
     assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
     assert.equal(removals().length, 0);
     await requestRemoval();
-    await act(async () => { for (const listener of events.get("keydown") ?? []) listener({ key: "Escape", preventDefault() {} }); });
+    await requestDismiss();
     assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
     assert.equal(removals().length, 0);
   });
@@ -110,7 +121,7 @@ describe("project presentation removal", () => {
     customFetch = async (url) => url.endsWith("/actions") ? pending.promise : undefined;
     await click(button("移除项目"));
     assert.equal(button("正在移除…").props.disabled, true);
-    await act(async () => { for (const listener of events.get("keydown") ?? []) listener({ key: "Escape", preventDefault() {} }); });
+    await requestDismiss();
     assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 1);
     await act(async () => { pending.resolve(Response.json({ error: { message: "write failed" } }, { status: 409 })); await settle(); });
     assert.match(text(renderer!.root), /无法移除项目write failed/);
@@ -137,7 +148,7 @@ describe("project presentation removal", () => {
     customFetch = async (url, init) => url.endsWith("/sessions") && init?.method === "POST" ? creation.promise : undefined;
     await act(async () => { void workspace!.createSession(alpha.id); await settle(); });
     await click(labelled(`项目操作 ${alpha.name}`));
-    assert.equal(button("移除").props.disabled, true);
+    assert.equal(menuItem("移除").props["aria-disabled"], true);
     assert.equal(removals().length, 0);
     await act(async () => { creation.resolve(Response.json({ projectId: alpha.id, sessionId: "created", session: { id: "created", projectId: alpha.id } })); await settle(); });
     assert.equal(href, "/projects/alpha/sessions/created");

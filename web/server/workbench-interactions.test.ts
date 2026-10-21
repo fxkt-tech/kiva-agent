@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createElement, type ReactNode } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
-import { WorkspaceShell } from "../features/workspace/shell";
+import { installUiMocks } from "./helpers/mock-ui";
+
+installUiMocks();
+const { WorkspaceShell } = await import("../features/workspace/shell");
+const { Dialog } = await import("../components/ui/dialog");
 import { parseWorkspaceRoute } from "../features/workspace/route";
-import SessionPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/page";
-import SessionsPage from "../app/(workspace)/projects/[projectId]/sessions/page";
-import FilesPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/files/page";
-import ProjectFilesPage from "../app/(workspace)/projects/[projectId]/files/page";
-import ChangesPage from "../app/(workspace)/projects/[projectId]/sessions/[sessionId]/changes/page";
-import ArchivePage from "../app/(workspace)/projects/[projectId]/archive/page";
-import TrashPage from "../app/(workspace)/projects/[projectId]/trash/page";
-import ProjectsPage from "../app/(workspace)/projects/page";
+const { default: SessionPage } = await import("../app/(workspace)/projects/[projectId]/sessions/[sessionId]/page");
+const { default: SessionsPage } = await import("../app/(workspace)/projects/[projectId]/sessions/page");
+const { default: FilesPage } = await import("../app/(workspace)/projects/[projectId]/sessions/[sessionId]/files/page");
+const { default: ProjectFilesPage } = await import("../app/(workspace)/projects/[projectId]/files/page");
+const { default: ChangesPage } = await import("../app/(workspace)/projects/[projectId]/sessions/[sessionId]/changes/page");
+const { default: ArchivePage } = await import("../app/(workspace)/projects/[projectId]/archive/page");
+const { default: TrashPage } = await import("../app/(workspace)/projects/[projectId]/trash/page");
+const { default: ProjectsPage } = await import("../app/(workspace)/projects/page");
 import type { BootstrapData } from "../shared/types";
 import type { RuntimeSnapshot } from "../shared/runtime-types";
 import type { ModelConfiguration } from "../shared/model-configuration";
@@ -53,7 +57,6 @@ describe("routed workspace features", () => {
   let pendingNavigation: Promise<void>;
   let extraFetch: ((url: string, init?: RequestInit) => Promise<Response | undefined>) | undefined;
   let preview: DeletionPreview;
-  let confirm = true;
   const originalFetch = globalThis.fetch;
   const originalWebSocket = globalThis.WebSocket;
   const originalWindow = globalThis.window;
@@ -81,16 +84,18 @@ describe("routed workspace features", () => {
   }
   function navigate(href: string) { pendingNavigation = renderRoute(href); }
   async function open(href = "/projects/alpha/sessions/one") { await act(async () => { await renderRoute(href); }); }
-  async function click(node: ReactTestInstance) { await act(async () => { node.props.onClick({ button: 0, preventDefault() {}, stopPropagation() {} }); await pendingNavigation; await settle(); }); }
-  const button = (label: string) => renderer!.root.findAllByType("button").find((node) => text(node) === label)!;
+  async function click(node: ReactTestInstance) { const target = typeof node.props.onClick === "function" ? node : node.findAll((child) => typeof child.type === "string" && typeof child.props.onClick === "function")[0]; assert.ok(target, "expected an actionable control"); await act(async () => { target.props.onClick({ button: 0, preventDefault() {}, stopPropagation() {} }); await pendingNavigation; await settle(); }); }
+  const button = (label: string) => renderer!.root.findAll((node) => node.type === "button" || (node.type === "div" && node.props.role === "menuitem")).find((node) => text(node) === label)!;
+  const trigger = (label: string) => renderer!.root.findAllByType("button").find((node) => node.props["aria-label"] === label)!;
+  const field = (label: string) => renderer!.root.findAll((node) => (node.props["aria-label"] ?? node.props.label) === label && typeof node.props.onValueChange === "function")[0];
   const treeRow = (path: string) => renderer!.root.findAllByProps({ className: "workspace-tree-row" }).find((node) => node.props["data-path"] === path)!;
   const commandRequests = () => requests.filter((entry) => entry.url.endsWith("/commands"));
   async function publish(value = currentSnapshot, socket = FakeWebSocket.sockets.at(-1)!) { await act(async () => { socket.onopen?.(); socket.publish({ type: "snapshot", snapshot: value }, { projectId: "alpha", sessionId: value.session.id }); }); }
 
   beforeEach(() => {
-    renderer = undefined; requests = []; visibleProjects = [p]; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); defaults = undefined; preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; confirm = true; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
+    renderer = undefined; requests = []; visibleProjects = [p]; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); defaults = undefined; preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); }, confirm: () => confirm, prompt: () => "Renamed" } });
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
     Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:9495" } });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {}, getItem() { return null; } } });
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
@@ -243,7 +248,7 @@ describe("routed workspace features", () => {
 
   it("opens the selected row's JSONL without switching or executing the viewed session", async () => {
     await open(); await publish();
-    await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session two" }));
+    await click(trigger("会话操作 Session two"));
     await click(button("查看 JSONL"));
     assert.equal(currentHref, "/projects/alpha/sessions/one");
     assert.equal(renderer!.root.findAllByProps({ className: "session-menu" }).length, 0);
@@ -261,12 +266,12 @@ describe("routed workspace features", () => {
   it("hides a project only after confirmation and restores its retained sessions on reimport", async () => {
     await open(); await publish();
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "keep this draft" } }));
-    await click(renderer!.root.findByProps({ "aria-label": "项目操作 Alpha" }));
+    await click(trigger("项目操作 Alpha"));
     await click(button("移除"));
     assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /仅从项目列表中隐藏.*不会被删除.*任务会继续/);
     await click(button("取消"));
     assert.equal(requests.some((entry) => entry.body), false);
-    await click(renderer!.root.findByProps({ "aria-label": "项目操作 Alpha" })); await click(button("移除")); await click(button("移除项目"));
+    await click(trigger("项目操作 Alpha")); await click(button("移除")); await click(button("移除项目"));
     assert.equal(currentHref, "/projects");
     assert.equal(renderer!.root.findAllByProps({ className: "project-card" }).length, 0);
     assert.deepEqual(requests.filter((entry) => entry.body).map((entry) => [entry.url, entry.body]), [["/api/projects/alpha/actions", { type: "remove" }]]);
@@ -275,6 +280,46 @@ describe("routed workspace features", () => {
     assert.ok(renderer!.root.findAllByProps({ className: "session-item-title" }).some((node) => text(node) === "Session one"));
     await open(); await publish();
     assert.equal(renderer!.root.findByType("textarea").props.value, "keep this draft");
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("renames the chosen row through an explicit form without changing the active session", async () => {
+    await open(); await publish();
+    await click(trigger("会话操作 Session two")); await click(button("重命名"));
+    const name = () => renderer!.root.findByProps({ "aria-label": "新的会话名称" });
+    assert.equal(name().props.value, "Session two");
+    await act(() => name().props.onChange({ target: { value: "  Renamed two  " } }));
+    await click(button("取消"));
+    assert.equal(requests.some((entry) => entry.body), false);
+    await click(trigger("会话操作 Session two")); await click(button("重命名"));
+    assert.equal(name().props.value, "Session two");
+    await act(() => name().props.onChange({ target: { value: "  Renamed two  " } }));
+    await act(async () => { renderer!.root.findByProps({ className: "rename-session-form" }).props.onSubmit({ preventDefault() {} }); await settle(); });
+    assert.deepEqual(requests.filter((entry) => entry.body).map((entry) => [entry.url, entry.body]), [["/api/projects/alpha/sessions/two/actions", { type: "rename", name: "Renamed two" }]]);
+    assert.equal(currentHref, "/projects/alpha/sessions/one");
+    assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("retains a failed rename candidate and blocks dismissal and duplicate submission while saving", async () => {
+    await open(); await click(trigger("会话操作 Session two")); await click(button("重命名"));
+    const form = () => renderer!.root.findByProps({ className: "rename-session-form" });
+    const name = () => renderer!.root.findByProps({ "aria-label": "新的会话名称" });
+    await act(() => name().props.onChange({ target: { value: "Candidate" } }));
+    extraFetch = async (url) => url.endsWith("/two/actions") ? Response.json({ error: "Rename failed" }, { status: 409 }) : undefined;
+    await act(async () => { form().props.onSubmit({ preventDefault() {} }); await settle(); });
+    assert.equal(name().props.value, "Candidate");
+    assert.match(text(renderer!.root.findByProps({ role: "alert" })), /Rename failed/);
+    const gate = deferred<Response>();
+    extraFetch = async (url) => url.endsWith("/two/actions") ? gate.promise : undefined;
+    await act(async () => { form().props.onSubmit({ preventDefault() {} }); await settle(); });
+    assert.equal(button("取消").props.disabled, true);
+    await act(() => renderer!.root.findByType(Dialog).props.onOpenChange(false));
+    assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 1);
+    await act(async () => { form().props.onSubmit({ preventDefault() {} }); await settle(); });
+    assert.equal(requests.filter((entry) => entry.url.endsWith("/two/actions")).length, 2);
+    await act(async () => { gate.resolve(Response.json({ accepted: true })); await settle(); });
+    assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
     assert.equal(commandRequests().length, 0);
   });
 
@@ -290,7 +335,7 @@ describe("routed workspace features", () => {
     await click(renderer!.root.findByProps({ className: "project-more" }));
     assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, true, "opening the menu must not expand a collapsed project");
     assert.deepEqual(renderer!.root.findByProps({ role: "menu" }).findAllByProps({ role: "menuitem" }).map(text), ["搜索会话", "移除"]);
-    await click(renderer!.root.findByProps({ "aria-label": "搜索 Alpha 会话" }));
+    await click(renderer!.root.findAll((node) => node.type === "div" && node.props.role === "menuitem" && node.props["aria-label"] === "搜索 Alpha 会话")[0]);
     assert.equal(renderer!.root.findAllByProps({ role: "menu" }).length, 0);
     assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, false);
     const search = renderer!.root.findByProps({ placeholder: "搜索会话" });
@@ -311,40 +356,29 @@ describe("routed workspace features", () => {
     const action = renderer!.root.findByProps({ className: "project-more" });
     await act(() => row.props.onClick({ target: action, currentTarget: row }));
     assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, true);
-    await click(action); await click(renderer!.root.findByProps({ "aria-label": "搜索 Alpha 会话" }));
+    await click(action); await click(renderer!.root.findAll((node) => node.type === "div" && node.props.role === "menuitem" && node.props["aria-label"] === "搜索 Alpha 会话")[0]);
     assert.equal(renderer!.root.findByProps({ className: "project-toggle" }).props["aria-expanded"], true);
     await act(() => renderer!.root.findByProps({ placeholder: "搜索会话" }).props.onChange({ target: { value: "Session two" } }));
     assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 1);
-    await click(action); await click(renderer!.root.findByProps({ "aria-label": "搜索 Alpha 会话" }));
-    assert.equal(renderer!.root.findAllByProps({ placeholder: "搜索会话" }).length, 0);
+    await click(action); await click(renderer!.root.findAll((node) => node.type === "div" && node.props.role === "menuitem" && node.props["aria-label"] === "搜索 Alpha 会话")[0]);
+    assert.equal(renderer!.root.findAllByType("input").filter((node) => node.props.placeholder === "搜索会话").length, 0);
     assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 2);
     assert.equal(currentHref, "/projects/alpha/sessions");
     assert.equal(requests.some((entry) => entry.body || entry.url.includes("directories")), false);
   });
 
-  it("navigates project menu items by keyboard and searches the scoped sessions view from files", async () => {
+  it("searches the scoped sessions view from the shared project menu on files", async () => {
     await open("/projects/alpha/files");
     await click(renderer!.root.findByProps({ className: "project-more" }));
-    let focused = -1;
-    const items = [0, 1].map((index) => ({ focus() { focused = index; } }));
-    const menu = renderer!.root.findByProps({ role: "menu" });
-    for (const [key, current, expected] of [["ArrowDown", 0, 1], ["ArrowDown", 1, 0], ["ArrowUp", 0, 1], ["Home", 1, 0], ["End", 0, 1]] as const) {
-      let prevented = false;
-      menu.props.onKeyDown({ key, target: items[current], currentTarget: { querySelectorAll() { return items; } }, preventDefault() { prevented = true; }, stopPropagation() {} });
-      assert.equal(focused, expected); assert.equal(prevented, true);
-    }
-    await act(() => menu.props.onKeyDown({ key: "Escape", preventDefault() {}, stopPropagation() {} }));
-    assert.equal(renderer!.root.findAllByProps({ role: "menu" }).length, 0);
-    await click(renderer!.root.findByProps({ className: "project-more" }));
-    await click(renderer!.root.findByProps({ "aria-label": "搜索 Alpha 会话" }));
+    await click(renderer!.root.findAll((node) => node.type === "div" && node.props.role === "menuitem" && node.props["aria-label"] === "搜索 Alpha 会话")[0]);
     assert.equal(currentHref, "/projects/alpha/sessions");
     assert.equal(renderer!.root.findByProps({ id: "project-sessions-alpha" }).props.hidden, false);
-    assert.equal(renderer!.root.findAllByProps({ placeholder: "搜索会话" }).length, 1);
+    assert.equal(renderer!.root.findAllByType("input").filter((node) => node.props.placeholder === "搜索会话").length, 1);
     await open("/projects/alpha/files");
     await click(renderer!.root.findByProps({ className: "project-more" }));
-    await click(renderer!.root.findByProps({ "aria-label": "搜索 Alpha 会话" }));
+    await click(renderer!.root.findAll((node) => node.type === "div" && node.props.role === "menuitem" && node.props["aria-label"] === "搜索 Alpha 会话")[0]);
     assert.equal(currentHref, "/projects/alpha/sessions");
-    assert.equal(renderer!.root.findAllByProps({ placeholder: "搜索会话" }).length, 1, "returning from files reopens existing search rather than toggling it closed");
+    assert.equal(renderer!.root.findAllByType("input").filter((node) => node.props.placeholder === "搜索会话").length, 1, "returning from files reopens existing search rather than toggling it closed");
     assert.equal(requests.some((entry) => entry.body), false);
   });
 
@@ -352,8 +386,8 @@ describe("routed workspace features", () => {
     await open("/projects/alpha/sessions");
     const choice = { provider: "test", modelId: "alternate-model", thinkingLevel: "high" };
     await click(renderer!.root.findByProps({ "aria-label": "模型与思考强度" }));
-    await act(() => renderer!.root.findByProps({ "aria-label": "选择模型" }).props.onChange({ target: { value: JSON.stringify(["test", "alternate-model"]) } }));
-    await act(() => renderer!.root.findByProps({ "aria-label": "思考强度" }).props.onChange({ target: { value: "high" } }));
+    await act(() => field("选择模型").props.onValueChange(JSON.stringify(["test", "alternate-model"])));
+    await act(() => field("思考强度").props.onValueChange("high"));
     assert.doesNotMatch(text(renderer!.root.findByProps({ role: "dialog" })), /所有项目的新会话|其他已有会话不变/);
     assert.equal(requests.filter((entry) => entry.body).length, 0, "candidate changes are local until confirmation");
     await click(button("保存并应用"));
@@ -377,7 +411,7 @@ describe("routed workspace features", () => {
     assert.equal(trigger.props.disabled, false);
     assert.equal(commandRequests().length, 0, "passive options must not start the session");
     await click(trigger);
-    await act(() => renderer!.root.findByProps({ "aria-label": "选择模型" }).props.onChange({ target: { value: JSON.stringify(["test", "alternate-model"]) } }));
+    await act(() => field("选择模型").props.onValueChange(JSON.stringify(["test", "alternate-model"])));
     await click(button("保存并应用"));
     assert.deepEqual(requests.filter((entry) => entry.body).map((entry) => entry.body), [{ provider: "test", modelId: "alternate-model", thinkingLevel: "medium", sessionId: "one" }]);
     assert.equal(commandRequests().length, 0);
@@ -388,9 +422,9 @@ describe("routed workspace features", () => {
     await open("/projects/alpha/sessions");
     const trigger = () => renderer!.root.findByProps({ "aria-label": "模型与思考强度" });
     await click(trigger());
-    await act(() => renderer!.root.findByProps({ "aria-label": "选择模型" }).props.onChange({ target: { value: JSON.stringify(["test", "plain-model"]) } }));
-    const thinking = renderer!.root.findByProps({ "aria-label": "思考强度" });
-    assert.equal(thinking.props.value, "off"); assert.deepEqual(thinking.findAllByType("option").map((node) => node.props.value), ["off"]);
+    await act(() => field("选择模型").props.onValueChange(JSON.stringify(["test", "plain-model"])));
+    const thinking = field("思考强度");
+    assert.equal(thinking.props.value, "off"); assert.deepEqual(thinking.props.options.map((option: { value: string }) => option.value), ["off"]);
     await click(button("取消")); assert.equal(requests.filter((entry) => entry.body).length, 0);
     assert.doesNotMatch(text(trigger()), /plain-model/);
     await click(trigger());
@@ -446,7 +480,7 @@ describe("routed workspace features", () => {
     await open("/projects/alpha/sessions/missing");
     assert.match(text(renderer!.root.findByProps({ "data-slot": "alert" })), /无法打开此资源.*Session not found/);
     extraFetch = undefined; preview.workspace.state = "dirty";
-    await open(); await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session one" })); await click(button("删除"));
+    await open(); await click(trigger("会话操作 Session one")); await click(button("删除"));
     const warning = renderer!.root.findByProps({ role: "dialog" }).findByProps({ "data-slot": "alert", "data-variant": "warning" });
     assert.match(text(warning), /暂时不能清理工作区/);
     assert.equal(button("删除会话").props.disabled, true);
@@ -569,14 +603,14 @@ describe("routed workspace features", () => {
     assert.equal(submissions, 0); assert.equal(commandRequests().length, 0);
   });
 
-  it("brands the dynamic Pi version in the sidebar and retains the cold fallback", async () => {
+  it("keeps the sidebar footer limited to settings with and without Pi version metadata", async () => {
     extraFetch = async (url) => url === "/api/projects/alpha" ? Response.json({ project: p, bootstrap: { ...bootstrap, runtime: { ...bootstrap.runtime, piVersion: "2.3.4" } } }) : undefined;
     await open();
-    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置Powered By Pi 2.3.4");
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置");
     assert.equal(renderer!.root.findAllByProps({ className: "status-dot" }).length, 0);
     extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta" } }) : undefined;
     await open("/projects/beta/sessions");
-    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置Powered By Pi 1.3.0");
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置");
   });
 
   it("opens installation settings from no-project and conversation routes without losing a draft or running commands", async () => {
@@ -584,7 +618,7 @@ describe("routed workspace features", () => {
     await open("/projects");
     const settingsButton = () => renderer!.root.findByProps({ "aria-label": "设置" });
     await click(settingsButton());
-    assert.equal(renderer!.root.findByProps({ "aria-labelledby": "settings-title" }).props["aria-modal"], "true");
+    assert.equal(renderer!.root.findByProps({ role: "dialog" }).props["aria-modal"], "true");
     assert.equal(currentHref, "/projects"); assert.equal(FakeWebSocket.sockets.length, 0);
     await click(renderer!.root.findByProps({ "aria-label": "关闭设置" }));
     visibleProjects = [p]; await open(); await publish();
@@ -642,10 +676,10 @@ describe("routed workspace features", () => {
     webPreferences.update("shortcuts", { sendMode: "mod-enter" });
     webPreferences.update("conversation", { queueMode: "follow_up" });
     await open(); await publish(snapshot("one", { status: "running" }));
-    assert.equal(renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.value, "follow_up");
-    await act(() => renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.onChange({ target: { value: "steer" } }));
+    assert.equal(field("消息队列模式").props.value, "follow_up");
+    await act(() => field("消息队列模式").props.onValueChange("steer"));
     await act(() => webPreferences.update("conversation", { queueMode: "follow_up" }));
-    assert.equal(renderer!.root.findByProps({ "aria-label": "消息队列模式" }).props.value, "steer", "preference updates must not overwrite current composer selection");
+    assert.equal(field("消息队列模式").props.value, "steer", "preference updates must not overwrite current composer selection");
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "mod-enter message" } }));
     async function key(mod = false, shiftKey = false, isComposing = false) {
       let prevented = false;
@@ -682,7 +716,7 @@ describe("routed workspace features", () => {
     extraFetch = async (url) => url === "/api/projects" ? Response.json({ error: "registry unavailable" }, { status: 503 }) : undefined;
     await open(); await publish();
     const footer = renderer!.root.findByProps({ className: "sidebar-footer" });
-    assert.equal(text(footer), "设置Powered By Pi 1.3.0");
+    assert.equal(text(footer), "设置");
     assert.doesNotMatch(text(footer), /本地工作区|连接异常/);
     assert.equal(footer.findAll((node) => typeof node.props.className === "string" && node.props.className.split(/\s+/).includes("status-dot")).length, 0);
     assert.ok(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("项目列表加载失败registry unavailable")));
@@ -776,7 +810,7 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findByType("textarea").props.value, "/review ");
     assert.equal(renderer!.root.findAllByProps({ className: "command-palette" }).length, 0);
     assert.equal(commandRequests().length, 0, "selecting a command only edits the draft");
-    await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "k", metaKey: true, preventDefault() {} }); });
+    await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "k", metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), shiftKey: false, altKey: false, preventDefault() {} }); });
     assert.equal(renderer!.root.findAllByProps({ className: "command-palette" }).length, 1, "keyboard command access remains available");
   });
 
@@ -787,12 +821,17 @@ describe("routed workspace features", () => {
     assert.equal(settings.findAllByProps({ className: "composer-context" }).length, 1);
     assert.equal(settings.findAllByProps({ className: "model-settings-control" }).length, 1);
     await click(renderer!.root.findByProps({ "aria-label": "模型与思考强度" }));
-    await act(async () => renderer!.root.findByProps({ "aria-label": "思考强度" }).props.onChange({ target: { value: "high" } }));
+    await act(async () => field("思考强度").props.onValueChange("high"));
     await click(button("保存并应用"));
     await click(renderer!.root.findByProps({ "aria-label": "上下文剩余量" }));
     assert.match(text(renderer!.root.findByProps({ id: "composer-context-details" })), /25%|25,000/);
-    confirm = false; await click(button("压缩上下文")); assert.ok(!commandRequests().some((entry) => entry.body?.type === "compact"));
-    confirm = true; await click(button("压缩上下文"));
+    await click(button("压缩上下文"));
+    assert.ok(renderer!.root.findByProps({ role: "alertdialog" }));
+    await click(button("取消"));
+    assert.ok(!commandRequests().some((entry) => entry.body?.type === "compact"));
+    await click(renderer!.root.findByProps({ "aria-label": "上下文剩余量" }));
+    await click(button("压缩上下文"));
+    await click(button("压缩上下文"));
     await publish(snapshot("one", { status: "running", queue: { steering: ["steer one"], followUp: ["follow one"] } }));
     assert.equal(renderer!.root.findByProps({ "aria-label": "模型与思考强度" }).props.disabled, true);
     await click(renderer!.root.findByProps({ "aria-label": "清空队列" })); await click(renderer!.root.findByProps({ "aria-label": "停止" }));
@@ -855,16 +894,16 @@ describe("routed workspace features", () => {
 
   it("defaults cleanup checked, blocks dirty cleanup, and sends unchecked history-only choice", async () => {
     preview.workspace.state = "dirty"; preview.workspace.localChanges = ["?? work.txt"];
-    await open(); await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session one" })); await click(button("删除"));
-    const checkbox = renderer!.root.findByProps({ type: "checkbox" }); assert.equal(checkbox.props.checked, true); assert.equal(button("删除会话").props.disabled, true);
-    await act(() => checkbox.props.onChange({ target: { checked: false } })); assert.equal(button("删除会话").props.disabled, false);
+    await open(); await click(trigger("会话操作 Session one")); await click(button("删除"));
+    const checkbox = renderer!.root.findAll((node) => typeof node.props.onCheckedChange === "function")[0]; assert.equal(checkbox.props.checked, true); assert.equal(button("删除会话").props.disabled, true);
+    await act(() => checkbox.props.onCheckedChange(false)); assert.equal(button("删除会话").props.disabled, false);
     await click(button("删除会话"));
     assert.ok(requests.some((entry) => entry.url.endsWith("/actions") && entry.body?.confirmation === "target-state-token" && entry.body.removeWorktree === false));
   });
 
   it("keeps exact target visible on busy preview and reports raw partial deletion truthfully", async () => {
     extraFetch = async (url) => url.endsWith("/deletion-preview") ? Response.json({ error: "Task is busy" }, { status: 409 }) : undefined;
-    await open(); await click(renderer!.root.findByProps({ "aria-label": "会话操作 Session one" })); await click(button("删除"));
+    await open(); await click(trigger("会话操作 Session one")); await click(button("删除"));
     assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /one.*\/worktrees\/one/s); assert.equal(button("删除会话").props.disabled, true);
     extraFetch = async (url) => url.endsWith("/actions") ? Response.json({ status: "partial", history: "retained", workspace: "removed", error: "history move failed" }) : undefined;
     await click(button("重新检查")); await click(button("删除会话"));

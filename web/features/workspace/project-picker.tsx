@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Braces, ChevronDown, Folder, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import type { ProjectResource } from "@/shared/workspace-contract";
 import { mutate, projectUrl, request } from "./resources";
 import { useWorkspace } from "./shell";
@@ -17,6 +19,8 @@ export function ProjectPicker({ onClose }: { onClose(): void }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<{ title: string; message: string }>();
   const sequence = useRef(0);
+  const pathInput = useRef<HTMLInputElement>(null);
+  const openingRef = useRef(false);
   async function browse(nextPath: string) {
     const current = ++sequence.current;
     setLoading(true); setError(undefined);
@@ -28,7 +32,8 @@ export function ProjectPicker({ onClose }: { onClose(): void }) {
   }
   useEffect(() => { void browse(path); return () => { sequence.current += 1; }; }, []);
   async function open() {
-    if (!directory) return;
+    if (!directory || openingRef.current) return;
+    openingRef.current = true;
     setOpening(true); setError(undefined);
     const source = locationKey;
     try {
@@ -36,15 +41,15 @@ export function ProjectPicker({ onClose }: { onClose(): void }) {
       if (!result.project.id) throw new Error("项目注册未返回标识");
       refresh(); onClose(); if (navigationCurrent(source)) navigate(`${projectUrl(result.project.id)}/sessions`);
     } catch (cause) { setError({ title: "无法添加项目", message: cause instanceof Error ? cause.message : String(cause) }); }
-    finally { setOpening(false); }
+    finally { openingRef.current = false; setOpening(false); }
   }
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="project-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title">
-    <div className="project-dialog-heading"><div><p className="eyebrow">LOCAL WORKSPACE</p><h2 id="project-dialog-title">打开本地项目</h2></div><button aria-label="关闭项目选择器" onClick={onClose}><X size={16} /></button></div>
-    <p>浏览运行 Kiva 的这台电脑，选择项目目录。</p>
-    <form className="project-location" onSubmit={(event) => { event.preventDefault(); void browse(path); }}><input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/project" spellCheck={false} /><Button type="submit" variant="ghost" disabled={loading || !path.trim()}>转到</Button></form>
+  return <Dialog open onOpenChange={(next) => { if (!next && !openingRef.current) onClose(); }}><DialogContent className="project-dialog" initialFocus={pathInput} showCloseButton={false} aria-busy={opening}>
+    <div className="project-dialog-heading"><div><p className="eyebrow">LOCAL WORKSPACE</p><DialogTitle>打开本地项目</DialogTitle></div><button aria-label="关闭项目选择器" disabled={opening} onClick={onClose}><X size={16} /></button></div>
+    <DialogDescription>浏览运行 Kiva 的这台电脑，选择项目目录。</DialogDescription>
+    <form className="project-location" onSubmit={(event) => { event.preventDefault(); if (!openingRef.current) void browse(path); }}><Input ref={pathInput} aria-label="项目目录" disabled={opening} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/project" spellCheck={false} /><Button type="submit" variant="ghost" disabled={opening || loading || !path.trim()}>转到</Button></form>
     {error && <Alert variant="error" title={error.title} className="dialog-alert">{error.message}</Alert>}
-    <div className="directory-browser"><div className="directory-browser-header"><button disabled={!directory?.parent || loading} onClick={() => directory?.parent && void browse(directory.parent)} aria-label="上级目录">↑</button><span title={directory?.path}>{directory?.path ?? "正在读取目录…"}</span></div><div className="directory-list">{loading ? <p>正在读取目录…</p> : directory?.directories.length ? directory.directories.map((entry) => <button key={entry.path} onClick={() => void browse(entry.path)}><Folder size={15} /><span>{entry.name}</span><ChevronDown size={13} /></button>) : <p>这个目录中没有子目录</p>}</div></div>
+    <div className="directory-browser"><div className="directory-browser-header"><button disabled={opening || !directory?.parent || loading} onClick={() => directory?.parent && void browse(directory.parent)} aria-label="上级目录">↑</button><span title={directory?.path}>{directory?.path ?? "正在读取目录…"}</span></div><div className="directory-list">{loading ? <p>正在读取目录…</p> : directory?.directories.length ? directory.directories.map((entry) => <button key={entry.path} disabled={opening} onClick={() => void browse(entry.path)}><Folder size={15} /><span>{entry.name}</span><ChevronDown size={13} /></button>) : <p>这个目录中没有子目录</p>}</div></div>
     <div className="project-dialog-actions"><span>选择：{directory?.path ?? path}</span><Button disabled={opening || loading || !directory?.path} onClick={() => void open()}>{opening ? "正在打开…" : "使用此文件夹"}</Button></div>
     <div className="recent-projects"><span>已注册项目</span>{projects.map((item) => <button key={item.id} disabled={opening} onClick={() => void browse(item.path)}><Braces size={14} /><div><strong>{item.name}</strong><small>{item.path}</small></div>{item.id === project?.id && <em>当前</em>}</button>)}</div>
-  </section></div>;
+  </DialogContent></Dialog>;
 }

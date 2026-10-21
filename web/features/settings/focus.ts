@@ -11,13 +11,6 @@ function isVisible(node: HTMLElement): boolean {
   return true;
 }
 
-/** Native summaries participate in Tab order; descendants of closed details do not. */
-export function settingsTabStops(scope: HTMLElement): HTMLElement[] {
-  return Array.from(scope.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href], summary, [tabindex]"))
-    .filter((node) => node.tabIndex >= 0 && !node.matches(":disabled") && isVisible(node))
-    .sort((a, b) => (a.tabIndex > 0 ? a.tabIndex : Infinity) - (b.tabIndex > 0 ? b.tabIndex : Infinity));
-}
-
 export function restoreSettingsFocus(previous: Element | null, owner: Document): void {
   const navigation = owner.querySelector<HTMLButtonElement>(".workspace-navigation-toggle");
   if (previous instanceof HTMLElement && previous.isConnected) {

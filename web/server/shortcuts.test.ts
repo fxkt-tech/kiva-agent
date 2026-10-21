@@ -137,7 +137,7 @@ describe("single scoped shortcut dispatcher", () => {
     registry.register("newSession", { run: () => { runs += 1; } });
     const recorder = Object.assign(new EventTarget(), { closest: (selector: string) => { assert.equal(selector, "[data-shortcut-recorder]"); return {}; } });
     assert.equal(registry.dispatch(event({ target: recorder })), false);
-    const modal = Object.assign(new EventTarget(), { ownerDocument: { querySelector: (selector: string) => { assert.equal(selector, '[role="dialog"][aria-modal="true"]'); return {}; } } });
+    const modal = Object.assign(new EventTarget(), { ownerDocument: { querySelector: (selector: string) => { assert.equal(selector, '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'); return {}; } } });
     assert.equal(registry.dispatch(event({ target: modal })), false);
     assert.equal(runs, 0);
     assert.equal(registry.dispatch(event()), true);
