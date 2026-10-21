@@ -50,3 +50,25 @@ Implemented stable project/session URLs, passive resource repositories, independ
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Global settings and provider configuration
+<!-- trellis-session: v=2 fp=be46ab060095f852 -->
+
+**Date**: 2026-10-21
+**Task**: Global settings and provider configuration
+**Branch**: `feat/workspace-routing`
+
+### Summary
+
+Implemented Geist settings with appearance, shortcuts, session preferences, Pi model defaults, safe separate provider and API-key saves, and diagnostics. Preserved existing-session controls and active work. Passed 254 tests, typecheck, production build, diff/context checks, independent review and isolated plus actual-origin desktop/mobile browser acceptance. Excluded the pre-existing generated next-env development imports; archived the completed task after the feature commit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32c2d78` | feat(web): add global settings and provider configuration |
+
+### Status
+
+[OK] **Completed**
