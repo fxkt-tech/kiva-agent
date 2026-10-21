@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -46,6 +46,135 @@ async function fixture(capacity = 4) {
 }
 
 describe("scoped HTTP/WebSocket transport", () => {
+  it("reads exact original JSONL passively, including empty metadata and malformed lines", async () => {
+    const f = await fixture();
+    try {
+      const session = await f.create("jsonl-passive");
+      const api = `${f.api}/sessions/${session.id}/jsonl`;
+      const empty = await f.request(api);
+      assert.equal(empty.status, 200);
+      assert.equal(empty.body.content, ""); assert.equal(empty.body.bytes, 0);
+      assert.equal(empty.body.fileName, undefined); assert.equal(empty.body.truncated, false);
+      const metadata = join(f.installation, ".kiva", "web", "sessions", `${session.id}.json`);
+      const before = readFileSync(metadata, "utf8");
+      const history = join(f.installation, ".kiva", "sessions"); mkdirSync(history, { recursive: true });
+      const content = `${JSON.stringify({ type: "session", id: session.id, version: 3, cwd: f.installation })}\r\n\r\n${JSON.stringify({ type: "message", id: "record", parentId: null, message: { role: "user", content: "原始文本" } })}\n{partial`;
+      const file = join(history, "original.jsonl"); writeFileSync(file, content);
+      const response = await fetch(`${f.origin}${api}`);
+      assert.equal(response.status, 200); assert.match(response.headers.get("cache-control")!, /no-store/);
+      const document = await response.json();
+      assert.equal(document.projectId, f.project.id); assert.equal(document.sessionId, session.id);
+      assert.equal(document.content, content); assert.equal(document.fileName, "original.jsonl");
+      assert.equal(document.bytes, Buffer.byteLength(content)); assert.equal(document.totalBytes, document.bytes);
+      assert.equal(document.truncated, false); assert.equal(readFileSync(file, "utf8"), content);
+      assert.equal(readFileSync(metadata, "utf8"), before); assert.equal(f.adapters.size, 0);
+      assert.equal((await f.request(`${api}?path=other.jsonl`)).status, 400);
+      assert.equal((await f.request(api, {})).status, 405);
+      assert.equal((await f.request(`${f.api}/sessions/missing/jsonl`)).status, 404);
+      const otherRoot = join(f.root, "other-jsonl"); mkdirSync(otherRoot);
+      const other = f.registry.register(otherRoot);
+      assert.equal((await f.request(`/api/projects/${other.id}/sessions/${session.id}/jsonl`)).status, 404);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
+  it("hides projects without deleting data or stopping owners and restores the same registration on import", async () => {
+    const f = await fixture();
+    try {
+      const session = await f.create("project-visibility");
+      const sessionApi = `${f.api}/sessions/${session.id}`;
+      const marker = join(session.workspace!.executionRoot, "preserved.txt"); writeFileSync(marker, "keep all working files\n");
+      const metadata = join(f.installation, ".kiva", "web", "sessions", `${session.id}.json`);
+      await f.request(`${sessionApi}/commands`, { type: "prompt", message: "keep running while hidden" });
+      const before = readFileSync(metadata, "utf8"), owner = f.adapters.get(session.id)!;
+      assert.equal((await f.request(`${f.api}/actions`, { type: "remove" }, { origin: "https://foreign.invalid" })).status, 403);
+      assert.equal((await f.request(`${f.api}/actions`, { type: "delete" })).status, 400);
+      assert.equal((await f.request(`${f.api}/actions`)).status, 405);
+      const hidden = await f.request(`${f.api}/actions`, { type: "remove" });
+      assert.equal(hidden.status, 200); assert.equal(hidden.body.projectId, f.project.id); assert.deepEqual(hidden.body.projects, []);
+      assert.deepEqual((await f.request("/api/projects")).body.projects, []);
+      assert.deepEqual(new WorkspaceRegistry(f.installation).list(), []);
+      assert.equal((await f.request(`${sessionApi}`)).body.lifecycle, "running");
+      assert.equal(owner.starts(), 1); assert.equal(owner.stops(), 0);
+      assert.equal(readFileSync(marker, "utf8"), "keep all working files\n"); assert.equal(readFileSync(metadata, "utf8"), before);
+      assert.equal((await f.request(`${f.api}/actions`, { type: "remove" })).status, 200, "hiding is idempotent");
+      const restored = await f.request("/api/projects", { path: f.installation });
+      assert.equal(restored.body.project.id, f.project.id);
+      assert.equal((await f.request("/api/projects")).body.projects[0].id, f.project.id);
+      assert.equal((await f.request(`${sessionApi}`)).body.lifecycle, "running");
+      assert.equal(readFileSync(metadata, "utf8"), before);
+      assert.equal((await f.request("/api/projects/not-registered/actions", { type: "remove" })).status, 404);
+
+      // A hidden registration still protects its directory from workspace cleanup.
+      await f.request(`${sessionApi}/commands`, { type: "abort" });
+      const registeredTree = f.registry.register(session.workspace!.treeRoot);
+      await f.request(`/api/projects/${registeredTree.id}/actions`, { type: "remove" });
+      const preview = await f.request(`${sessionApi}/deletion-preview`, {});
+      assert.equal(preview.body.workspace.state, "unavailable");
+      assert.match(preview.body.workspace.message, /registered project/);
+      assert.equal(existsSync(marker), true);
+    } finally { await f.close(); }
+  });
+
+  it("serves passive installation model options before any session exists", async () => {
+    const f = await fixture();
+    try {
+      const agent = join(f.installation, ".kiva", "agent");
+      mkdirSync(agent, { recursive: true });
+      writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: { "transport-fixture": { api: "openai-completions", baseUrl: "https://example.invalid/v1", apiKey: "fixture-secret", models: [{ id: "configured", name: "Configured", contextWindow: 8192, maxTokens: 2048, reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] } } }));
+      const result = await f.request(`${f.api}/models`);
+      assert.equal(result.status, 200);
+      assert.ok((result.body.models as Array<{ provider: string; id: string }>).some((model) => model.provider === "transport-fixture" && model.id === "configured"));
+      assert.equal(JSON.stringify(result.body).includes("fixture-secret"), false);
+      assert.equal(f.adapters.size, 0);
+      assert.equal(f.repository.list(f.project.id).length, 0);
+      assert.equal((await f.request("/api/projects/not-registered/models")).status, 404);
+    } finally { await f.close(); }
+  });
+
+  it("saves a complete installation default without execution and pins only new sessions", async () => {
+    const f = await fixture();
+    try {
+      const agent = join(f.installation, ".kiva", "agent"); mkdirSync(agent, { recursive: true });
+      writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: { fixture: { api: "openai-completions", baseUrl: "https://example.invalid/v1", apiKey: "fixture-secret", models: ["controlled", "alternate"].map((id) => ({ id, name: id, contextWindow: 8192, maxTokens: 2048, reasoning: true, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })) } } }));
+      const before = await f.create("before-default");
+      const choice = { provider: "fixture", modelId: "alternate", thinkingLevel: "high" };
+      assert.equal((await f.request(`${f.api}/models`, { ...choice, thinkingLevel: "not-a-level" })).status, 409);
+      assert.equal((await f.request(`${f.api}/models`, { provider: "fixture", modelId: "alternate" })).status, 400);
+      assert.equal((await f.request(`${f.api}/models`, choice, { origin: "https://foreign.invalid" })).status, 403);
+      assert.equal(existsSync(join(agent, "settings.json")), false);
+      assert.equal((await f.request(`${f.api}/models`, choice)).status, 200);
+      assert.deepEqual((await f.request(`${f.api}/models`)).body.defaults, choice);
+      const otherRoot = join(f.root, "another-project"); mkdirSync(otherRoot);
+      const other = f.registry.register(otherRoot);
+      assert.deepEqual((await f.request(`/api/projects/${other.id}/models`)).body.defaults, choice);
+      assert.equal(f.adapters.size, 0);
+      const created = await f.create("after-default");
+      assert.deepEqual(created.controls, { model: { provider: "fixture", id: "alternate" }, thinkingLevel: "high" });
+      const original = { model: { provider: "fixture", id: "controlled" }, thinkingLevel: "low" };
+      const [once, retried] = await Promise.all([
+        f.repository.create(f.project.id, { operationId: "concurrent-default-retry" }, original),
+        f.repository.create(f.project.id, { operationId: "concurrent-default-retry" }, { model: { provider: "fixture", id: "alternate" }, thinkingLevel: "high" }),
+      ]);
+      assert.equal(once.id, retried.id); assert.deepEqual(retried.controls, original);
+      assert.equal(f.repository.read(f.project.id, before.id).session.controls?.model, undefined);
+      assert.equal((await f.request(`${f.api}/sessions/${created.id}`)).body.lifecycle, "dormant");
+      const forCurrent = { ...choice, modelId: "controlled", thinkingLevel: "medium", sessionId: created.id };
+      assert.equal((await f.request(`${f.api}/models`, forCurrent)).status, 200);
+      assert.equal(f.adapters.size, 1);
+      assert.equal((await f.request(`${f.api}/sessions/${created.id}`)).body.snapshot.thinkingLevel, "medium");
+      const stored = readFileSync(join(agent, "settings.json"), "utf8");
+      assert.equal((await f.request(`${f.api}/models`, { ...choice, sessionId: "missing" })).status, 404);
+      assert.equal(readFileSync(join(agent, "settings.json"), "utf8"), stored);
+      await f.request(`${f.api}/sessions/${created.id}/commands`, { type: "prompt", message: "stay running" });
+      assert.equal((await f.request(`${f.api}/models`, { ...choice, sessionId: created.id })).status, 409);
+      assert.equal(readFileSync(join(agent, "settings.json"), "utf8"), stored);
+      // Changing defaults alone never edits another existing session's confirmed controls.
+      await f.request(`${f.api}/models`, choice);
+      assert.equal(f.repository.read(f.project.id, created.id).session.controls?.model?.id, "controlled");
+    } finally { await f.close(); }
+  });
+
   it("creates a real isolated resource while GET and WS stay passive, then scopes live events and concurrent owners", { timeout: 20_000 }, async () => {
     const f = await fixture();
     try {

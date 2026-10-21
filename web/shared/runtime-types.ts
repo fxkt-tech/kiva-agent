@@ -1,4 +1,5 @@
 import type { SessionResource } from "./workspace-contract";
+import { isModelConfiguration, type ModelConfiguration } from "./model-configuration";
 
 export type RuntimeStatus = "connecting" | "idle" | "running" | "error";
 export interface RuntimeScope { projectId: string; sessionId: string }
@@ -27,6 +28,7 @@ export interface RuntimeModel {
   id: string;
   contextWindow: number;
   reasoning: boolean;
+  thinkingLevels?: string[];
 }
 
 export interface RuntimeContextUsage {
@@ -106,6 +108,7 @@ export type RuntimeCommand =
   | { type: "rename_session"; name: string }
   | { type: "set_model"; provider: string; modelId: string }
   | { type: "set_thinking"; level: string }
+  | ({ type: "set_configuration" } & ModelConfiguration)
   | { type: "compact" }
   | { type: "steer"; message: string; images?: RuntimeImage[]; files?: RuntimeTextFile[] }
   | { type: "follow_up"; message: string; images?: RuntimeImage[]; files?: RuntimeTextFile[] }
@@ -155,6 +158,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
     case "rename_session": return typeof command.name === "string" && command.name.length <= 1_000;
     case "set_model": return typeof command.provider === "string" && typeof command.modelId === "string";
     case "set_thinking": return typeof command.level === "string";
+    case "set_configuration": return isModelConfiguration(command);
     case "extension_ui_response": return typeof command.id === "string" && (typeof command.value === "string" || typeof command.confirmed === "boolean" || command.cancelled === true);
     case "prompt": case "steer": case "follow_up":
       return typeof command.message === "string" && validAttachments(command.images, "image") && validAttachments(command.files, "text");

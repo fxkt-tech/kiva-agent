@@ -8,6 +8,8 @@ import type { RuntimeManager } from "./runtime-manager";
 import { getBootstrapData } from "./bootstrap";
 import { readProjectDiff, readProjectFile } from "./workspace-files";
 import { listWorkspaceDirectories } from "./workspace-directories";
+import { readModelCatalog, readModelDefaults, saveModelDefaults } from "./model-catalog";
+import { isModelConfiguration } from "../shared/model-configuration";
 
 export interface ScopedTransportOptions {
   registry: WorkspaceRegistry;
@@ -20,6 +22,7 @@ export interface ScopedTransportOptions {
 export function createScopedTransport({ registry, repository, manager, allowedOrigins }: ScopedTransportOptions) {
   const allowed = (request: IncomingMessage) => !request.headers.origin || allowedOrigins.includes(request.headers.origin);
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
+  let settingsWrite = Promise.resolve();
 
   return {
     allowed,
@@ -50,6 +53,27 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         }
         const projectId = decodeResourceId(parts[2]);
         const project = registry.resolve(projectId);
+        if (parts.length === 4 && parts[3] === "actions") {
+          if (request.method !== "POST") methodNotAllowed();
+          const body = await readObject(request);
+          if (body.type !== "remove") throw new WorkspaceError("invalid_action", "Invalid project action", 400, { projectId });
+          sendJson(response, 200, { projectId, projects: registry.remove(projectId) });
+          return true;
+        }
+        if (parts.length === 4 && parts[3] === "models") {
+          if (request.method === "GET") sendJson(response, 200, await readModelCatalog(registry.installationRoot));
+          else if (request.method === "POST") {
+            const body = await readObject(request);
+            if (!isModelConfiguration(body) || (body.sessionId !== undefined && typeof body.sessionId !== "string")) throw new WorkspaceError("invalid_configuration", "请同时选择模型和思考强度。", 400, { projectId });
+            const selection = { provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel };
+            const scope = body.sessionId === undefined ? undefined : { projectId, sessionId: decodeResourceId(body.sessionId) };
+            // Serialize complete pair saves across projects/tabs sharing this installation.
+            const pending = settingsWrite.then(() => saveModelDefaults(registry.installationRoot, selection, scope ? async () => { await manager.command(scope, { type: "set_configuration", ...selection }); } : undefined));
+            settingsWrite = pending.then(() => {}, () => {});
+            sendJson(response, 200, await pending);
+          } else methodNotAllowed();
+          return true;
+        }
         const bootstrap = (root = project.path) => getBootstrapData(root, { installationRoot: registry.installationRoot, recentProjects: registry.list().map((entry) => entry.path), historyRoot: project.path });
         if (parts.length === 3 && request.method === "GET") { sendJson(response, 200, { project, bootstrap: project.capability.state === "unavailable" ? undefined : bootstrap() }); return true; }
         if (["workspace", "files", "changes"].includes(parts[3]) && parts.length === 4 && request.method === "GET") {
@@ -63,7 +87,8 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
             if (collection !== null && !["active", "archived", "trash"].includes(collection)) throw new WorkspaceError("invalid_collection", "Unknown session collection", 400);
             sendJson(response, 200, { active: await repository.list(projectId, "active"), archived: await repository.list(projectId, "archived"), trash: await repository.list(projectId, "trash") });
           } else if (request.method === "POST") {
-            const session = await repository.create(projectId, creationInput(await readObject(request)));
+            const defaults = readModelDefaults(registry.installationRoot);
+            const session = await repository.create(projectId, creationInput(await readObject(request)), defaults ? { model: { provider: defaults.provider, id: defaults.modelId }, thinkingLevel: defaults.thinkingLevel } : undefined);
             sendJson(response, 201, { projectId, sessionId: session.id, session });
           } else methodNotAllowed();
           return true;
@@ -72,6 +97,12 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         if (parts.length === 5 && request.method === "GET") { sendJson(response, 200, await manager.read(scope)); return true; }
         if (parts.length !== 6) throw new WorkspaceError("endpoint_not_found", "API endpoint not found", 404, scope);
         const endpoint = parts[5];
+        if (endpoint === "jsonl") {
+          if (request.method !== "GET") methodNotAllowed();
+          if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "JSONL resources do not accept file paths or query parameters", 400, scope);
+          sendJson(response, 200, repository.readJsonl(projectId, scope.sessionId));
+          return true;
+        }
         if (["workspace", "files", "changes"].includes(endpoint) && request.method === "GET") {
           const root = await repository.resolveWorkspace(projectId, scope.sessionId);
           sendJson(response, 200, endpoint === "workspace" ? bootstrap(root) : endpoint === "files" ? readProjectFile(root, url.searchParams.get("path") ?? "") : readProjectDiff(root, url.searchParams.get("path") ?? "")); return true;

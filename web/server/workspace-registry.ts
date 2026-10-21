@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeResourceId, WorkspaceError, type GitCapability, type ProjectResource } from "../shared/workspace-contract";
 
-interface ProjectRegistration { id: string; path: string }
+interface ProjectRegistration { id: string; path: string; hidden?: boolean }
 interface WorkspaceConfig { version: 2; active: string; projects: ProjectRegistration[] }
 
 export class WorkspaceRegistry {
@@ -29,7 +29,10 @@ export class WorkspaceRegistry {
     this.write(value);
   }
 
-  list(): ProjectResource[] { return this.read().projects.map((entry) => this.project(entry)); }
+  list(): ProjectResource[] { return this.read().projects.filter((entry) => !entry.hidden).map((entry) => this.project(entry)); }
+
+  /** Hidden registrations still own their source directories and session resources. */
+  listAll(): ProjectResource[] { return this.read().projects.map((entry) => this.project(entry)); }
 
   resolve(id: string): ProjectResource {
     decodeResourceId(id);
@@ -44,15 +47,31 @@ export class WorkspaceRegistry {
     const value = this.read();
     let entry = value.projects.find((project) => project.path === canonical);
     if (!entry) { entry = { id: projectId(canonical), path: canonical }; value.projects.push(entry); }
+    delete entry.hidden;
     value.active = entry.id;
     value.projects = [entry, ...value.projects.filter((project) => project.id !== entry.id)];
     this.write(value);
     return this.project(entry);
   }
 
+  /** Presentation-only removal; never inspect or mutate the target directory. */
+  remove(id: string): ProjectResource[] {
+    decodeResourceId(id);
+    const value = this.read();
+    const entry = value.projects.find((project) => project.id === id);
+    if (!entry) throw new WorkspaceError("project_not_found", "Project is not registered", 404, { projectId: id });
+    this.initialize();
+    if (!entry.hidden) {
+      entry.hidden = true;
+      if (value.active === id) value.active = value.projects.find((project) => !project.hidden)?.id ?? "";
+      this.write(value);
+    }
+    return value.projects.filter((project) => !project.hidden).map((project) => this.project(project));
+  }
+
   activeRoot() {
     const value = this.read();
-    const entry = value.projects.find((project) => project.id === value.active);
+    const entry = value.projects.find((project) => project.id === value.active && !project.hidden) ?? value.projects.find((project) => !project.hidden);
     try { return canonicalDirectory(entry?.path ?? this.installationRoot); }
     catch { return this.installationRoot; }
   }
@@ -60,10 +79,11 @@ export class WorkspaceRegistry {
   open(path: string) { return this.register(path).path; }
 
   private project(entry: ProjectRegistration): ProjectResource {
+    const identity = { id: entry.id, path: entry.path, name: basename(entry.path) };
     try {
-      if (canonicalDirectory(entry.path) !== entry.path) return { ...entry, name: basename(entry.path), capability: { state: "unavailable", message: "Registered directory was moved or substituted; repair registration explicitly." } };
+      if (canonicalDirectory(entry.path) !== entry.path) return { ...identity, capability: { state: "unavailable", message: "Registered directory was moved or substituted; repair registration explicitly." } };
     } catch { /* Capability inspection reports missing/permission errors below. */ }
-    return { ...entry, name: basename(entry.path), capability: inspectGitCapability(entry.path) };
+    return { ...identity, capability: inspectGitCapability(entry.path) };
   }
 
   private read(): WorkspaceConfig {
@@ -78,7 +98,8 @@ export class WorkspaceRegistry {
           if (!entry || typeof entry !== "object") throw new Error("Invalid project record");
           const project = entry as Record<string, unknown>;
           if (typeof project.path !== "string" || !project.path || resolve(project.path) !== project.path) throw new Error("Invalid registered path");
-          return { id: decodeResourceId(project.id), path: project.path };
+          if (project.hidden !== undefined && typeof project.hidden !== "boolean") throw new Error("Invalid project visibility");
+          return { id: decodeResourceId(project.id), path: project.path, ...(project.hidden !== undefined ? { hidden: project.hidden } : {}) };
         });
         if (new Set(projects.map((project) => project.id)).size !== projects.length || new Set(projects.map((project) => project.path)).size !== projects.length) throw new Error("Duplicate project registration");
         return { version: 2, active: config.active, projects };

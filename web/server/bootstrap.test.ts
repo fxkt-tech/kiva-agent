@@ -23,9 +23,12 @@ it("keeps exact Unicode, newline, whitespace and renamed paths in workspace list
   writeFileSync(join(root, whitespace), "changed whitespace filename\n");
   const untracked = "未跟踪 -> 文件.txt";
   writeFileSync(join(root, untracked), "untracked\n");
+  mkdirSync(join(root, "new", "nested"), { recursive: true });
+  const nested = "new/nested/新 文件.ts";
+  writeFileSync(join(root, nested), "nested untracked\n");
 
   const data = getBootstrapData(root, { installationRoot: root, recentProjects: [], historyRoot: root });
-  for (const path of [destination, newline, whitespace, untracked]) {
+  for (const path of [destination, newline, whitespace, untracked, nested]) {
     assert.ok(data.project.files.includes(path), `File listing must preserve ${JSON.stringify(path)}`);
     assert.ok(data.project.changes.some((change) => change.path === path), `Change listing must preserve ${JSON.stringify(path)}`);
     const query = new URLSearchParams({ path });
@@ -35,6 +38,7 @@ it("keeps exact Unicode, newline, whitespace and renamed paths in workspace list
   }
   assert.equal(data.project.changes.filter((change) => change.path === destination).length, 1);
   assert.equal(data.project.changes.some((change) => change.path === source), false);
+  assert.equal(data.project.changes.some((change) => change.path.endsWith("/")), false, "change trees need individual files, not aggregated untracked directories");
 });
 
 it("lists only selected-subdirectory changes using paths relative to its execution context", () => {

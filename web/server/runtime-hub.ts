@@ -76,6 +76,7 @@ export class RuntimeHub {
   private quarantineStop?: Promise<void>;
   private interrupted = false;
   private eventChain = Promise.resolve();
+  private configuring = false;
 
   constructor(
     private readonly createAdapter: RuntimeAdapterFactory,
@@ -165,9 +166,11 @@ export class RuntimeHub {
     if (this.expected && (command.type === "switch_session" || command.type === "new_session")) {
       throw new WorkspaceError("identity_change_forbidden", "Create or continue a session through its resource endpoint", 400, this.expected);
     }
-    if (this.expected && (command.type === "set_model" || command.type === "set_thinking" || command.type === "compact") && ["running", "waiting", "starting"].includes(this.lifecycle())) {
+    if (this.configuring && ["prompt", "steer", "follow_up", "set_model", "set_thinking", "set_configuration", "compact"].includes(command.type)) throw new WorkspaceError("session_busy", "模型设置正在保存，请稍后重试。", 409, this.expected);
+    if (this.expected && (command.type === "set_model" || command.type === "set_thinking" || command.type === "set_configuration" || command.type === "compact") && ["running", "waiting", "starting"].includes(this.lifecycle())) {
       throw new WorkspaceError("session_busy", "Wait for this task to finish before changing execution controls", 409, this.expected);
     }
+    if (command.type === "set_configuration") this.configuring = true;
     this.pending += 1;
     try {
     let adapter = await this.ensureStarted();
@@ -196,6 +199,22 @@ export class RuntimeHub {
         const name = command.name.trim();
         if (!name) throw new Error("Session name cannot be empty");
         await adapter.setSessionName(name);
+      } else if (command.type === "set_configuration") {
+        const model = (await adapter.getAvailableModels()).find((model) => model.provider === command.provider && model.id === command.modelId);
+        if (!model) throw new WorkspaceError("model_unavailable", "The selected model is unavailable", 409, this.expected);
+        if (model.thinkingLevels && !model.thinkingLevels.includes(command.thinkingLevel)) throw new WorkspaceError("thinking_unavailable", "The selected model does not support this thinking level", 409, this.expected);
+        const previous = await adapter.getState();
+        try {
+          await adapter.setModel(command.provider, command.modelId);
+          if (!(await adapter.getAvailableThinkingLevels()).includes(command.thinkingLevel)) throw new WorkspaceError("thinking_unavailable", "The selected thinking level is unavailable", 409, this.expected);
+          await adapter.setThinkingLevel(command.thinkingLevel);
+        } catch (error) {
+          try {
+            if (previous.model?.provider && previous.model.id) await adapter.setModel(previous.model.provider, previous.model.id);
+            await adapter.setThinkingLevel(previous.thinkingLevel);
+          } catch { throw new WorkspaceError("configuration_partial", "模型设置未能完成，且无法恢复原设置。请检查当前会话状态后重试。", 500, this.expected); }
+          throw error;
+        }
       } else if (command.type === "set_model") {
         if (this.expected && !(await adapter.getAvailableModels()).some((model) => model.provider === command.provider && model.id === command.modelId)) throw new WorkspaceError("model_unavailable", "The selected model is unavailable", 409, this.expected);
         await adapter.setModel(command.provider, command.modelId);
@@ -227,7 +246,7 @@ export class RuntimeHub {
     }
     await this.publishSnapshot();
     return { accepted: true };
-    } finally { this.pending -= 1; }
+    } finally { this.pending -= 1; if (command.type === "set_configuration") this.configuring = false; }
   }
 
   subscribe(listener: RuntimeListener): () => void {

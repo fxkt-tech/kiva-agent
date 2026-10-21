@@ -10,7 +10,7 @@ function git(repoRoot: string, args: string[]) {
 }
 
 export function getBootstrapData(repoRoot = workspaceRegistry.activeRoot(), options: { installationRoot?: string; recentProjects?: string[]; historyRoot?: string } = {}): BootstrapData {
-  const status = git(repoRoot, ["status", "--porcelain=v1", "-z", "--", "."]);
+  const status = git(repoRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."]);
   const prefix = git(repoRoot, ["rev-parse", "--show-prefix"]).replace(/\r?\n$/, "");
   const trackedFiles = git(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
   const files = trackedFiles ? trackedFiles.split("\0").filter(Boolean).slice(0, 1_000) : listFiles(repoRoot);

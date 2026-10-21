@@ -7,6 +7,7 @@ import type { ResourceTarget } from "@/shared/workspace-contract";
 import { resourceApi } from "@/features/workspace/resources";
 
 export type ToolActivity = RuntimeTool;
+export type RuntimeConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
 
 export interface ChatMessage extends RuntimeMessage {
   streaming?: boolean;
@@ -14,6 +15,7 @@ export interface ChatMessage extends RuntimeMessage {
 
 interface RuntimeViewState {
   connected: boolean;
+  connectionStatus: RuntimeConnectionStatus;
   status: RuntimeStatus;
   snapshot?: RuntimeSnapshot;
   messages: ChatMessage[];
@@ -24,14 +26,14 @@ interface RuntimeViewState {
 
 type Action =
   | { type: "reset" }
-  | { type: "connected"; value: boolean }
+  | { type: "connection"; value: RuntimeConnectionStatus }
   | { type: "stream_changed" }
   | { type: "user"; message: ChatMessage }
   | { type: "event"; event: RuntimeEvent }
   | { type: "error"; message: string }
   | { type: "ui_answered" };
 
-const initialState: RuntimeViewState = { connected: false, status: "connecting", messages: [], sessionsVersion: 0 };
+const initialState: RuntimeViewState = { connected: false, connectionStatus: "connecting", status: "connecting", messages: [], sessionsVersion: 0 };
 
 export function useRuntime(target?: ResourceTarget) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
@@ -58,11 +60,13 @@ export function useRuntime(target?: ResourceTarget) {
       if (streamId.current) cursor.set("stream", streamId.current);
       if (sequence.current) cursor.set("since", String(sequence.current));
       const suffix = cursor.size ? `?${cursor}` : "";
-      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${resourceApi(target)}/events${suffix}`);
-      socket.onopen = () => dispatch({ type: "connected", value: true });
-      socket.onmessage = (message) => {
+      const currentSocket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${resourceApi(target)}/events${suffix}`);
+      socket = currentSocket;
+      const isCurrent = () => !disposed && selectedKey.current === key && socket === currentSocket;
+      currentSocket.onopen = () => { if (isCurrent()) dispatch({ type: "connection", value: "connected" }); };
+      currentSocket.onmessage = (message) => {
         try {
-          if (disposed || selectedKey.current !== key) return;
+          if (!isCurrent()) return;
           const decoded = JSON.parse(String(message.data));
           if (typeof decoded.error === "string") { dispatch({ type: "error", message: decoded.error }); return; }
           const wire = decodeRuntimeWireEvent(decoded, { projectId: target.projectId, sessionId: target.sessionId! });
@@ -84,10 +88,13 @@ export function useRuntime(target?: ResourceTarget) {
         }
         catch { dispatch({ type: "error", message: "收到无法解析的运行时事件" }); }
       };
-      socket.onerror = () => dispatch({ type: "error", message: "无法连接到 KivA 运行时" });
-      socket.onclose = (event) => {
-        dispatch({ type: "connected", value: false });
-        if (!disposed && event.code !== 1008) retry.current = setTimeout(connect, 1_500);
+      currentSocket.onerror = () => { if (isCurrent()) dispatch({ type: "error", message: "无法连接到 KivA 运行时" }); };
+      currentSocket.onclose = (event) => {
+        if (!isCurrent()) return;
+        socket = undefined;
+        const terminal = event.code === 1008;
+        dispatch({ type: "connection", value: terminal ? "disconnected" : "reconnecting" });
+        if (!terminal) retry.current = setTimeout(connect, 1_500);
       };
     };
     connect();
@@ -137,16 +144,6 @@ export function useRuntime(target?: ResourceTarget) {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
   }, [execute]);
 
-  const setModel = useCallback(async (provider: string, modelId: string) => {
-    try { await execute({ type: "set_model", provider, modelId }); }
-    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
-  }, [execute]);
-
-  const setThinking = useCallback(async (level: string) => {
-    try { await execute({ type: "set_thinking", level }); }
-    catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
-  }, [execute]);
-
   const compact = useCallback(async () => {
     try { await execute({ type: "compact" }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
@@ -166,12 +163,12 @@ export function useRuntime(target?: ResourceTarget) {
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); }
   }, [execute]);
 
-  return { ...(renderedKey.current === key ? state : initialState), sendPrompt, abort, initialize, renameSession, queueMessage, clearQueue, setModel, setThinking, compact, respondToUI };
+  return { ...(renderedKey.current === key ? state : initialState), sendPrompt, abort, initialize, renameSession, queueMessage, clearQueue, compact, respondToUI };
 }
 
 function reducer(state: RuntimeViewState, action: Action): RuntimeViewState {
   if (action.type === "reset") return initialState;
-  if (action.type === "connected") return { ...state, connected: action.value, error: action.value ? undefined : state.error };
+  if (action.type === "connection") return { ...state, connectionStatus: action.value, connected: action.value === "connected", error: action.value === "connected" ? undefined : state.error };
   if (action.type === "stream_changed") return { ...state, snapshot: undefined, uiRequest: undefined };
   if (action.type === "user") return { ...state, status: "running", messages: [...state.messages, action.message], error: undefined };
   if (action.type === "error") return { ...state, status: "error", error: action.message };

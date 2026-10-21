@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createPiAdapter } from "./pi-adapter";
 import { RuntimeHub } from "./runtime-hub";
+import { saveModelDefaults } from "./model-catalog";
 import type { ExecutionDescriptor } from "../shared/workspace-contract";
 
 function fixture() {
@@ -20,6 +21,27 @@ function fixture() {
 }
 
 describe("installed Pi no-prompt compatibility", () => {
+  it("starts new Pi owners with the saved model/thinking pair without a model request", { timeout: 30_000 }, async () => {
+    const f = fixture(), agent = join(f.descriptor.installationRoot, ".kiva", "agent");
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: { "defaults-probe": { api: "openai-completions", baseUrl: "https://example.invalid/v1", apiKey: "offline-fixture-key", models: [{ id: "offline-reasoner", name: "Offline reasoner", contextWindow: 8192, maxTokens: 2048, reasoning: true, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] } } }));
+    await saveModelDefaults(f.descriptor.installationRoot, { provider: "defaults-probe", modelId: "offline-reasoner", thinkingLevel: "high" });
+    const settings = readFileSync(join(agent, "settings.json"), "utf8");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const previous = process.env.PI_OFFLINE; process.env.PI_OFFLINE = "1";
+      const adapter = createPiAdapter({ ...f.descriptor, sessionId: randomUUID() });
+      if (previous === undefined) delete process.env.PI_OFFLINE; else process.env.PI_OFFLINE = previous;
+      try {
+        await adapter.start();
+        const state = await adapter.getState();
+        assert.equal(state.model?.provider, "defaults-probe"); assert.equal(state.model?.id, "offline-reasoner");
+        assert.equal(state.thinkingLevel, "high"); assert.equal(state.messageCount, 0);
+        await adapter.setThinkingLevel("low");
+      } finally { await adapter.stop(); }
+      assert.equal(readFileSync(join(agent, "settings.json"), "utf8"), settings, "session-only RPC controls must not rewrite shared defaults");
+    }
+  });
+
   it("creates and restarts the full exact empty ID with observed extension cwd and external history", { timeout: 30_000 }, async () => {
     const f = fixture();
     for (let attempt = 0; attempt < 2; attempt++) {

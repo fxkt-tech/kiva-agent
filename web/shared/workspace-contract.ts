@@ -7,6 +7,7 @@ export type GitCapability =
   | { state: "ready"; repositoryRoot: string; commonDirectory: string; projectSubdirectory: string; head: string; branch: string }
   | { state: "non-git" | "no-commit" | "missing-git" | "unavailable"; message: string };
 export interface ProjectResource { id: string; name: string; path: string; capability: GitCapability }
+export interface RemoveProjectResult { projectId: string; projects: ProjectResource[] }
 export interface OwnedWorkspace {
   projectId: string; sessionId: string; operationId: string;
   managedRoot: string; treeRoot: string; executionRoot: string;

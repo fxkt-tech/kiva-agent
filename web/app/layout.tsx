@@ -5,7 +5,7 @@ import { legacyCacheRecoveryScript } from "@/lib/legacy-cache-recovery";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kiva — Agent Workspace",
+  title: "KivA Agent",
   description: "A project-local workspace for Kiva Agent",
 };
 

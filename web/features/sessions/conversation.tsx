@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, FolderOpen } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { ExtensionDialog } from "@/components/extension-dialog";
 import { MessageContent } from "@/components/message-content";
 import { useRuntime } from "@/lib/use-runtime";
@@ -57,14 +58,14 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
   }
   return <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session")}>
     <MessageViewport className="message-scroll"><div className="message-column">
-      {session && <div className="session-workspace-notice">
+      {session && <Alert variant={quarantined || !session.executable ? "warning" : "info"} title={quarantined ? "运行时已隔离" : session.legacy ? "旧会话 · 只读" : "会话工作区"} className="session-workspace-notice">
         {quarantined && <p>运行时会话标识发生变化，已停止接受操作。请检查运行状态后显式恢复。</p>}
         {session.legacy ? <><p>这是在原项目目录执行的旧会话，仅供查看。继续操作会创建新的隔离会话，并从项目当前提交开始；不会还原历史代码。</p>{session.collection !== "trash" && <Button variant="ghost" size="sm" disabled={continuing || project.capability.state !== "ready"} onClick={() => void continueSession()}>{continuing ? "正在创建…" : "在独立工作区继续"}</Button>}</> : <><span>会话工作区 · {session.workspace?.branch ?? "未就绪"}</span><code title={session.workspace?.executionRoot}>{session.workspace?.executionRoot ?? "工作区不可用"}</code>{session.sourceSessionId && <p>继承自会话 {session.sourceSessionId}；代码起点为创建时的已提交版本。</p>}{session.workspace?.state === "removed" && <p>工作区已删除。恢复历史不会恢复工作文件；可以显式继续为新会话。</p>}{!session.executable && session.collection === "active" && <Button variant="ghost" size="sm" disabled={continuing || project.capability.state !== "ready"} onClick={() => void continueSession()}>在新工作区继续</Button>}</>}
         {session.collection !== "active" && <p>当前会话位于{session.collection === "archived" ? "归档" : "回收站"}，恢复后才能执行。</p>}
-      </div>}
-      {project.capability.state !== "ready" && <div className="session-workspace-notice"><p>{project.capability.message}。请先在项目中准备 Git 仓库和首次提交，再刷新此页。</p><Button size="sm" variant="ghost" onClick={refresh}>重新检查</Button></div>}
+      </Alert>}
+      {project.capability.state !== "ready" && <Alert variant="warning" title="项目尚未准备好" className="session-workspace-notice"><p>{project.capability.message}。请先在项目中准备 Git 仓库和首次提交，再刷新此页。</p><Button size="sm" variant="ghost" onClick={refresh}>重新检查</Button></Alert>}
       {messages.length ? messages.map((message) => message.role === "user" ? <article key={message.id} className="user-message"><p>{message.text}</p></article> : <article key={message.id} className="assistant-message"><div className="assistant-body"><div className="message-meta"><strong>KivA</strong><MessageTime value={message.timestamp} /></div><MessageContent message={message} /></div></article>) : <div className="empty-state"><h2>今天想构建什么？</h2><button className="empty-project" title={project.path} onClick={openProjectPicker}><FolderOpen size={15} /><span>{project.name}</span><ChevronDown size={13} /></button></div>}
-      {(runtime.error || error) && <div className="runtime-error" role="alert">{error ?? runtime.error}</div>}
+      {(runtime.error || error) && <Alert variant="error" title={error ? "无法继续会话" : "运行时出现问题"} className="conversation-alert">{error ?? runtime.error}</Alert>}
       {session?.executable && runtime.connected && !runtime.snapshot?.models.length && <div className="runtime-initialize"><Button size="sm" variant="ghost" onClick={() => void runtime.initialize()}>加载模型与运行设置</Button><span>仅在明确操作或发送时启动此会话运行时</span></div>}
       <div ref={messageEnd} />
     </div></MessageViewport>

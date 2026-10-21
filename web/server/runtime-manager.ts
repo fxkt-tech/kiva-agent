@@ -63,7 +63,7 @@ export class RuntimeManager {
       owner.lastUsed = Date.now();
       this.bump(scope);
       const pending = owner.hub.execute(command).then(async (result) => {
-        if (command.type === "set_model" || command.type === "set_thinking") {
+        if (command.type === "set_model" || command.type === "set_thinking" || command.type === "set_configuration") {
           const snapshot = owner.hub.passiveSnapshot();
           if (snapshot) await this.repository.updateControls(scope.projectId, scope.sessionId, { model: snapshot.model, thinkingLevel: snapshot.thinkingLevel });
         }

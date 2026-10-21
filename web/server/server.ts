@@ -11,7 +11,7 @@ import { workspaceRegistry } from "./workspace-registry";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const host = "127.0.0.1";
-const port = Number(process.env.PORT ?? 30141);
+const port = Number(process.env.PORT ?? 9495);
 const dev = process.env.NODE_ENV !== "production";
 // Only explicit server startup performs controlled migration. Next rendering
 // imports passive storage, never this execution composition root.

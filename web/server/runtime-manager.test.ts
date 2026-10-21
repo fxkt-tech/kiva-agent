@@ -83,6 +83,36 @@ describe("RuntimeManager scoped ownership", () => {
     await f.manager.stop();
   });
 
+  it("applies model/thinking as one guarded command, persists both, and restores a failed pair", async () => {
+    const f = fixture();
+    try {
+      await f.manager.command(a, { type: "initialize" });
+      const adapter = f.adapters.get("project/session-a")!.adapter;
+      const previous = await adapter.getState();
+      const setThinking = adapter.setThinkingLevel;
+      adapter.setThinkingLevel = async (level) => { if (level === "high") throw new Error("controlled thinking failure"); await setThinking(level); };
+      await assert.rejects(f.manager.command(a, { type: "set_configuration", provider: "fixture", modelId: "alternate", thinkingLevel: "high" }), /controlled thinking failure/);
+      assert.deepEqual((await adapter.getState()).model, previous.model);
+      assert.equal((await adapter.getState()).thinkingLevel, previous.thinkingLevel);
+      assert.equal(f.records.get("project/session-a")?.controls, undefined);
+      adapter.setThinkingLevel = setThinking;
+      let release!: () => void, entered!: () => void;
+      const waiting = new Promise<void>((resolve) => { release = resolve; });
+      const started = new Promise<void>((resolve) => { entered = resolve; });
+      const setModel = adapter.setModel;
+      adapter.setModel = async (provider, id) => { await setModel(provider, id); entered(); await waiting; };
+      const applying = f.manager.command(a, { type: "set_configuration", provider: "fixture", modelId: "alternate", thinkingLevel: "high" });
+      await started;
+      await assert.rejects(f.manager.command(a, { type: "prompt", message: "must not use an intermediate pair" }), /设置正在保存/);
+      release(); await applying;
+      assert.deepEqual(f.records.get("project/session-a")?.controls, { model: { provider: "fixture", id: "alternate" }, thinkingLevel: "high" });
+      const current = await f.manager.read(a);
+      assert.equal(current.snapshot.thinkingLevel, "high"); assert.equal(current.snapshot.model?.id, "alternate");
+      await f.manager.command(a, { type: "prompt", message: "now both are ready" });
+      await assert.rejects(f.manager.command(a, { type: "set_configuration", provider: "fixture", modelId: "controlled", thinkingLevel: "medium" }), /finish/);
+    } finally { await f.manager.stop(); }
+  });
+
   it("protects unvalidated extension events and restores a pending scoped dialog on subscribe", async () => {
     const f = fixture();
     await f.manager.command(a, { type: "initialize" });

@@ -6,6 +6,8 @@ import { decodeResourceId, WorkspaceError, type CreateSessionInput, type DeleteS
 import { digest, ExecutionWorkspace } from "./execution-workspace";
 import { normalizeMessages } from "./runtime-hub";
 import { SessionCatalog } from "./session-catalog";
+import type { SessionJsonlDocument } from "../shared/session-jsonl";
+import { readSessionJsonl } from "./session-jsonl";
 import { WorkspaceRegistry } from "./workspace-registry";
 
 interface SessionRecord extends SessionResource {
@@ -46,6 +48,17 @@ export class SessionRepository {
     return { session, messages: normalizeMessages(projection.messages) };
   }
 
+  readJsonl(projectId: string, sessionId: string): SessionJsonlDocument {
+    decodeResourceId(projectId); decodeResourceId(sessionId);
+    this.projectRoot(projectId);
+    const record = this.records(projectId).find((entry) => entry.id === sessionId);
+    const document = readSessionJsonl(this.catalog(projectId), { projectId, sessionId });
+    if (document) return document;
+    if (!record) throw new WorkspaceError("session_not_found", "Session is not part of this project.", 404, { projectId, sessionId });
+    if (record.persisted !== false) throw new WorkspaceError("session_history_missing", "This session's persisted history is unavailable. Restore or repair its history before previewing it.", 409, { projectId, sessionId });
+    return { projectId, sessionId, content: "", bytes: 0, totalBytes: 0, truncated: false };
+  }
+
   resolveExecution(projectId: string, sessionId: string): ExecutionDescriptor {
     const session = this.resource(projectId, sessionId);
     if (!session.executable || !session.workspace) throw new WorkspaceError(session.legacy ? "legacy_read_only" : "session_read_only", session.legacy ? "Continue this conversation into a new isolated session before executing." : "Restore or repair this session before executing.", 409, { projectId, sessionId });
@@ -63,8 +76,12 @@ export class SessionRepository {
     return this.workspaces.resolve(session.workspace);
   }
 
-  create(projectId: string, input: CreateSessionInput = {}): Promise<SessionResource> {
-    return this.exclusive(projectId, () => this.provision(projectId, input));
+  create(projectId: string, input: CreateSessionInput = {}, initialControls?: SessionControls): Promise<SessionResource> {
+    return this.exclusive(projectId, () => {
+      const session = this.provision(projectId, input);
+      if (initialControls && !session.controls?.model && !session.controls?.thinkingLevel) return this.updateControls(projectId, session.id, initialControls);
+      return session;
+    });
   }
 
   continue(projectId: string, sourceSessionId: string, input: CreateSessionInput = {}): Promise<SessionResource> {
@@ -199,7 +216,7 @@ export class SessionRepository {
       const project = this.registry.resolve(projectId);
       const id = randomUUID();
       const now = new Date().toISOString();
-      const workspace = this.workspaces.reserve(project, id, operationId, this.registry.list().map((registered) => registered.path));
+      const workspace = this.workspaces.reserve(project, id, operationId, this.registry.listAll().map((registered) => registered.path));
       record = { version: 1, operationId, projectId, id, name: input.name?.trim() || "未命名会话", nameOverride: input.name?.trim(), path: "", preview: "尚无消息预览", createdAt: now, updatedAt: now, collection: "active", legacy: false, executable: false, sourceSessionId, workspace, persisted: false };
       this.save(record);
     }
@@ -225,7 +242,7 @@ export class SessionRepository {
   private inspect(session: SessionResource): WorkspaceRemovalInspection {
     if (!session.workspace) return { state: "none", localChanges: [], revision: "none" };
     const workspace = session.workspace;
-    if (this.registry.list().some((project) => project.path === workspace.treeRoot || project.path.startsWith(`${workspace.treeRoot}${sep}`))) return { state: "unavailable", treeRoot: workspace.treeRoot, branch: workspace.branch, localChanges: [], revision: digest(JSON.stringify(workspace)), message: "This workspace contains a registered project; cleanup is blocked." };
+    if (this.registry.listAll().some((project) => project.path === workspace.treeRoot || project.path.startsWith(`${workspace.treeRoot}${sep}`))) return { state: "unavailable", treeRoot: workspace.treeRoot, branch: workspace.branch, localChanges: [], revision: digest(JSON.stringify(workspace)), message: "This workspace contains a registered project; cleanup is blocked." };
     return this.workspaces.inspectRemoval(workspace);
   }
 
