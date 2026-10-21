@@ -1,4 +1,5 @@
 import type { CommandResult, RuntimeCommand, RuntimeEvent, RuntimeImage, RuntimeMessage, RuntimeModel, RuntimeQueue, RuntimeSlashCommand, RuntimeSnapshot, RuntimeTextFile, RuntimeTool } from "../shared/runtime-types";
+import { normalizeMessageTimestamp } from "../shared/message-time";
 
 export interface RuntimeAdapterState {
   isStreaming: boolean;
@@ -322,8 +323,10 @@ export function normalizeMessages(values: unknown[]): RuntimeMessage[] {
   const messages: RuntimeMessage[] = [];
   values.forEach((value, index) => {
     const message = record(value);
+    const timestamp = normalizeMessageTimestamp(message?.timestamp);
+    const metadata = timestamp === undefined ? {} : { timestamp };
     if (message?.role === "user") {
-      messages.push({ id: `history-${index}`, role: "user", text: displayPrompt(contentText(message.content)), thinking: "", tools: [] });
+      messages.push({ id: `history-${index}`, ...metadata, role: "user", text: displayPrompt(contentText(message.content)), thinking: "", tools: [] });
       return;
     }
     if (message?.role === "assistant") {
@@ -333,6 +336,7 @@ export function normalizeMessages(values: unknown[]): RuntimeMessage[] {
         : []);
       messages.push({
         id: `history-${index}`,
+        ...metadata,
         role: "assistant",
         text: content.filter((item) => item?.type === "text").map((item) => stringValue(item?.text)).join(""),
         thinking: content.filter((item) => item?.type === "thinking").map((item) => stringValue(item?.thinking)).join("\n"),

@@ -10,6 +10,8 @@ export interface RuntimeTool {
 
 export interface RuntimeMessage {
   id: string;
+  /** Original Pi message time in epoch milliseconds; absent when unknown. */
+  timestamp?: number;
   role: "user" | "assistant";
   text: string;
   thinking: string;

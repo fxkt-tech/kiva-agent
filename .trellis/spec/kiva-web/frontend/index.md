@@ -20,7 +20,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
-| [Workspace Visual System](./visual-system.md) | Codex-style tokens, responsive layout, Markdown and UI verification | Documented |
+| [Workspace Visual System](./visual-system.md) | Codex-style tokens, local Geist typography, responsive layout, Markdown and UI verification | Documented |
 
 ---
 

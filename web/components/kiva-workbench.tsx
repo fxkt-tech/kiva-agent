@@ -7,7 +7,6 @@ import {
   Bot,
   Braces,
   ChevronDown,
-  CircleDot,
   Clock3,
   Command,
   FileCode2,
@@ -22,9 +21,7 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Settings2,
   SquareTerminal,
-  SquarePen,
   StopCircle,
   Trash2,
   X,
@@ -34,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { formatMessageTime, normalizeMessageTimestamp } from "@/shared/message-time";
 import { useRuntime } from "@/lib/use-runtime";
 import { MessageContent } from "@/components/message-content";
 import { ExtensionDialog } from "@/components/extension-dialog";
@@ -59,14 +57,21 @@ function formatPercent(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : `${Math.round(value)}%`;
 }
 
+function MessageTime({ value }: { value?: number }) {
+  const timestamp = normalizeMessageTimestamp(value);
+  return <time dateTime={timestamp === undefined ? undefined : new Date(timestamp).toISOString()}>{formatMessageTime(timestamp)}</time>;
+}
+
 export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
   const [attachments, setAttachments] = useState<RuntimeAttachment[]>([]);
   const [workspaceView, setWorkspaceView] = useState<"sessions" | "files" | "changes">("sessions");
+  const [projectExpanded, setProjectExpanded] = useState(true);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [projectPath, setProjectPath] = useState(data.project.path);
   const [projectError, setProjectError] = useState<string>();
@@ -78,7 +83,6 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [sessionSearch, setSessionSearch] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  const [workspaceMenu, setWorkspaceMenu] = useState(false);
   const [sessions, setSessions] = useState(data.sessions);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [deletedSessions, setDeletedSessions] = useState<SessionSummary[]>([]);
@@ -86,17 +90,31 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   const [sessionMenu, setSessionMenu] = useState<string>();
   const messageEnd = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const sessionSearchInput = useRef<HTMLInputElement>(null);
+  const contextControl = useRef<HTMLDivElement>(null);
   const runtime = useRuntime();
-  const selected = useMemo(() => sessions.find((session) => session.id === selectedId), [sessions, selectedId]);
   const visibleSessions = (sessionView === "active" ? sessions : sessionView === "archived" ? archivedSessions : deletedSessions)
     .filter((session) => `${session.name} ${session.preview}`.toLowerCase().includes(sessionSearch.toLowerCase()));
   const running = runtime.status === "running";
+  const contextPercent = Math.min(100, Math.max(0, runtime.snapshot?.context?.percent ?? 0));
   const emptyConversation = workspaceView === "sessions" && runtime.messages.length === 0;
   const MessageViewport = emptyConversation ? "div" : ScrollArea;
   const runtimeLabel = !runtime.connected ? "连接中" : running ? "运行中" : runtime.status === "error" ? "异常" : "已就绪";
   const visibleCommands = useMemo(() => runtime.snapshot?.commands.filter((command) => `${command.name} ${command.description ?? ""}`.toLowerCase().includes(commandQuery.toLowerCase())).slice(0, 12) ?? [], [commandQuery, runtime.snapshot?.commands]);
 
   useEffect(() => { void refreshSessions(); }, [runtime.sessionsVersion]);
+  useEffect(() => { setContextOpen(false); }, [workspaceView, runtime.snapshot?.session.id]);
+  useEffect(() => {
+    if (!contextOpen) return;
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Node && !contextControl.current?.contains(event.target)) setContextOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOutside);
+    return () => window.removeEventListener("pointerdown", closeOutside);
+  }, [contextOpen]);
+  useEffect(() => {
+    if (projectExpanded && workspaceView === "sessions" && sessionSearchOpen) sessionSearchInput.current?.focus();
+  }, [projectExpanded, workspaceView, sessionSearchOpen]);
   useEffect(() => { messageEnd.current?.scrollIntoView({ block: "end", behavior: running ? "smooth" : "auto" }); }, [runtime.messages, running]);
   useEffect(() => {
     const active = sessions.find((session) => session.id === runtime.snapshot?.session.id);
@@ -107,14 +125,14 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
       if (event.key === "Escape") {
         setMobileSidebarOpen(false);
         setProjectDialogOpen(false);
-        setWorkspaceMenu(false);
         setCommandOpen(false);
+        setContextOpen(false);
+        setInspectorOpen(false);
         return;
       }
       if (!(event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
-        setWorkspaceView("sessions");
         void createSession();
       } else if (event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -207,6 +225,12 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
   }
 
   async function createSession() {
+    setWorkspaceView("sessions");
+    setProjectExpanded(true);
+    setSessionSearchOpen(false);
+    setSessionSearch("");
+    setSessionMenu(undefined);
+    setMobileSidebarOpen(false);
     try {
       await runtime.newSession();
       setSelectedId(undefined);
@@ -327,18 +351,28 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
     void browseProjectDirectory(data.project.path);
   }
 
+  function toggleProject() {
+    setProjectExpanded((expanded) => !expanded);
+    setSessionMenu(undefined);
+  }
+
+  function toggleProjectSearch() {
+    const open = !projectExpanded || workspaceView !== "sessions" || !sessionSearchOpen;
+    setWorkspaceView("sessions");
+    setProjectExpanded(true);
+    setSessionSearchOpen(open);
+    if (!open) setSessionSearch("");
+  }
+
   return (
     <main className={cn("workbench", !inspectorOpen && "inspector-closed", mobileSidebarOpen && "sidebar-mobile-open")}>
       {mobileSidebarOpen && <button type="button" className="sidebar-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileSidebarOpen(false)} />}
       <aside className="sidebar">
         <div className="brand-row">
           <div className="brand-mark"><SquareTerminal size={21} strokeWidth={1.65} /></div>
-          <p className="brand-name">Kiva</p>
-          <Button variant="ghost" size="icon" className="ml-auto" aria-label="打开命令面板" onClick={() => { setWorkspaceView("sessions"); setMobileSidebarOpen(false); setCommandOpen(true); }}><Command size={16} /></Button>
+          <p className="brand-name">KivA Agent</p>
           <button type="button" className="mobile-sidebar-close" aria-label="关闭导航" onClick={() => setMobileSidebarOpen(false)}><X size={17} /></button>
         </div>
-
-        <Button variant="ghost" className="sidebar-new-session" onClick={() => { setWorkspaceView("sessions"); setMobileSidebarOpen(false); void createSession(); }}><SquarePen size={16} />新建会话<kbd>⌘ N</kbd></Button>
 
         <nav className="nav-list" aria-label="工作区导航" onClick={() => setMobileSidebarOpen(false)}>
           <button className={cn("nav-item", workspaceView === "sessions" && sessionView === "active" && "active")} onClick={() => { setWorkspaceView("sessions"); setSessionView("active"); }}><Bot size={16} />会话</button>
@@ -349,14 +383,19 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         </nav>
 
         <div className="sidebar-project-heading"><span>项目</span><button type="button" aria-label="添加项目" title="打开本地项目" onClick={openProjectPicker}><Plus size={14} /></button></div>
-        <button type="button" className="project-card" aria-label="打开本地项目" title={data.project.path} onClick={openProjectPicker}>
-          <div className="project-icon"><FolderOpen size={16} /></div>
-          <div className="min-w-0 flex-1"><p className="project-name">{data.project.name}</p><p className="project-path">{data.project.path}</p></div>
-          <span className="project-action-label">打开本地项目</span><ChevronDown size={13} className="text-muted-foreground" />
-        </button>
+        <div className="project-card">
+          <button type="button" className="project-toggle" aria-label={`${projectExpanded ? "折叠" : "展开"}项目 ${data.project.name}`} aria-expanded={projectExpanded} aria-controls="project-sessions" title={data.project.path} onClick={toggleProject}>
+            <span className="project-icon"><FolderOpen size={16} /></span>
+            <span className="project-name">{data.project.name}</span>
+          </button>
+          <button type="button" className="project-new-session" aria-label={`在 ${data.project.name} 中新建会话`} title={`新建会话 · ${data.project.name} (⌘ / Ctrl + N)`} disabled={!runtime.connected || running} onClick={() => void createSession()}><Plus size={13} /></button>
+          <button type="button" className="project-search" aria-label="搜索会话" aria-expanded={projectExpanded && workspaceView === "sessions" && sessionSearchOpen} aria-controls="project-sessions" title="搜索项目会话" onClick={toggleProjectSearch}><Search size={13} /></button>
+          <button type="button" className="project-collapse" aria-label={projectExpanded ? "折叠项目" : "展开项目"} aria-expanded={projectExpanded} aria-controls="project-sessions" onClick={toggleProject}><ChevronDown size={13} /></button>
+        </div>
 
-        <div className="section-label"><span>{workspaceView === "files" ? "项目文件" : workspaceView === "changes" ? "工作区状态" : sessionView === "active" ? "最近会话" : sessionView === "archived" ? "已归档" : "最近删除"}</span>{workspaceView === "sessions" && <button type="button" aria-label="搜索会话" onClick={() => setSessionSearchOpen((value) => !value)}><Search size={13} /></button>}</div>
-        {sessionSearchOpen && workspaceView === "sessions" && <div className="session-search"><Search size={13} /><input autoFocus value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话" /></div>}
+        <div id="project-sessions" className="project-sessions" hidden={!projectExpanded}>
+        {(workspaceView !== "sessions" || sessionView !== "active") && <div className="section-label"><span>{workspaceView === "files" ? "项目文件" : workspaceView === "changes" ? "工作区状态" : sessionView === "archived" ? "已归档" : "最近删除"}</span></div>}
+        {sessionSearchOpen && workspaceView === "sessions" && <div className="session-search"><Search size={13} /><input ref={sessionSearchInput} value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话" /></div>}
         <ScrollArea className="session-scroll">
           <div className="space-y-1 px-2 pb-4">
             {workspaceView === "files" ? <p className="sidebar-summary">{data.project.files.length} 个项目文件</p> : workspaceView === "changes" ? <p className="sidebar-summary">{data.project.changes.length} 个未提交变更</p> : visibleSessions.length ? visibleSessions.map((session) => (
@@ -377,17 +416,17 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
             )) : <p className="px-3 py-6 text-center text-xs leading-5 text-muted-foreground">{sessionView === "active" ? <>还没有会话。<br />创建一个开始工作。</> : sessionView === "archived" ? "还没有归档会话。" : "回收站是空的。"}</p>}
           </div>
         </ScrollArea>
+        </div>
 
         <div className="sidebar-footer">
-          <button className={cn("nav-item", inspectorOpen && "active")} onClick={() => { setMobileSidebarOpen(false); setInspectorOpen((value) => !value); }}><Settings2 size={16} />运行上下文</button>
           <div className="runtime-line"><span className={cn("status-dot", !runtime.connected && "offline")} />{runtimeLabel}<span className="ml-auto">本地 · Pi {data.runtime.piVersion}</span></div>
         </div>
       </aside>
 
       <section className={cn("conversation", emptyConversation && "is-empty")}>
         <header className="conversation-header">
-          <div className="header-title"><Button variant="ghost" size="icon" className="mobile-sidebar-toggle" aria-label="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={18} /></Button><div className="min-w-0"><h1>{workspaceView === "files" ? "文件浏览" : workspaceView === "changes" ? "代码变更" : selected?.name ?? runtime.snapshot?.session.name ?? "新会话"}</h1>{!emptyConversation && <p>{data.project.name} · {data.project.branch}</p>}</div></div>
-          <div className="header-actions"><span className="runtime-badge" data-status={runtime.status}><CircleDot size={11} />{runtimeLabel}</span><div className="workspace-menu-wrap"><Button variant="ghost" size="icon" onClick={() => setWorkspaceMenu((value) => !value)} aria-label="会话菜单"><MoreHorizontal size={18} /></Button>{workspaceMenu && <div className="workspace-menu"><button onClick={() => { setWorkspaceMenu(false); void createSession(); }}>新建会话</button><button onClick={() => { setWorkspaceMenu(false); setInspectorOpen(true); }}>运行上下文</button><button disabled={running || !runtime.snapshot?.context} onClick={() => { setWorkspaceMenu(false); compactSession(); }}>压缩上下文</button></div>}</div><Button variant="ghost" size="icon" aria-label="切换运行上下文" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={17} /></Button></div>
+          <Button type="button" variant="ghost" size="icon" className="mobile-sidebar-toggle" aria-label="打开导航" title="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={17} /></Button>
+          <Button variant="ghost" size="icon" aria-label="切换右侧栏" aria-expanded={inspectorOpen} aria-controls="workspace-panel" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={17} /></Button>
         </header>
 
         {workspaceView === "sessions" ? <MessageViewport className="message-scroll">
@@ -397,7 +436,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
             ) : (
               <article key={message.id} className="assistant-message">
                 <div className="assistant-body">
-                  <div className="message-meta"><strong>Kiva</strong><span>{message.streaming ? "正在回答" : "刚刚"}</span></div>
+                  <div className="message-meta"><strong>KivA</strong><MessageTime value={message.timestamp} /></div>
                   <MessageContent message={message} />
                 </div>
               </article>
@@ -417,7 +456,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
               {workspaceView === "files" ? data.project.files.map((path) => <button type="button" className={cn(workspacePreview?.path === path && "selected")} key={path} onClick={() => void loadWorkspacePreview(path, "file")}><FileCode2 size={15} /><span>{path}</span></button>) : data.project.changes.length ? data.project.changes.map((change) => <button type="button" className={cn(workspacePreview?.path === change.path && "selected")} key={`${change.status}:${change.path}`} onClick={() => void loadWorkspacePreview(change.path, "change")}><strong>{change.status}</strong><span>{change.path}</span></button>) : <div className="workspace-empty"><GitBranch size={24} /><p>工作区没有未提交变更</p></div>}
             </div></ScrollArea>
             <div className="workspace-preview">
-              {workspacePreview ? <><div className="workspace-preview-header"><span>{workspacePreview.path}</span><button type="button" onClick={() => askKivaAbout(workspacePreview.path, workspaceView === "files" ? "file" : "change")}>交给 Kiva</button></div>{workspacePreview.loading ? <p className="workspace-preview-state">正在读取…</p> : workspacePreview.error ? <p className="workspace-preview-error">{workspacePreview.error}</p> : <pre>{workspacePreview.content}</pre>}</> : <div className="workspace-preview-placeholder"><FileCode2 size={25} /><p>选择一个{workspaceView === "files" ? "文件进行预览" : "变更查看差异"}</p></div>}
+              {workspacePreview ? <><div className="workspace-preview-header"><span>{workspacePreview.path}</span><button type="button" onClick={() => askKivaAbout(workspacePreview.path, workspaceView === "files" ? "file" : "change")}>交给 KivA</button></div>{workspacePreview.loading ? <p className="workspace-preview-state">正在读取…</p> : workspacePreview.error ? <p className="workspace-preview-error">{workspacePreview.error}</p> : <pre>{workspacePreview.content}</pre>}</> : <div className="workspace-preview-placeholder"><FileCode2 size={25} /><p>选择一个{workspaceView === "files" ? "文件进行预览" : "变更查看差异"}</p></div>}
             </div>
           </div>
         </div>}
@@ -437,12 +476,40 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
           </div> : null}
           <form className="composer" onSubmit={submit}>
             {attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`}>{attachment.kind === "image" ? <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="" /> : <span className="attachment-file"><FileCode2 size={14} /></span>}<span>{attachment.name}</span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
-            <textarea value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 Kiva 你想完成什么…"} rows={2} />
+            <textarea value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 KivA 你想完成什么…"} rows={2} />
             <div className="composer-actions">
-              <input ref={fileInput} className="sr-only" type="file" accept={ATTACHMENT_ACCEPT} multiple onChange={attachImages} />
-              <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Paperclip size={17} /></Button>
-              {running ? <select className="composer-mode" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm" className="composer-command" onClick={() => setCommandOpen((value) => !value)}><SquareTerminal size={14} />命令</Button>}
-              <div className="ml-auto flex min-w-0 items-center gap-2"><button type="button" className="composer-model" aria-label="模型与思考设置" onClick={() => setInspectorOpen(true)}><span>{runtime.snapshot?.model?.id ?? "选择模型"}</span><ChevronDown size={12} /></button>{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" className="composer-send" aria-label="发送消息" disabled={(!draft.trim() && !attachments.length) || !runtime.connected}><ArrowUp size={17} /></Button></div>
+              <div className="composer-input-actions">
+                <input ref={fileInput} className="sr-only" type="file" accept={ATTACHMENT_ACCEPT} multiple onChange={attachImages} />
+                <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Paperclip size={17} /></Button>
+                {running ? <select className="composer-mode" aria-label="消息队列模式" value={queueMode} onChange={(event) => setQueueMode(event.target.value as "steer" | "follow_up")}><option value="steer">立即纠正</option><option value="follow_up">完成后追加</option></select> : <Button type="button" variant="ghost" size="sm" className="composer-command" onClick={() => setCommandOpen((value) => !value)}><SquareTerminal size={14} />命令</Button>}
+              </div>
+              <div className="composer-settings">
+                <div className="composer-context" ref={contextControl}>
+                  <button type="button" className="composer-context-trigger" aria-label="上下文使用量" aria-expanded={contextOpen} aria-controls="composer-context-details" title="查看上下文使用量" onClick={() => setContextOpen((value) => !value)}>
+                    <svg className="context-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><circle className="context-ring-value" cx="10" cy="10" r="7" pathLength="100" strokeDasharray={`${contextPercent} 100`} /></svg><span>{formatPercent(runtime.snapshot?.context?.percent)}</span>
+                  </button>
+                  {contextOpen && <div id="composer-context-details" className="composer-context-popover" role="region" aria-label="上下文详情">
+                    <div className="context-heading"><strong>上下文使用量</strong><span>{formatPercent(runtime.snapshot?.context?.percent)}</span></div>
+                    <div className="context-track" role="progressbar" aria-label="上下文使用百分比" aria-valuemin={0} aria-valuemax={100} aria-valuenow={runtime.snapshot?.context?.percent == null ? undefined : contextPercent}><span style={{ width: `${contextPercent}%` }} /></div>
+                    <div className="context-details"><span>{formatTokens(runtime.snapshot?.context?.tokens)} tokens</span><span>{runtime.snapshot?.context ? `${formatTokens(runtime.snapshot.context.contextWindow)} 上限` : "等待首次请求"}</span></div>
+                    {runtime.snapshot?.context && <div className="context-details"><span>累计 {formatTokens(runtime.snapshot.context.total)}</span><span>${runtime.snapshot.context.cost.toFixed(4)}</span></div>}
+                    <Button type="button" variant="ghost" size="sm" className="compact-button" disabled={running || !runtime.connected || !runtime.snapshot?.context} onClick={compactSession}>压缩上下文</Button>
+                  </div>}
+                </div>
+                <label className="composer-select composer-model" title={runtime.snapshot?.model ? `${runtime.snapshot.model.provider} / ${runtime.snapshot.model.id}` : "选择模型"}>
+                  <span>{runtime.snapshot?.model?.id ?? (data.runtime.modelConfigFound ? "选择模型" : "未配置模型")}</span><ChevronDown size={12} aria-hidden="true" />
+                  <select aria-label="选择模型" disabled={running || !runtime.connected || !runtime.snapshot?.models.length} value={runtime.snapshot?.model ? JSON.stringify({ provider: runtime.snapshot.model.provider, id: runtime.snapshot.model.id }) : ""} onChange={(event) => changeModel(event.target.value)}>
+                    <option value="" disabled>选择模型</option>{runtime.snapshot?.models.map((model) => <option key={`${model.provider}:${model.id}`} value={JSON.stringify({ provider: model.provider, id: model.id })}>{model.provider} / {model.id}</option>)}
+                  </select>
+                </label>
+                <label className="composer-select composer-thinking" title="思考强度">
+                  <span>{runtime.snapshot?.thinkingLevel ?? "—"}</span><ChevronDown size={12} aria-hidden="true" />
+                  <select aria-label="思考强度" disabled={running || !runtime.connected || !runtime.snapshot?.thinkingLevels.length} value={runtime.snapshot?.thinkingLevel ?? ""} onChange={(event) => void runtime.setThinking(event.target.value)}>
+                    <option value="" disabled>等待运行时</option>{runtime.snapshot?.thinkingLevels.map((level) => <option key={level} value={level}>{level}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="composer-send-actions">{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" className="composer-send" aria-label="发送消息" disabled={(!draft.trim() && !attachments.length) || !runtime.connected}><ArrowUp size={17} /></Button></div>
             </div>
           </form>
           <div className="composer-note"><span className="composer-project-context"><SquareTerminal size={11} />本地<span>·</span><GitBranch size={11} /><span>{data.project.branch}</span></span><span className="composer-keyboard-hint">⌘ / Ctrl + Enter 发送</span></div>
@@ -450,14 +517,7 @@ export function KivaWorkbench({ data }: { data: BootstrapData }) {
         </div>}
       </section>
 
-      {inspectorOpen && <aside className="inspector">
-        <div className="inspector-heading"><h2>运行上下文</h2><Button variant="ghost" size="icon" aria-label="关闭运行上下文" onClick={() => setInspectorOpen(false)}><X size={16} /></Button></div>
-        <div className="inspector-section"><p className="inspector-label">模型</p><div className="model-card"><span className="model-glyph">A</span><label><strong>{runtime.snapshot?.model?.id ?? "等待模型配置"}</strong><small>{runtime.snapshot?.model?.provider ?? (data.runtime.modelConfigFound ? "可从 models.json 选择" : "尚未找到 models.json")}</small></label><ChevronDown size={14} className="model-picker-chevron" aria-hidden="true" /><select aria-label="选择模型" disabled={running || !runtime.snapshot?.models.length} value={runtime.snapshot?.model ? JSON.stringify({ provider: runtime.snapshot.model.provider, id: runtime.snapshot.model.id }) : ""} onChange={(event) => changeModel(event.target.value)}><option value="" disabled>选择模型</option>{runtime.snapshot?.models.map((model) => <option key={`${model.provider}:${model.id}`} value={JSON.stringify({ provider: model.provider, id: model.id })}>{model.provider} / {model.id}</option>)}</select></div><div className="thinking-row"><span>思考强度</span><select aria-label="思考强度" disabled={running || !runtime.snapshot?.thinkingLevels.length} value={runtime.snapshot?.thinkingLevel ?? ""} onChange={(event) => void runtime.setThinking(event.target.value)}>{runtime.snapshot?.thinkingLevels.map((level) => <option key={level} value={level}>{level}</option>)}</select></div></div>
-        <div className="inspector-section"><div className="flex items-center justify-between"><p className="inspector-label">上下文使用量</p><span className="text-xs text-muted-foreground">{formatPercent(runtime.snapshot?.context?.percent)}</span></div><div className="context-track"><span style={{ width: `${Math.min(100, runtime.snapshot?.context?.percent ?? 0)}%` }} /></div><div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>{formatTokens(runtime.snapshot?.context?.tokens)} tokens</span><span>{runtime.snapshot?.context ? `${formatTokens(runtime.snapshot.context.contextWindow)} 上限` : "等待首次请求"}</span></div>{runtime.snapshot?.context && <div className="context-details"><span>累计 {formatTokens(runtime.snapshot.context.total)}</span><span>${runtime.snapshot.context.cost.toFixed(4)}</span></div>}<Button type="button" variant="ghost" size="sm" className="compact-button" disabled={running || !runtime.snapshot?.context} onClick={compactSession}>压缩上下文</Button></div>
-        <div className="inspector-section"><p className="inspector-label">项目</p><dl className="detail-list"><div><dt>分支</dt><dd><GitBranch size={12} />{data.project.branch}</dd></div><div><dt>变更</dt><dd>{data.project.dirtyFiles} 个文件</dd></div><div><dt>工作区</dt><dd className="truncate">{data.project.name}</dd></div></dl></div>
-        <div className="inspector-section"><p className="inspector-label">可用能力</p><div className="capability-grid"><span><FileCode2 size={14} />文件</span><span><SquareTerminal size={14} />命令</span><span><GitBranch size={14} />Git</span><span><Wrench size={14} />工具</span></div></div>
-        <div className="inspector-footer"><span className={cn("status-dot", !runtime.connected && "offline")} /><span>{runtimeLabel}</span><span className="ml-auto text-muted-foreground">127.0.0.1</span></div>
-      </aside>}
+      {inspectorOpen && <aside id="workspace-panel" className="inspector" aria-label="右侧扩展面板" />}
       {projectDialogOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setProjectDialogOpen(false)}><section className="project-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title"><div className="project-dialog-heading"><div><p className="eyebrow">LOCAL WORKSPACE</p><h2 id="project-dialog-title">打开本地项目</h2></div><button type="button" aria-label="关闭项目选择器" onClick={() => setProjectDialogOpen(false)}><X size={16} /></button></div><p>浏览运行 Kiva 的这台电脑，选择 Pi 要读取和修改的项目目录。</p><form className="project-location" onSubmit={(event) => { event.preventDefault(); void browseProjectDirectory(projectPath); }}><input autoFocus value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" spellCheck={false} /><Button type="submit" variant="ghost" disabled={projectDirectoryLoading || !projectPath.trim()}>转到</Button></form>{projectError && <div className="project-dialog-error">{projectError}</div>}<div className="directory-browser"><div className="directory-browser-header"><button type="button" disabled={!projectDirectory?.parent || projectDirectoryLoading} onClick={() => projectDirectory?.parent && void browseProjectDirectory(projectDirectory.parent)} aria-label="上级目录">↑</button><span title={projectDirectory?.path}>{projectDirectory?.path ?? "正在读取目录…"}</span></div><div className="directory-list">{projectDirectoryLoading ? <p>正在读取目录…</p> : projectDirectory?.directories.length ? projectDirectory.directories.map((directory) => <button type="button" key={directory.path} onClick={() => void browseProjectDirectory(directory.path)}><Folder size={15} /><span>{directory.name}</span><ChevronDown size={13} /></button>) : <p>这个目录中没有子目录</p>}</div></div><div className="project-dialog-actions"><span>选择：{projectDirectory?.path ?? projectPath}</span><Button type="button" disabled={projectSwitching || projectDirectoryLoading || !projectDirectory?.path} onClick={() => projectDirectory?.path && void openProject(projectDirectory.path)}>{projectSwitching ? "正在打开…" : "使用此文件夹"}</Button></div><div className="recent-projects"><span>最近项目</span>{data.recentProjects.map((path) => <button type="button" key={path} className={cn(path === data.project.path && "active")} disabled={projectSwitching} onClick={() => void browseProjectDirectory(path)}><Braces size={14} /><div><strong>{path.split(/[\\/]/).filter(Boolean).at(-1) ?? path}</strong><small>{path}</small></div>{path === data.project.path && <em>当前</em>}</button>)}</div></section></div>}
       <ExtensionDialog request={runtime.uiRequest} respond={runtime.respondToUI} />
     </main>

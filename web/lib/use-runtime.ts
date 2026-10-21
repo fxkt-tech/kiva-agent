@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { RuntimeAttachment, RuntimeCommand, RuntimeEvent, RuntimeMessage, RuntimeSnapshot, RuntimeStatus, RuntimeTool, RuntimeUIRequest, RuntimeWireEvent } from "@/shared/runtime-types";
+import { normalizeMessageTimestamp } from "@/shared/message-time";
 
 export type ToolActivity = RuntimeTool;
 
@@ -66,7 +67,7 @@ export function useRuntime() {
         }
         catch { dispatch({ type: "error", message: "收到无法解析的运行时事件" }); }
       };
-      socket.onerror = () => dispatch({ type: "error", message: "无法连接到 Kiva 运行时" });
+      socket.onerror = () => dispatch({ type: "error", message: "无法连接到 KivA 运行时" });
       socket.onclose = () => {
         dispatch({ type: "connected", value: false });
         if (!disposed) retry.current = setTimeout(connect, 1_500);
@@ -93,7 +94,7 @@ export function useRuntime() {
   const sendPrompt = useCallback(async (message: string, attachments: RuntimeAttachment[] = []) => {
     const text = message.trim();
     if (!text && !attachments.length) return;
-    dispatch({ type: "user", message: { id: crypto.randomUUID(), role: "user", text: text || "请查看附件。", thinking: "", tools: [] } });
+    dispatch({ type: "user", message: { id: crypto.randomUUID(), timestamp: Date.now(), role: "user", text: text || "请查看附件。", thinking: "", tools: [] } });
     try { await execute({ type: "prompt", message: text, images: attachments.filter((item) => item.kind === "image"), files: attachments.filter((item) => item.kind === "text") }); }
     catch (error) { dispatch({ type: "error", message: errorMessage(error) }); throw error; }
   }, [execute]);
@@ -193,31 +194,37 @@ function applyPiEvent(state: RuntimeViewState, value: unknown): RuntimeViewState
   if (event.type === "session_info_changed") return { ...state, sessionsVersion: state.sessionsVersion + 1 };
   if (event.type === "message_start") {
     const message = record(event.message);
+    const timestamp = normalizeMessageTimestamp(message?.timestamp);
     if (message?.role === "user") {
       const text = displayPrompt(messageText(message.content));
-      if (!text || (state.messages.at(-1)?.role === "user" && state.messages.at(-1)?.text === text)) return state;
-      return { ...state, messages: [...state.messages, { id: crypto.randomUUID(), role: "user", text, thinking: "", tools: [] }] };
+      if (!text) return state;
+      if (state.messages.at(-1)?.role === "user" && state.messages.at(-1)?.text === text) {
+        return timestamp === undefined ? state : { ...state, messages: state.messages.map((item, index) => index === state.messages.length - 1 ? { ...item, timestamp } : item) };
+      }
+      return { ...state, messages: [...state.messages, { id: crypto.randomUUID(), timestamp, role: "user", text, thinking: "", tools: [] }] };
     }
     if (message?.role !== "assistant") return state;
-    return { ...state, messages: ensureAssistant(state.messages) };
+    return { ...state, messages: ensureAssistant(state.messages, timestamp) };
   }
   if (event.type === "message_update") {
     const update = record(event.assistantMessageEvent);
     if (typeof update?.delta !== "string") return state;
-    if (update.type === "text_delta") return { ...state, messages: appendAssistantField(state.messages, "text", update.delta) };
-    if (update.type === "thinking_delta") return { ...state, messages: appendAssistantField(state.messages, "thinking", update.delta) };
+    const timestamp = normalizeMessageTimestamp(record(event.message)?.timestamp);
+    if (update.type === "text_delta") return { ...state, messages: appendAssistantField(state.messages, "text", update.delta, timestamp) };
+    if (update.type === "thinking_delta") return { ...state, messages: appendAssistantField(state.messages, "thinking", update.delta, timestamp) };
     return state;
   }
   if (event.type === "message_end") {
     const message = record(event.message);
     if (message?.role !== "assistant") return state;
     const content = assistantContent(message.content);
-    return { ...state, messages: replaceAssistantContent(state.messages, content) };
+    return { ...state, messages: replaceAssistantContent(state.messages, content, normalizeMessageTimestamp(message.timestamp)) };
   }
   if (event.type === "tool_execution_start") {
     const id = stringValue(event.toolCallId) ?? crypto.randomUUID();
     const name = stringValue(event.toolName) ?? "工具";
-    return { ...state, messages: upsertTool(ensureAssistant(state.messages), { id, name, args: event.args, status: "running" }) };
+    const messages = state.messages.at(-1)?.role === "assistant" ? state.messages : ensureAssistant(state.messages);
+    return { ...state, messages: upsertTool(messages, { id, name, args: event.args, status: "running" }) };
   }
   if (event.type === "tool_execution_end") {
     const id = stringValue(event.toolCallId);
@@ -246,18 +253,20 @@ function isInteractiveUIRequest(event: Record<string, unknown>) {
     && ["select", "confirm", "input", "editor"].includes(String(event.method));
 }
 
-function ensureAssistant(messages: ChatMessage[]) {
-  if (messages.at(-1)?.role === "assistant" && messages.at(-1)?.streaming) return messages;
-  return [...messages, { id: crypto.randomUUID(), role: "assistant" as const, text: "", thinking: "", tools: [], streaming: true }];
+function ensureAssistant(messages: ChatMessage[], timestamp?: number) {
+  if (messages.at(-1)?.role === "assistant" && messages.at(-1)?.streaming) {
+    return timestamp === undefined ? messages : messages.map((message, index) => index === messages.length - 1 ? { ...message, timestamp } : message);
+  }
+  return [...messages, { id: crypto.randomUUID(), timestamp, role: "assistant" as const, text: "", thinking: "", tools: [], streaming: true }];
 }
 
-function appendAssistantField(messages: ChatMessage[], field: "text" | "thinking", delta: string) {
-  const next = ensureAssistant(messages);
+function appendAssistantField(messages: ChatMessage[], field: "text" | "thinking", delta: string, timestamp?: number) {
+  const next = ensureAssistant(messages, timestamp);
   return next.map((message, index) => index === next.length - 1 ? { ...message, [field]: message[field] + delta } : message);
 }
 
-function replaceAssistantContent(messages: ChatMessage[], content: { text: string; thinking: string }) {
-  const next = ensureAssistant(messages);
+function replaceAssistantContent(messages: ChatMessage[], content: { text: string; thinking: string }, timestamp?: number) {
+  const next = ensureAssistant(messages, timestamp);
   return next.map((message, index) => index === next.length - 1 ? { ...message, text: content.text || message.text, thinking: content.thinking || message.thinking, streaming: false } : message);
 }
 

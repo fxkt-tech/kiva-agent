@@ -25,9 +25,9 @@ export function MessageContent({ message }: { message: ChatMessage }) {
       <summary><Brain size={13} />思考过程<ChevronRight size={13} className="thinking-chevron" /></summary>
       <div className="thinking-copy"><Markdown>{message.thinking}</Markdown></div>
     </details>}
-    <div className={cn("markdown-body", message.streaming && "streaming-text")}>
-      {message.text ? <Markdown>{message.text}</Markdown> : message.tools.length ? <p>正在使用工具…</p> : <p>正在思考…</p>}
-    </div>
+    {(message.text || (!message.tools.length && message.streaming)) && <div className={cn("markdown-body", message.streaming && "streaming-text")}>
+      {message.text ? <Markdown>{message.text}</Markdown> : <p>正在思考…</p>}
+    </div>}
     {message.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
   </>;
 }
@@ -58,12 +58,13 @@ function Markdown({ children }: { children: string }) {
 }
 
 function ToolCard({ tool }: { tool: ToolActivity }) {
-  const icon = tool.status === "running" ? <LoaderCircle size={13} className="animate-spin" /> : tool.status === "error" ? <CircleX size={13} /> : <Check size={13} />;
+  const statusLabel = tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成";
+  const icon = tool.status === "running" ? <LoaderCircle size={13} className="animate-spin" aria-hidden="true" /> : tool.status === "error" ? <CircleX size={13} aria-hidden="true" /> : <Check size={13} aria-hidden="true" />;
   return <details className="tool-card tool-details">
     <summary>
-      <div className="tool-icon"><Wrench size={14} /></div>
-      <div className="tool-summary"><p>{tool.name}</p><span>{tool.status === "running" ? "正在执行" : tool.status === "error" ? "执行失败" : "执行完成"}</span></div>
-      <span className="tool-status" data-status={tool.status}>{icon}{tool.status === "running" ? "运行中" : tool.status === "error" ? "失败" : "完成"}</span>
+      <Wrench size={13} className="tool-icon" aria-hidden="true" />
+      <span className="tool-summary" title={tool.name}>{tool.name}</span>
+      <span className="tool-status" data-status={tool.status} role="img" aria-label={statusLabel} title={statusLabel}>{icon}</span>
       <ChevronRight size={14} className="tool-chevron" />
     </summary>
     <div className="tool-detail-body">
