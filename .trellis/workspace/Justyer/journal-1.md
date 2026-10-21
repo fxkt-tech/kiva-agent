@@ -72,3 +72,38 @@ Implemented Geist settings with appearance, shortcuts, session preferences, Pi m
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Unify web UI controls and smooth streaming
+<!-- trellis-session: v=2 fp=8efbcec5a9e3205f -->
+
+**Date**: 2026-10-21
+**Task**: Unify web UI controls and smooth streaming
+**Package**: kiva-web
+**Branch**: `main`
+
+### Summary
+
+Unified controls and overlays with Base UI, shared model fields and confirmations; improved command previews, sidebar layout and streaming scroll behavior. User requested commit and push to main.
+
+### Main Changes
+
+- Migrated settings, composer, workspace menus and dialogs while preserving scoped requests, dirty/pending guards and focus restoration.
+- Fixed Combobox Escape and search identity across parent renders, plus settings Toast modal visibility.
+- Preserved detached reading position, added return-to-bottom and reduced streaming display work.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fc29291` | feat(web): unify UI controls and improve conversation scrolling |
+
+### Testing
+
+- [OK] pnpm test: 5 CLI and 271 web tests passed.
+- [OK] pnpm typecheck, pnpm web:build and git diff --check passed.
+- [OK] Real browser themes and 1440/390/320px checks passed with mocked mutations; desktop scroll P95 16.8ms, no long tasks.
+
+### Status
+
+[OK] **Completed**
