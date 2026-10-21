@@ -566,17 +566,38 @@ describe("routed workspace features", () => {
   it("brands the dynamic Pi version in the sidebar and retains the cold fallback", async () => {
     extraFetch = async (url) => url === "/api/projects/alpha" ? Response.json({ project: p, bootstrap: { ...bootstrap, runtime: { ...bootstrap.runtime, piVersion: "2.3.4" } } }) : undefined;
     await open();
-    assert.match(text(renderer!.root.findByProps({ className: "sidebar-footer" })), /Powered By Pi 2\.3\.4/);
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "Powered By Pi 2.3.4");
+    assert.equal(renderer!.root.findAllByProps({ className: "status-dot" }).length, 0);
     extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta" } }) : undefined;
     await open("/projects/beta/sessions");
-    assert.match(text(renderer!.root.findByProps({ className: "sidebar-footer" })), /Powered By Pi 1\.3\.0/);
+    assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "Powered By Pi 1.3.0");
   });
 
-  it("retains title-free header, mobile drawer, empty right panel and real directory picker", async () => {
+  it("keeps registry errors in the sidebar Alert without a misleading footer connection label", async () => {
+    extraFetch = async (url) => url === "/api/projects" ? Response.json({ error: "registry unavailable" }, { status: 503 }) : undefined;
+    await open(); await publish();
+    const footer = renderer!.root.findByProps({ className: "sidebar-footer" });
+    assert.equal(text(footer), "Powered By Pi 1.3.0");
+    assert.doesNotMatch(text(footer), /本地工作区|连接异常/);
+    assert.equal(footer.findAll((node) => typeof node.props.className === "string" && node.props.className.split(/\s+/).includes("status-dot")).length, 0);
+    assert.ok(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("项目列表加载失败registry unavailable")));
+    assert.equal(text(renderer!.root.findByProps({ "aria-label": "当前会话后端连接" })), "已连接");
+  });
+
+  it("retains standalone mobile navigation and the real directory picker without a session header or right panel", async () => {
     await open();
-    const header = renderer!.root.findByProps({ className: "conversation-header" }); assert.equal(text(header), "");
+    assert.equal(renderer!.root.findAllByType("header").length, 0);
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "切换右侧栏" }).length, 0);
+    assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 0);
+    assert.doesNotMatch(renderer!.root.findByProps({ "aria-label": "打开导航" }).props.className, /focus-visible:ring/);
     await click(renderer!.root.findByProps({ "aria-label": "打开导航" })); assert.match(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
-    await click(renderer!.root.findByProps({ "aria-label": "切换右侧栏" })); assert.equal(renderer!.root.findByProps({ className: "inspector" }).children.length, 0);
+    await click(renderer!.root.findByProps({ "aria-label": "关闭导航" })); assert.doesNotMatch(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
+    await click(renderer!.root.findByProps({ "aria-label": "打开导航" }));
+    await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "Escape" }); });
+    assert.doesNotMatch(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
+    await click(renderer!.root.findByProps({ "aria-label": "打开导航" }));
+    await click(renderer!.root.findByProps({ "aria-label": "关闭导航遮罩" }));
+    assert.doesNotMatch(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
     await click(renderer!.root.findByProps({ "aria-label": "添加项目" }));
     assert.ok(requests.some((entry) => entry.url.startsWith("/api/project/directories")));
     await click(button("other")); await click(button("使用此文件夹"));
@@ -584,22 +605,18 @@ describe("routed workspace features", () => {
     assert.equal(currentHref, "/projects/beta/sessions");
   });
 
-  it("only shows the central header and reserved inspector on session routes", async () => {
-    await open();
-    assert.equal(renderer!.root.findAllByType("header").length, 1);
-    await click(renderer!.root.findByProps({ "aria-label": "切换右侧栏" }));
-    assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 1);
-    for (const href of ["/projects/alpha/sessions/one/files", "/projects/alpha/sessions/one/changes", "/projects/alpha/files", "/projects/alpha/archive", "/projects/alpha/trash", "/projects"]) {
+  it("omits the header and right panel on every route while keeping standalone navigation reachable", async () => {
+    for (const href of ["/projects/alpha/sessions/one", "/projects/alpha/sessions", "/projects/alpha/sessions/one/files", "/projects/alpha/sessions/one/changes", "/projects/alpha/files", "/projects/alpha/archive", "/projects/alpha/trash", "/projects"]) {
       await open(href);
       assert.equal(renderer!.root.findAllByType("header").length, 0, href);
       assert.equal(renderer!.root.findAllByProps({ "aria-label": "切换右侧栏" }).length, 0, href);
       assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 0, href);
+      assert.equal(renderer!.root.findAllByProps({ className: "inspector" }).length, 0, href);
+      assert.doesNotMatch(renderer!.root.findByType("main").props.className, /inspector-closed/);
+      assert.match(renderer!.root.findByProps({ "aria-label": "打开导航" }).props.className, /workspace-navigation-toggle/);
       await click(renderer!.root.findByProps({ "aria-label": "打开导航" }));
       assert.match(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/, `${href} keeps navigation reachable`);
     }
-    await open();
-    assert.equal(renderer!.root.findAllByType("header").length, 1);
-    assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 0, "leaving sessions resets the reserved inspector");
     assert.equal(commandRequests().length, 0);
   });
 

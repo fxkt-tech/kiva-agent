@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, PanelRightClose, Plus, Search, SquareTerminal, Trash2, X } from "lucide-react";
+import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, SquareTerminal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
@@ -49,9 +49,6 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const navigationCurrent = useCallback((source: string) => locationRef.current === source, []);
   const [version, setVersion] = useState(0);
   const [drafts] = useState(() => new DraftStore());
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const sessionRoute = route.section === "sessions";
-  const inspectorVisible = sessionRoute && inspectorOpen;
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pending, setPending] = useState<string[]>([]);
@@ -112,10 +109,9 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
     setMobileSidebarOpen(false);
     try { sessionStorage.setItem("kiva:last-route", `${pathname}${search ? `?${search}` : ""}`); } catch { /* Navigation still works if storage is unavailable. */ }
   }, [pathname, search]);
-  useEffect(() => { if (!sessionRoute) setInspectorOpen(false); }, [sessionRoute]);
   useEffect(() => {
     const shortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") { setPickerOpen(false); setInspectorOpen(false); setMobileSidebarOpen(false); }
+      if (event.key === "Escape") { setPickerOpen(false); setMobileSidebarOpen(false); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && route.projectId && !removingProject) { event.preventDefault(); void createSession(route.projectId); }
     };
     window.addEventListener("keydown", shortcut);
@@ -125,7 +121,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
   const context: WorkspaceContextValue = { route, query, project, projects, bootstrap: current.data?.bootstrap, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
   return <WorkspaceContext.Provider value={context}>
-    <main className={cn("workbench", !inspectorVisible && "inspector-closed", mobileSidebarOpen && "sidebar-mobile-open")}>
+    <main className={cn("workbench", mobileSidebarOpen && "sidebar-mobile-open")}>
       {mobileSidebarOpen && <button className="sidebar-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileSidebarOpen(false)} />}
       <aside className="sidebar">
         <div className="brand-row"><div className="brand-mark"><SquareTerminal size={21} strokeWidth={1.65} /></div><p className="brand-name"><Navigation href="/projects" className="brand-home">KivA Agent</Navigation></p><button className="mobile-sidebar-close" aria-label="关闭导航" onClick={() => setMobileSidebarOpen(false)}><X size={17} /></button></div>
@@ -134,14 +130,13 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
         </nav>
         <div className="sidebar-project-heading"><span>项目</span><button aria-label="添加项目" title="打开本地项目" onClick={openProjectPicker}><Plus size={14} /></button></div>
         <div className="project-groups">{projects.map((item) => <ProjectGroup key={item.id} project={item} pending={pending.includes(item.id)} removing={pendingRemovals.includes(item.id)} onRemove={() => setRemovingProject(item)} />)}{registry.error && <Alert variant="error" title="项目列表加载失败" className="sidebar-alert">{registry.error}</Alert>}</div>
-        <div className="sidebar-footer"><div className="runtime-line"><span className={cn("status-dot", registry.error && "offline")} />{registry.error ? "连接异常" : "本地工作区"}<span className="ml-auto">Powered By Pi {current.data?.bootstrap?.runtime.piVersion ?? "1.3.0"}</span></div></div>
+        <div className="sidebar-footer"><div className="runtime-line"><span className="ml-auto">Powered By Pi {current.data?.bootstrap?.runtime.piVersion ?? "1.3.0"}</span></div></div>
       </aside>
       <section className="conversation">
-        {sessionRoute ? <header className="conversation-header"><Button variant="ghost" size="icon" className="mobile-sidebar-toggle" aria-label="打开导航" title="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={17} /></Button><Button variant="ghost" size="icon" aria-label="切换右侧栏" aria-expanded={inspectorVisible} aria-controls="workspace-panel" onClick={() => setInspectorOpen((value) => !value)}><PanelRightClose size={17} /></Button></header> : <Button variant="ghost" size="icon" className="workspace-navigation-toggle" aria-label="打开导航" title="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={17} /></Button>}
+        <Button variant="ghost" size="icon" className="workspace-navigation-toggle" aria-label="打开导航" title="打开导航" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(true)}><PanelLeft size={17} /></Button>
         {error?.projectId === route.projectId && <div className="workspace-feedback"><Alert variant="error" title="创建会话失败" onDismiss={() => setError(undefined)}>{error?.message}</Alert></div>}
         {queryError ? <ResourceState error={queryError} /> : children}
       </section>
-      {inspectorVisible && <aside id="workspace-panel" className="inspector" aria-label="右侧扩展面板" />}
       {pickerOpen && <ProjectPicker onClose={() => setPickerOpen(false)} />}
       {removingProject && <RemoveProjectDialog key={removingProject.id} project={removingProject} onClose={() => setRemovingProject(undefined)} onConfirm={() => removeProject(removingProject.id)} />}
     </main>
