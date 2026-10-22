@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: implementation, full-scope review and verification complete; the user approved the commit and archival plan ("可以") on 2026-10-22.
+Status: implementation, review and verification complete; user-approved work committed as `d706f08` on 2026-10-22. Trellis finish-work owns final archive/journal bookkeeping.
 
 ## 1. Baseline and ownership
 
@@ -42,7 +42,7 @@ Status: implementation, full-scope review and verification complete; the user ap
 - [x] Recheck R1–R5 against AC1–AC6 and preserve unrelated changes.
 
 - [x] Obtain the Phase 3.4 one-shot commit confirmation.
-- [ ] Commit task-owned work, then archive and record the journal through Trellis.
+- [x] Commit task-owned work as `d706f08` and hand off archive/journal recording to `trellis-finish-work`.
 
 ## Rollback points
 
