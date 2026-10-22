@@ -107,3 +107,38 @@ Unified controls and overlays with Base UI, shared model fields and confirmation
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Configure default current-branch and worktree sessions
+<!-- trellis-session: v=2 fp=ac9bd731ca224158 -->
+
+**Date**: 2026-10-22
+**Task**: Configure default current-branch and worktree sessions
+**Package**: kiva-web
+**Branch**: `main`
+
+### Summary
+
+Added browser-local default workspace selection with current branch as the initial default, optional isolated worktrees, persisted session modes and safe history-only deletion for shared directories. User requested commit and push.
+
+### Main Changes
+
+- Capture workspace mode and operation identity across all creation and continuation retries; preserve existing no-mode worktree metadata.
+- Resolve current-branch execution and file views against exact canonical project/Git identity while retaining source edits and worktree cleanup guards.
+- Show correct workspace captions and deletion paths, including selected subdirectories during loading or preview failure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7602d04` | feat(web): configure default session workspace mode |
+
+### Testing
+
+- [OK] pnpm test: 5 CLI and 291 web tests passed.
+- [OK] pnpm typecheck, pnpm web:build and git diff --check passed.
+- [OK] Isolated production Next/real-Git browser checks passed for both modes, deletion safety, persistence/reset/cross-tab, light/dark and 1440/390/320px; no paid model calls.
+
+### Status
+
+[OK] **Completed**
