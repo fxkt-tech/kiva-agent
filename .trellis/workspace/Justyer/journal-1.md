@@ -176,3 +176,36 @@ Replaced generic JSONL field browsing with readable message/tool history and a s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Independent neumorphic visual theme
+<!-- trellis-session: v=2 fp=b04e847cc9c8ab6a -->
+
+**Date**: 2026-10-22
+**Task**: Independent neumorphic visual theme
+**Package**: kiva-web
+**Branch**: `feat/neumorphic-theme`
+
+### Summary
+
+Added an independent flat/neumorphic visual style while preserving current defaults, layout and business behavior.
+
+### Main Changes
+
+- Centralized semantic palettes/material roles and extended browser preferences, pre-paint restoration, cross-tab synchronization and appearance reset.
+- Added executable theme contracts and retained the pre-existing web/next-env.d.ts edit outside all commits.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d706f08` | feat(web): add independent neumorphic visual theme |
+
+### Testing
+
+- [OK] Typecheck passed; 309 full tests passed (5 root plus 304 web); production build and diff/context checks passed.
+- [OK] Independent full-scope review and isolated browser checks passed across light/dark desktop, 390px and 320px, including state retention, first-frame restoration, portals and resource viewers.
+
+### Status
+
+[OK] **Completed**
