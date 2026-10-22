@@ -27,7 +27,7 @@ describe("browser preference allowlist", () => {
       shortcuts: { sendMode: "invalid" },
     });
     assert.deepEqual(decoded.appearance, { theme: "dark", conversationFontSize: 14, wrapCode: true });
-    assert.deepEqual(decoded.conversation, { thinkingExpanded: true, toolsExpanded: false, queueMode: "follow_up" });
+    assert.deepEqual(decoded.conversation, { thinkingExpanded: true, toolsExpanded: false, queueMode: "follow_up", workspaceMode: "current-branch" });
     assert.deepEqual(decoded.shortcuts, DEFAULT_WEB_PREFERENCES.shortcuts);
   });
 
@@ -50,6 +50,14 @@ describe("browser preference allowlist", () => {
     assert.ok(Object.isFrozen(decoded.shortcuts.bindings.newSession));
   });
 
+  it("defaults missing or invalid workspace choices to current branch and retains explicit worktree", () => {
+    for (const workspaceMode of [undefined, null, "", "isolated", true, {}]) {
+      assert.equal(decodeWebPreferences({ version: 1, conversation: { workspaceMode, toolsExpanded: true } }).conversation.workspaceMode, "current-branch");
+    }
+    assert.equal(parseWebPreferences(JSON.stringify({ version: 1, conversation: { workspaceMode: "worktree" } })).conversation.workspaceMode, "worktree");
+    assert.equal(DEFAULT_WEB_PREFERENCES.conversation.workspaceMode, "current-branch");
+  });
+
   it("falls back conflicted/protected binding fields without losing other preferences or valid swaps", () => {
     const decoded = decodeWebPreferences({ ...DEFAULT_WEB_PREFERENCES,
       shortcuts: { sendMode: "mod-enter", bindings: { newSession: { key: "k", mod: true, shift: false, alt: false }, openSettings: { key: "r", mod: true, shift: false, alt: false }, focusComposer: null } },
@@ -63,6 +71,26 @@ describe("browser preference allowlist", () => {
 });
 
 describe("browser preference store", () => {
+  it("persists, reloads, resets and synchronizes the browser-local workspace mode", () => {
+    const current = fixture();
+    current.store.update("appearance", { theme: "dark" });
+    current.store.update("conversation", { workspaceMode: "worktree", toolsExpanded: true });
+    const saved = current.writes.at(-1)!;
+    assert.equal(JSON.parse(saved).conversation.workspaceMode, "worktree");
+    const reloaded = fixture(saved);
+    assert.equal(reloaded.store.getSnapshot().preferences.conversation.workspaceMode, "worktree");
+    reloaded.store.resetGroup("conversation");
+    assert.equal(reloaded.store.getSnapshot().preferences.conversation.workspaceMode, "current-branch");
+    assert.equal(reloaded.store.getSnapshot().preferences.appearance.theme, "dark");
+    current.external(reloaded.writes.at(-1)!);
+    assert.equal(current.store.getSnapshot().preferences.conversation.workspaceMode, "current-branch");
+    current.external(saved);
+    assert.equal(current.store.getSnapshot().preferences.conversation.workspaceMode, "worktree");
+    current.external(null);
+    assert.equal(current.store.getSnapshot().preferences.conversation.workspaceMode, "current-branch");
+    assert.equal(current.writes.length, 2, "storage events never echo writes");
+    current.store.destroy(); reloaded.store.destroy();
+  });
   it("initializes exactly once without writing, provides immutable stable snapshots and shares subscribers", () => {
     const current = fixture(JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { theme: "light", conversationFontSize: 16, wrapCode: true } }));
     const first = current.store.getSnapshot();

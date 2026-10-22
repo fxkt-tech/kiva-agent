@@ -107,6 +107,7 @@ function RenameSessionDialog({ session, onClose, onRenamed, returnFocus }: { ses
 }
 
 export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }: { session: SessionResource; onClose(): void; onDeleted(): void; returnFocus?: HTMLElement | null }) {
+  const currentBranch = session.workspace?.mode === "current-branch";
   const [preview, setPreview] = useState<DeletionPreview & { deletion?: DeletionOutcome }>();
   const [outcome, setOutcome] = useState<DeletionOutcome>();
   const [removeWorktree, setRemoveWorktree] = useState(true);
@@ -128,9 +129,9 @@ export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }
     }).catch((cause: unknown) => { if (!disposed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { disposed = true; mounted.current = false; };
   }, [endpoint, previewVersion]);
-  const owned = preview ? !["none", "removed"].includes(preview.workspace.state) : Boolean(session.workspace && session.workspace.state !== "removed");
+  const owned = !currentBranch && (preview ? !["none", "removed"].includes(preview.workspace.state) : Boolean(session.workspace && session.workspace.state !== "removed"));
   const retry = preview?.deletion ?? outcome ?? (session.deletion?.status !== "complete" ? session.deletion : undefined);
-  const selectedRemoval = retry ? retry.removeWorktree : owned && removeWorktree;
+  const selectedRemoval = !currentBranch && (retry ? retry.removeWorktree : owned && removeWorktree);
   const cleanupBlocked = selectedRemoval && owned && preview?.workspace.state !== "clean";
   async function confirm() {
     if (!preview || cleanupBlocked || pendingRef.current) return;
@@ -151,13 +152,13 @@ export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }
   return <Dialog open onOpenChange={(next) => { if (!next && !pendingRef.current) onClose(); }}>
     <DialogContent className="project-dialog delete-dialog" initialFocus={cancel} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
       <div className="project-dialog-heading"><DialogTitle>删除“{session.name}”</DialogTitle><button aria-label="取消删除" disabled={pending} onClick={onClose}><X size={16} /></button></div>
-      <DialogDescription>会话历史将移入可恢复的回收站。正在运行或等待输入的任务必须先结束。</DialogDescription>
-      <dl className="deletion-details"><dt>会话</dt><dd>{session.id}</dd><dt>工作区</dt><dd>{preview?.workspace.treeRoot ?? session.workspace?.treeRoot ?? "旧会话：原项目目录不会被删除"}</dd><dt>分支</dt><dd>{preview?.workspace.branch ?? session.workspace?.branch ?? "—"}</dd><dt>状态</dt><dd>{preview ? preview.workspace.state === "dirty" ? "含本地改动" : preview.workspace.state === "clean" ? "空闲 · 工作区干净" : preview.workspace.message ?? preview.workspace.state : error ? "无法确认，删除已阻止" : "正在检查任务和工作区状态…"}</dd></dl>
+      <DialogDescription>会话历史将移入可恢复的回收站。{currentBranch && "当前分支的项目文件不会被删除。"}正在运行或等待输入的任务必须先结束。</DialogDescription>
+      <dl className="deletion-details"><dt>会话</dt><dd>{session.id}</dd><dt>工作区</dt><dd>{preview?.workspace.treeRoot ?? (currentBranch ? session.workspace?.executionRoot : session.workspace?.treeRoot) ?? "旧会话：原项目目录不会被删除"}</dd><dt>分支</dt><dd>{preview?.workspace.branch ?? session.workspace?.branch ?? "—"}</dd><dt>状态</dt><dd>{preview ? preview.workspace.state === "dirty" ? "含本地改动" : preview.workspace.state === "clean" ? "空闲 · 工作区干净" : preview.workspace.message ?? preview.workspace.state : error ? "无法确认，删除已阻止" : "正在检查任务和工作区状态…"}</dd></dl>
       {owned && <label className="delete-worktree-option"><Checkbox checked={selectedRemoval} disabled={pending || Boolean(retry)} onCheckedChange={setRemoveWorktree} />同时删除对应的工作区</label>}
-      {retry && <Alert variant="warning" title="删除操作尚未完成" className="dialog-alert">正在恢复删除操作 {retry.operationId}：历史 {retry.history}，工作区 {retry.workspace}。沿用原选择：{retry.removeWorktree ? "同时清理工作区" : "保留工作区"}。{retry.error}</Alert>}
+      {retry && <Alert variant="warning" title="删除操作尚未完成" className="dialog-alert">正在恢复删除操作 {retry.operationId}：历史 {retry.history}，工作区 {retry.workspace}。沿用原选择：{selectedRemoval ? "同时清理工作区" : "保留工作区"}。{retry.error}</Alert>}
       {preview && preview.workspace.localChanges.length > 0 && <pre className="deletion-changes">{preview.workspace.localChanges.join("\n")}</pre>}
       {preview && cleanupBlocked && <Alert variant="warning" title="暂时不能清理工作区" className="dialog-alert">工作区包含本地内容或状态不可确认。处理后重试，或取消勾选以保留文件。</Alert>}
-      <p className="workspace-location">{preview?.recovery ?? "历史恢复不会重建已删除的工作文件；分支引用会保留。"}</p>
+      <p className="workspace-location">{preview?.recovery ?? (currentBranch ? "此会话与其他当前分支会话共享项目目录，删除和恢复历史均不会改变项目文件。" : "历史恢复不会重建已删除的工作文件；分支引用会保留。")}</p>
       {error && <Alert variant="error" title="无法完成删除" className="dialog-alert">{error}</Alert>}
       <div className="project-dialog-actions"><Button ref={cancel} variant="ghost" disabled={pending} onClick={onClose}>取消</Button>{error && <Button variant="ghost" disabled={pending} onClick={() => setPreviewVersion((value) => value + 1)}>重新检查</Button>}<Button disabled={!preview || cleanupBlocked || pending} onClick={() => void confirm()}>{pending ? "正在删除…" : "删除会话"}</Button></div>
     </DialogContent>

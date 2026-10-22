@@ -18,7 +18,7 @@ The custom server binds loopback `127.0.0.1` on default port `9495`; `PORT` rema
 
 Project IDs resolve registered canonical directories; session IDs identify existing Pi histories or durable empty metadata. Names, directories and filenames are never route identity. Invalid/mismatched resources show their own recovery state. Reads, prefetch and subscriptions never create, continue, switch, abort or initialize execution.
 
-Session creation/continuation is an explicit POST returning confirmed IDs before navigation. Git worktrees pin creation-time HEAD, use owned named branches and stay outside registered source roots. Do not copy local source contents or install dependencies. Legacy conversations are passive; continuation forks dialogue to a new ID with current committed code. Non-Git/unborn projects require user preparation before execution.
+Session creation/continuation is an explicit POST returning confirmed IDs before navigation. New sessions default to the current project directory; explicit worktree mode pins creation-time HEAD, uses an owned named branch and stays outside registered source roots. Never copy local source contents or install dependencies for worktrees. Legacy conversations remain passive; continuation forks dialogue to a new ID using the selected workspace mode. Non-Git/unborn projects still require user preparation before execution. See Default session workspace mode below.
 
 `KIVA_WEB_WORKTREE_ROOT` optionally selects the managed worktree location. `KIVA_WEB_RUNTIME_CAPACITY` bounds independent session owners (default 4). One project/session has one owner shared by tabs; separate sessions can run concurrently, even in one project. Navigation/disconnect does not stop execution. Capacity may reclaim only durably recoverable idle owners; pending RPC, tools, queues, retries, compaction and extension input are active.
 
@@ -26,7 +26,7 @@ Each wire event carries protocol/project/session/stream/sequence identity. Route
 
 Metadata lives at project `.kiva/web/sessions/`; Pi history remains in project `.kiva/sessions/`. Registry migration is versioned, backed up and atomically replaced at controlled startup/registration. Empty-session metadata must not require invented transcript entries. Use supported exact-ID Pi CLI/SDK surfaces and verify identity before projecting events.
 
-Deletion previews bind confirmation to exact target, lifecycle and workspace revision. Cleanup starts checked; unchecked means history-only trash. Under idle exclusion, revalidate ownership and all local staged/unstaged/untracked/ignored contents across the whole worktree. Busy, dirty or substituted workspaces block before side effects. Never force cleanup, delete branch refs or fall back to the source directory. Persist history/workspace outcomes separately because their mutations are not atomic. Restore does not recreate removed files.
+Deletion previews bind confirmation to exact target, lifecycle and workspace revision. For owned worktrees, cleanup starts checked; unchecked means history-only trash. Current-branch sessions always use history-only trash and never expose or accept source-directory cleanup. Under idle exclusion, revalidate ownership and all local staged/unstaged/untracked/ignored contents across the whole worktree. Busy, dirty or substituted workspaces block before side effects. Never force cleanup, delete branch refs or fall back to the source directory. Persist history/workspace outcomes separately because their mutations are not atomic. Restore does not recreate removed files.
 
 Git status alone cannot prove cleanup safety: tracked paths marked assume-unchanged or skip-worktree can hide modified contents. Reject cleanup when `git ls-files -v` reports lowercase or `S` index tags; leave those flags and files untouched. Pending/partial deletion must remain accessible after reload, preserve the original cleanup choice and expose its operation/history/workspace outcomes for revalidated retry.
 
@@ -43,14 +43,14 @@ Git status alone cannot prove cleanup safety: tracked paths marked assume-unchan
 | Absolute/NUL/encoded traversal or target/ancestor symlink escape | Reject before filesystem/Git read |
 | Partial deletion or removed workspace restoration | Expose retained/removed state and retry/recovery; do not claim atomic success |
 
-Git diff arguments use literal pathspecs with external diff/textconv disabled. Bound text and diff buffers; binary and oversized files render explicit errors. Project-root inspection and session-worktree inspection remain visibly distinct.
+Git diff arguments use literal pathspecs with external diff/textconv disabled. Bound text and diff buffers; binary and oversized files render explicit errors. Project-root inspection and session workspace inspection identify whether the session shares current project files or owns an isolated worktree.
 
 Workspace file/status lists consume `git ls-files -z` and `git status --porcelain=v1 -z --untracked-files=all`; preserve raw path bytes represented as UTF-8 strings and parse rename source/destination as separate NUL records. Include individual untracked files rather than collapsed directory records, so both trees can select and preview each leaf. Newline splitting, Git's quoted display paths, arrow splitting and trimming can corrupt Unicode/newline/space filenames before URL encoding.
 
 ## 5. Good / base / bad cases
 
-- Good: two sessions edit the same relative file independently, each deep link resolves its own worktree, and leaving either page preserves its running owner.
-- Base: an old session outside the latest 100 list entries remains passively addressable and offers explicit isolated continuation.
+- Good: two explicit worktree sessions edit the same relative file independently; current-branch sessions intentionally share project files. Each deep link and execution owner retains its recorded directory mode, and leaving a page preserves running work.
+- Base: an old session outside the latest 100 list entries remains passively addressable and offers explicit continuation into the selected workspace mode.
 - Bad: selecting a route switches one mutable Pi process, a cold GET starts a session, an old event overwrites a new route, or restoring history silently recreates/reset code.
 
 ## 6. Tests required
@@ -174,3 +174,55 @@ Cover passive catalog/secret projection, actual capability lists, unrelated-fiel
 ### 7. Wrong vs correct
 
 Wrong: `onModelChange -> set_model`, then `onThinkingChange -> set_thinking`, assuming RPC also saved defaults. Correct: local candidate edits → one explicit complete-pair POST → validated scoped application → Pi settings flush/error check → confirmed catalog and success feedback.
+
+
+## Default session workspace mode
+
+### 1. Scope / trigger
+
+Conversation settings choose the directory policy for future sessions. The approved initial default is current branch. This choice affects creation, continuation, execution, file/diff views and deletion; it never migrates an existing session.
+
+### 2. Signatures
+
+- `SessionWorkspaceMode = "current-branch" | "worktree"`, `DEFAULT_SESSION_WORKSPACE_MODE = "current-branch"` and `isSessionWorkspaceMode(unknown)` live in `shared/workspace-contract.ts`.
+- `CreateSessionInput = {operationId?: string; name?: string; workspaceMode?: SessionWorkspaceMode}` is accepted by project session POST and exact-session continuation POST.
+- `SessionResource.workspace: OwnedWorkspace | CurrentBranchWorkspace | undefined`. Both variants retain identity, execution/tree/repository roots, Git common directory/subdirectory, creation base/branch and state. Only OwnedWorkspace has managedRoot. New owned records use mode=worktree; old owned records may omit it. CurrentBranchWorkspace always has mode=current-branch.
+- `WebPreferences.conversation.workspaceMode` is browser-local and persists under the existing v1 key. Sidebar, shortcut, first-send creation and continuation send the captured mode.
+- `ExecutionWorkspace.reserveCurrent/prepareCurrent/resolveCurrent(workspace, registeredProject)` operate on shared project directories. Existing reserve/prepare/resolve/inspectRemoval/remove APIs remain specific to owned worktrees.
+
+### 3. Contracts
+
+An omitted create mode selects current-branch. An omitted mode in persisted workspace metadata means the old owned-worktree behavior. These fallbacks are deliberately different. Missing/invalid browser preferences choose current-branch without resetting other preferences; conversation reset also restores it. Changing a default never rewrites existing session metadata or owners.
+
+Current-branch execution uses the exact registered canonical project directory, including existing staged, unstaged and untracked files. Prove project identity, canonical path, Git checkout root/common-directory and selected subdirectory at resolution. Do not create/reset/switch/stash/check out a branch or worktree. The directory follows the user's current checkout; visible branch can refresh from Git while creation baseCommit remains durable. Do not infer historical files from inherited dialogue. Current-branch sessions share files and retain the existing independent-runtime concurrency policy.
+
+Persist mode with the first creation intent. Retries without a mode use that intent; an explicitly conflicting mode is rejected. Browser operations capture operationId and mode together so an in-flight or failed creation/continuation cannot silently change mode when settings change. Validate continuation input before lifecycle exclusion releases an idle owner. History remains project-owned for both modes.
+
+Current-branch deletion previews return removeWorktree=false with non-removable shared-directory state. The UI hides cleanup during loading, errors and retries; project subdirectories display executionRoot, not the broader checkout root. Reject cleanup=true before saving deletion intents or moving history. Only owned-worktree variants may enter removal, interrupted-removal reconciliation and Git cleanup. Rename/archive/trash/restore/JSONL retain their existing scope and semantics.
+
+### 4. Validation and error matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Missing new create mode | Current project directory; metadata/history only |
+| Explicit worktree | Owned isolated checkout with original guards |
+| Unknown/null/non-string mode | HTTP 400 before metadata/Git/runtime side effects |
+| Same operation, explicit different mode | HTTP 409; retain original mode, ID and intent |
+| Old metadata without mode | Resolve/clean up as an owned worktree |
+| Changed canonical directory/Git ownership | Conflict; no fallback or checkout mutation |
+| Current-branch cleanup=true | HTTP 409 shared_workspace_cleanup before history/intent changes |
+| Current-branch cleanup=false | Recoverable history deletion; source files and branch unchanged |
+
+### 5. Good / base / bad cases
+
+Good: switch the preference to worktree, create an isolated session, then reset to current branch while both prior session modes remain intact. Base: existing v1 preferences gain the new current-branch fallback; old workspace metadata remains isolated. Bad: treat all missing modes identically, move an existing session after a preference update, or feed a shared project directory into Git worktree cleanup.
+
+### 6. Required tests
+
+Real-Git repository/workspace and scoped transport tests verify dirty/index/ref/worktree preservation, canonical subdirectory proof, creation/restart/failed retries, both continuation modes, old no-mode worktree metadata, current history-only deletion and forged cleanup with no side effects. Preference/settings/routed tests cover defaults/decoding/storage/reset/cross-tab, every entry point, captured retry identity/mode, retained existing modes and cleanup UI even on loading/error.
+
+Use `server/fixtures/workspace-mode-server.ts` after a production build for browser acceptance. It serves real Next UI with an isolated temp Git repository and deterministic RuntimeAdapter; it never calls Pi/model services or uses user session data. Check persisted selection, both actual directory modes, source-file retention after delete, worktree cancellation, nested Escape/focus, light/dark and 1440px/390px/320px. Stop only this fixture server afterward.
+
+### 7. Wrong vs correct
+
+Wrong: use the current preference each time an existing session executes, or infer owned cleanup from workspace presence alone. Correct: capture the preference at creation, persist a discriminated workspace, resolve that exact directory and allow cleanup only for its owned-worktree variant.

@@ -2,20 +2,32 @@ import type { RuntimeMessage } from "./runtime-types";
 import type { SessionSummary } from "./types";
 
 export type SessionCollection = "active" | "archived" | "trash";
+export type SessionWorkspaceMode = "current-branch" | "worktree";
+export const DEFAULT_SESSION_WORKSPACE_MODE: SessionWorkspaceMode = "current-branch";
+export function isSessionWorkspaceMode(value: unknown): value is SessionWorkspaceMode {
+  return value === "current-branch" || value === "worktree";
+}
 export interface ResourceTarget { projectId: string; sessionId?: string }
 export type GitCapability =
   | { state: "ready"; repositoryRoot: string; commonDirectory: string; projectSubdirectory: string; head: string; branch: string }
   | { state: "non-git" | "no-commit" | "missing-git" | "unavailable"; message: string };
 export interface ProjectResource { id: string; name: string; path: string; capability: GitCapability }
 export interface RemoveProjectResult { projectId: string; projects: ProjectResource[] }
-export interface OwnedWorkspace {
+interface WorkspaceIdentity {
   projectId: string; sessionId: string; operationId: string;
-  managedRoot: string; treeRoot: string; executionRoot: string;
+  treeRoot: string; executionRoot: string;
   repositoryRoot: string; commonDirectory: string; projectSubdirectory: string;
   baseCommit: string; branch: string;
   state: "provisioning" | "ready" | "failed" | "removed";
   error?: string;
 }
+export interface OwnedWorkspace extends WorkspaceIdentity {
+  /** Records written before workspace selection always represent owned worktrees. */
+  mode?: "worktree";
+  managedRoot: string;
+}
+export interface CurrentBranchWorkspace extends WorkspaceIdentity { mode: "current-branch" }
+export type SessionWorkspace = OwnedWorkspace | CurrentBranchWorkspace;
 export interface SessionControls { model?: { provider: string; id: string }; thinkingLevel?: string }
 export interface DeletionOutcome {
   operationId: string; history: "retained" | "trashed"; workspace: "retained" | "removed" | "none";
@@ -23,7 +35,7 @@ export interface DeletionOutcome {
 }
 export interface SessionResource extends SessionSummary {
   projectId: string; collection: SessionCollection; legacy: boolean; executable: boolean;
-  createdAt: string; sourceSessionId?: string; workspace?: OwnedWorkspace;
+  createdAt: string; sourceSessionId?: string; workspace?: SessionWorkspace;
   controls?: SessionControls; deletion?: DeletionOutcome;
 }
 export interface SessionRead { session: SessionResource; messages: RuntimeMessage[] }
@@ -43,7 +55,7 @@ export interface DeletionPreview {
   /** Existing durable operation; retries retain its original confirmation and choice. */
   deletion?: DeletionOutcome;
 }
-export interface CreateSessionInput { operationId?: string; name?: string }
+export interface CreateSessionInput { operationId?: string; name?: string; workspaceMode?: SessionWorkspaceMode }
 export type RepositoryAction = { type: "archive" | "restore" | "restore_deleted" };
 export interface DeleteSessionInput { confirmation: string; removeWorktree: boolean }
 

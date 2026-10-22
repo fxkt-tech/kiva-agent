@@ -116,6 +116,18 @@ describe("global settings dialog", () => {
     assert.equal(requests.filter((item) => item.body).length, 0);
   });
 
+  it("configures the default workspace for new sessions and resets the conversation group", async () => {
+    await open(); await click(root().findByProps({ id: "settings-tab-conversation" }));
+    assert.equal(field("默认工作区").props.value, "current-branch");
+    assert.deepEqual(field("默认工作区").props.options.map((option: { label: string }) => option.label), ["当前分支", "独立 worktree"]);
+    assert.match(text(root().findByProps({ id: "settings-panel-conversation" })), /仅用于新建和继续会话.*包含未提交改动.*共享同一目录/);
+    await change("默认工作区", "worktree");
+    assert.equal(webPreferences.getSnapshot().preferences.conversation.workspaceMode, "worktree");
+    await click(root().findByProps({ id: "settings-panel-conversation" }).findAllByType("button").find((node) => text(node) === "恢复本组默认")!);
+    assert.equal(field("默认工作区").props.value, "current-branch");
+    assert.equal(requests.filter((item) => item.body).length, 0, "workspace preference is browser-local");
+  });
+
   it("records, rejects conflicts and protected keys, clears and resets shortcuts without executing", async () => {
     await open(); await click(root().findByProps({ id: "settings-tab-shortcuts" }));
     const recorder = () => root().findByProps({ "aria-label": "录制聚焦输入框快捷键" });

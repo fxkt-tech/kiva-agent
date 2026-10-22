@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { decodeResourceId, WorkspaceError, type OwnedWorkspace, type ProjectResource, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
+import { decodeResourceId, WorkspaceError, type CurrentBranchWorkspace, type OwnedWorkspace, type ProjectResource, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
 import { git } from "./workspace-registry";
 
 /** Owns Git checkout/removal. The repository persists each intent before calling prepare/remove. */
@@ -21,11 +21,38 @@ export class ExecutionWorkspace {
       if (contains(root, treeRoot) || contains(treeRoot, root)) throw new WorkspaceError("unsafe_workspace_root", "Managed worktrees must be outside registered/source directories.");
     }
     return {
-      projectId: project.id, sessionId, operationId, managedRoot: this.managedRoot, treeRoot,
+      mode: "worktree", projectId: project.id, sessionId, operationId, managedRoot: this.managedRoot, treeRoot,
       executionRoot: join(treeRoot, capability.projectSubdirectory), repositoryRoot: capability.repositoryRoot,
       commonDirectory: capability.commonDirectory, projectSubdirectory: capability.projectSubdirectory,
       baseCommit: capability.head, branch: `kiva/session/${sessionId}`, state: "provisioning",
     };
+  }
+
+  /** Current-directory intents own only their session history, never the checkout. */
+  reserveCurrent(project: ProjectResource, sessionId: string, operationId: string): CurrentBranchWorkspace {
+    if (project.capability.state !== "ready") throw new WorkspaceError("git_not_ready", project.capability.message, 409, { projectId: project.id });
+    const capability = project.capability;
+    const workspace: CurrentBranchWorkspace = {
+      mode: "current-branch", projectId: project.id, sessionId, operationId,
+      treeRoot: capability.repositoryRoot, executionRoot: project.path,
+      repositoryRoot: capability.repositoryRoot, commonDirectory: capability.commonDirectory,
+      projectSubdirectory: capability.projectSubdirectory, baseCommit: capability.head,
+      branch: capability.branch, state: "provisioning",
+    };
+    this.proveCurrent(workspace, project);
+    return workspace;
+  }
+
+  prepareCurrent(workspace: CurrentBranchWorkspace, project: ProjectResource): CurrentBranchWorkspace {
+    if (workspace.state === "removed") throw new WorkspaceError("workspace_removed", "Current project directory metadata cannot be reused after removal.");
+    this.proveCurrent(workspace, project);
+    return { ...workspace, state: "ready", error: undefined };
+  }
+
+  resolveCurrent(workspace: CurrentBranchWorkspace, project: ProjectResource): string {
+    if (workspace.state !== "ready") throw new WorkspaceError("workspace_unavailable", "Repair this session's project directory metadata before execution.");
+    this.proveCurrent(workspace, project);
+    return workspace.executionRoot;
   }
 
   prepare(workspace: OwnedWorkspace): OwnedWorkspace {
@@ -81,6 +108,25 @@ export class ExecutionWorkspace {
     // Git independently checks cleanliness again. Never force and never remove the branch ref.
     git(workspace.repositoryRoot, ["worktree", "remove", workspace.treeRoot]);
     return { ...workspace, state: "removed" };
+  }
+
+  private proveCurrent(workspace: CurrentBranchWorkspace, project: ProjectResource) {
+    decodeResourceId(workspace.projectId);
+    decodeResourceId(workspace.sessionId);
+    const capability = project.capability;
+    if (capability.state !== "ready" || workspace.mode !== "current-branch" || workspace.projectId !== project.id
+      || workspace.executionRoot !== project.path || workspace.repositoryRoot !== capability.repositoryRoot
+      || workspace.treeRoot !== capability.repositoryRoot || workspace.commonDirectory !== capability.commonDirectory
+      || workspace.projectSubdirectory !== capability.projectSubdirectory || !/^[a-f0-9]{40,64}$/.test(workspace.baseCommit)
+      || resolve(workspace.repositoryRoot, workspace.projectSubdirectory) !== workspace.executionRoot
+      || !contains(workspace.repositoryRoot, workspace.executionRoot)
+      || !existsSync(workspace.executionRoot) || realpathSync(workspace.executionRoot) !== workspace.executionRoot
+      || realpathSync(workspace.repositoryRoot) !== workspace.repositoryRoot
+      || realpathSync(workspace.commonDirectory) !== workspace.commonDirectory
+      || realpathSync(git(workspace.executionRoot, ["rev-parse", "--show-toplevel"])) !== workspace.repositoryRoot
+      || realpathSync(git(workspace.executionRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"])) !== workspace.commonDirectory) {
+      throw new WorkspaceError("workspace_ownership", "The registered project directory or Git ownership changed; repair the session explicitly.");
+    }
   }
 
   private validateLocation(workspace: OwnedWorkspace) {

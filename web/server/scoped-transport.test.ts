@@ -12,7 +12,7 @@ import { SessionRepository } from "./session-repository";
 import { RuntimeManager } from "./runtime-manager";
 import { createScopedTransport } from "./scoped-transport";
 import { createDeterministicAdapter } from "./fixtures/deterministic-adapter";
-import type { SessionResource } from "../shared/workspace-contract";
+import type { SessionResource, SessionWorkspaceMode } from "../shared/workspace-contract";
 import type { RuntimeWireEvent, SessionRuntimeRead } from "../shared/runtime-types";
 
 async function fixture(capacity = 4) {
@@ -40,12 +40,103 @@ async function fixture(capacity = 4) {
     const response = await fetch(`${origin}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json", ...extraHeaders }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
-  const create = async (operationId: string) => (await request(`${api}/sessions`, { operationId })).body.session as SessionResource;
+  const create = async (operationId: string, workspaceMode?: SessionWorkspaceMode) => (await request(`${api}/sessions`, { operationId, ...(workspaceMode ? { workspaceMode } : {}) })).body.session as SessionResource;
   const close = async () => { sockets.clients.forEach((socket) => socket.terminate()); sockets.close(); await manager.stop(); await new Promise<void>((resolve) => server.close(() => resolve())); };
   return { root, installation, registry, repository, project, manager, adapters, origin, api, request, create, close, git };
 }
 
 describe("scoped HTTP/WebSocket transport", () => {
+  it("defaults to the current project files while retaining explicit isolated worktrees and captured retry modes", async () => {
+    const f = await fixture();
+    try {
+      writeFileSync(join(f.installation, "tracked.txt"), "local source edit\n");
+      writeFileSync(join(f.installation, "untracked.txt"), "untracked source\n");
+      const branch = f.git("symbolic-ref", "HEAD"), index = f.git("ls-files", "--stage"), worktrees = f.git("worktree", "list", "--porcelain");
+      const session = await f.create("current-default");
+      assert.equal(session.workspace?.mode, "current-branch");
+      assert.equal(session.workspace?.executionRoot, f.installation);
+      assert.equal(f.git("symbolic-ref", "HEAD"), branch);
+      assert.equal(f.git("ls-files", "--stage"), index);
+      assert.equal(f.git("worktree", "list", "--porcelain"), worktrees);
+      assert.equal(existsSync(join(f.root, "worktrees")), false);
+      const api = `${f.api}/sessions/${session.id}`;
+      assert.equal((await f.request(`${api}/files?path=tracked.txt`)).body.content, "local source edit\n");
+      assert.equal((await f.request(`${api}/files?path=untracked.txt`)).body.content, "untracked source\n");
+      assert.match((await f.request(`${api}/changes?path=tracked.txt`)).body.content, /local source edit/);
+      assert.equal((await f.request(`${api}/workspace`)).body.project.path, f.installation);
+      assert.equal(f.adapters.size, 0, "creating and inspecting a session must not start Pi");
+      assert.equal((await f.request(`${api}/commands`, { type: "initialize" })).status, 202);
+      assert.equal(f.adapters.get(session.id)?.state.cwd, f.installation);
+      assert.equal((await f.create("current-default")).id, session.id);
+      const conflict = await f.request(`${f.api}/sessions`, { operationId: "current-default", workspaceMode: "worktree" });
+      assert.equal(conflict.status, 409);
+      const isolated = await f.create("explicit-worktree", "worktree");
+      assert.equal(isolated.workspace?.mode, "worktree");
+      assert.notEqual(isolated.workspace?.executionRoot, f.installation);
+      assert.equal((await f.request(`${f.api}/sessions/${isolated.id}/files?path=tracked.txt`)).body.content, "committed fixture\n");
+      assert.equal((await f.create("explicit-worktree")).id, isolated.id, "an omitted retry mode preserves an existing worktree");
+      assert.equal(f.repository.read(f.project.id, session.id).session.workspace?.mode, "current-branch");
+      assert.equal(readFileSync(join(f.installation, "tracked.txt"), "utf8"), "local source edit\n");
+    } finally { await f.close(); }
+  });
+
+  it("rejects invalid create/continue modes before metadata or runtime side effects", async () => {
+    const f = await fixture();
+    try {
+      const worktrees = f.git("worktree", "list", "--porcelain");
+      for (const workspaceMode of [null, "", "project", false, 1, {}, ["worktree"]]) {
+        assert.equal((await f.request(`${f.api}/sessions`, { operationId: "invalid-mode", workspaceMode })).status, 400);
+      }
+      assert.equal(f.repository.list(f.project.id).length, 0);
+      assert.equal(existsSync(join(f.installation, ".kiva", "web", "sessions")), false);
+      assert.equal(f.git("worktree", "list", "--porcelain"), worktrees);
+      assert.equal(f.adapters.size, 0);
+      const session = await f.create("valid-current");
+      const api = `${f.api}/sessions/${session.id}`;
+      await f.request(`${api}/commands`, { type: "initialize" });
+      const adapter = f.adapters.get(session.id)!;
+      assert.equal((await f.request(`${api}/continue`, { operationId: "bad-continue", workspaceMode: "project" })).status, 400);
+      assert.equal(adapter.starts(), 1);
+      assert.equal(adapter.stops(), 0, "invalid continuation must not release an idle owner");
+      assert.equal(f.repository.list(f.project.id).length, 1);
+    } finally { await f.close(); }
+  });
+
+  it("permits only history deletion for a current-branch session, preserving project files and branch", async () => {
+    const f = await fixture();
+    try {
+      const session = await f.create("shared-deletion");
+      const api = `${f.api}/sessions/${session.id}`;
+      writeFileSync(join(f.installation, "tracked.txt"), "keep this dirty file\n");
+      writeFileSync(join(f.installation, "local.txt"), "keep untracked file\n");
+      const history = join(f.installation, ".kiva", "sessions"); mkdirSync(history, { recursive: true });
+      const file = join(history, `${session.id}.jsonl`);
+      const transcript = `${JSON.stringify({ type: "session", version: 3, id: session.id, timestamp: new Date().toISOString(), cwd: f.installation })}\n`;
+      writeFileSync(file, transcript);
+      const branch = f.git("symbolic-ref", "HEAD"), worktrees = f.git("worktree", "list", "--porcelain");
+      const metadata = join(f.installation, ".kiva", "web", "sessions", `${session.id}.json`);
+      const preview = await f.request(`${api}/deletion-preview`, {});
+      assert.equal(preview.status, 200); assert.equal(preview.body.removeWorktree, false);
+      const before = readFileSync(metadata, "utf8");
+      const forged = await f.request(`${api}/actions`, { type: "delete", confirmation: preview.body.confirmation, removeWorktree: true });
+      assert.equal(forged.status, 409);
+      assert.equal(readFileSync(metadata, "utf8"), before);
+      assert.equal(readFileSync(file, "utf8"), transcript);
+      assert.equal(f.repository.read(f.project.id, session.id).session.collection, "active");
+      const refreshed = await f.request(`${api}/deletion-preview`, {});
+      const removed = await f.request(`${api}/actions`, { type: "delete", confirmation: refreshed.body.confirmation, removeWorktree: false });
+      assert.equal(removed.status, 200); assert.equal(removed.body.history, "trashed");
+      assert.equal(f.repository.read(f.project.id, session.id).session.collection, "trash");
+      assert.equal(readFileSync(join(f.installation, "tracked.txt"), "utf8"), "keep this dirty file\n");
+      assert.equal(readFileSync(join(f.installation, "local.txt"), "utf8"), "keep untracked file\n");
+      assert.equal(f.git("symbolic-ref", "HEAD"), branch);
+      assert.equal(f.git("worktree", "list", "--porcelain"), worktrees);
+      assert.equal((await f.request(`${api}/actions`, { type: "restore_deleted" })).status, 200);
+      assert.equal(f.repository.resolveExecution(f.project.id, session.id).executionRoot, f.installation);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
   it("reads exact original JSONL passively, including empty metadata and malformed lines", async () => {
     const f = await fixture();
     try {
@@ -81,7 +172,7 @@ describe("scoped HTTP/WebSocket transport", () => {
   it("hides projects without deleting data or stopping owners and restores the same registration on import", async () => {
     const f = await fixture();
     try {
-      const session = await f.create("project-visibility");
+      const session = await f.create("project-visibility", "worktree");
       const sessionApi = `${f.api}/sessions/${session.id}`;
       const marker = join(session.workspace!.executionRoot, "preserved.txt"); writeFileSync(marker, "keep all working files\n");
       const metadata = join(f.installation, ".kiva", "web", "sessions", `${session.id}.json`);
@@ -178,7 +269,7 @@ describe("scoped HTTP/WebSocket transport", () => {
   it("creates a real isolated resource while GET and WS stay passive, then scopes live events and concurrent owners", { timeout: 20_000 }, async () => {
     const f = await fixture();
     try {
-      const a = await f.create("operation-a"), b = await f.create("operation-b");
+      const a = await f.create("operation-a", "worktree"), b = await f.create("operation-b", "worktree");
       const read = await f.request(`${f.api}/sessions/${a.id}`);
       assert.equal(read.status, 200); assert.equal((read.body as unknown as SessionRuntimeRead).lifecycle, "dormant");
       assert.notEqual(a.workspace?.executionRoot, f.installation); assert.equal(f.adapters.size, 0);
@@ -202,7 +293,7 @@ describe("scoped HTTP/WebSocket transport", () => {
   it("binds deletion to lifecycle revision, blocks dirty cleanup before history moves, and retains branch refs", { timeout: 20_000 }, async () => {
     const f = await fixture();
     try {
-      const session = await f.create("operation-delete"), path = `${f.api}/sessions/${session.id}`;
+      const session = await f.create("operation-delete", "worktree"), path = `${f.api}/sessions/${session.id}`;
       const preview = await f.request(`${path}/deletion-preview`, {});
       assert.equal(preview.body.removeWorktree, true);
       await f.request(`${path}/commands`, { type: "initialize" });
@@ -216,7 +307,7 @@ describe("scoped HTTP/WebSocket transport", () => {
       assert.equal(retained.status, 200); assert.equal(retained.body.workspace, "retained"); assert.equal(existsSync(join(session.workspace!.treeRoot, "local.txt")), true);
       await f.request(`${path}/actions`, { type: "restore_deleted" });
       assert.equal(f.repository.read(f.project.id, session.id).session.id, session.id);
-      const clean = await f.create("operation-clean"), cleanPath = `${f.api}/sessions/${clean.id}`;
+      const clean = await f.create("operation-clean", "worktree"), cleanPath = `${f.api}/sessions/${clean.id}`;
       const cleanPreview = await f.request(`${cleanPath}/deletion-preview`, {});
       const removed = await f.request(`${cleanPath}/actions`, { type: "delete", confirmation: cleanPreview.body.confirmation, removeWorktree: true });
       assert.equal(removed.status, 200); assert.equal(removed.body.workspace, "removed"); assert.equal(existsSync(clean.workspace!.treeRoot), false);

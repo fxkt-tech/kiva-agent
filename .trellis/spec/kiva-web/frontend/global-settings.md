@@ -6,7 +6,7 @@ Use this contract when changing the sidebar settings dialog, browser preferences
 
 ## 2. Signatures and ownership
 
-- `shared/web-preferences.ts` owns `WebPreferences`, defaults and field-wise decoding. The only browser key is `kiva:web-preferences:v1`; preferences contain appearance, conversation presentation/default queue mode and portable shortcut bindings, never drafts, credentials or server config.
+- `shared/web-preferences.ts` owns `WebPreferences`, defaults and field-wise decoding. The only browser key is `kiva:web-preferences:v1`; preferences contain appearance, conversation presentation/default queue/workspace mode and portable shortcut bindings, never drafts, credentials or server config.
 - `lib/web-preferences.ts` owns `createWebPreferencesStore`, the singleton `webPreferences` and `useWebPreferences()`. Stable immutable snapshots include `preferences` and `persistenceError`. `lib/shortcuts.ts` owns `createShortcutRegistry`, the singleton registry, key normalization/formatting and native send-mode matching.
 - `lib/theme-bootstrap.ts` exports `themeBootstrapScript`; `app/layout.tsx` loads it before paint alongside legacy cache recovery. Explicit light/dark sets root `data-theme`; system removes it. Root-only hydration suppression is justified for this expected attribute change, never the interactive subtree.
 - `features/settings/dialog.tsx` owns five category views, dirty-dismiss/pending decisions and action-specific feedback; shared Base UI Dialog owns portals, nested dismissal and focus trapping. `models-panel.tsx` owns default/provider/key candidates; `api.ts` decodes safe responses and maps failures to fixed messages.
@@ -33,7 +33,9 @@ Trap/restore focus, support category keyboard navigation and Escape/backdrop, co
 
 The no-project route has no `projectId`: require a real error before comparing its scope with the route. `error?.projectId === route.projectId` alone is true when both are absent and incorrectly renders an empty creation-error Alert.
 
-Browser defaults preserve existing behavior: system theme, 14px conversation text, non-wrapping code, collapsed thinking/tools, `steer`, Enter send/Shift+Enter newline. Font options are 14/16/18px. Explicit theme overrides OS; only system follows OS changes. Auto-save non-secret preferences and synchronize same-origin tabs; reset a single group. Initialize the preference subscription in the persistent shell on every route, including `/projects`, rather than waiting for a composer or settings dialog to mount: otherwise that tab misses theme storage events. Invalid fields fall back individually, and denied storage keeps an explicit in-memory-only warning without clearing unrelated storage.
+Browser presentation defaults are system theme, 14px conversation text, non-wrapping code, collapsed thinking/tools, `steer`, and Enter send/Shift+Enter newline. The new-session workspace default is `current-branch`; Settings → Conversation can choose `worktree` instead. Font options are 14/16/18px. Explicit theme overrides OS; only system follows OS changes. Auto-save non-secret preferences and synchronize same-origin tabs; reset a single group. Initialize the preference subscription in the persistent shell on every route, including `/projects`, rather than waiting for a composer or settings dialog to mount: otherwise that tab misses theme storage events. Invalid fields fall back individually, and denied storage keeps an explicit in-memory-only warning without clearing unrelated storage.
+
+The workspace default is captured by a new creation/continuation operation, never applied to existing sessions; changing it cannot change an in-flight retry. It is browser-local like the other conversation defaults. See [Default session workspace mode](./workspace-routing.md#default-session-workspace-mode) for API, compatibility and history-only deletion contracts.
 
 Disclosure defaults initialize a mounted item, not every streaming render. Queue preference initializes a composer, not queued work or an active user override. Code wrapping must not alter exact raw JSONL. Native new-model editor disclosure also initializes once: deriving `open` from whether its editable ID is empty collapses the field after the first keystroke.
 
@@ -80,7 +82,7 @@ Use concise Toasts for confirmed explicit actions and persistent actionable Aler
 ## 5. Good / base / bad cases
 
 - Good: change theme immediately, save a new-session default, add a compatible provider then its key, and retain existing session/draft/active task state.
-- Base: absent preferences preserve old UI defaults; missing configuration allows explicit first setup with no writes on GET.
+- Base: absent preferences preserve established presentation defaults and select current branch for new sessions; missing configuration allows explicit first setup with no writes on GET.
 - Bad: masked-key round trips, default changes rewriting existing sessions, stale retry loops, switching theme overwriting Pi TUI settings, or a provider save stopping a running owner.
 
 ## 6. Required tests

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebSocket } from "ws";
 import { isRuntimeCommand, type RuntimeScope } from "../shared/runtime-types";
-import { decodeResourceId, WorkspaceError, type CreateSessionInput } from "../shared/workspace-contract";
+import { decodeResourceId, isSessionWorkspaceMode, WorkspaceError, type CreateSessionInput } from "../shared/workspace-contract";
 import type { WorkspaceRegistry } from "./workspace-registry";
 import type { SessionRepository } from "./session-repository";
 import type { RuntimeManager } from "./runtime-manager";
@@ -112,8 +112,9 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
             if (collection !== null && !["active", "archived", "trash"].includes(collection)) throw new WorkspaceError("invalid_collection", "Unknown session collection", 400);
             sendJson(response, 200, { active: await repository.list(projectId, "active"), archived: await repository.list(projectId, "archived"), trash: await repository.list(projectId, "trash") });
           } else if (request.method === "POST") {
+            const input = creationInput(await readObject(request));
             const defaults = readModelDefaults(registry.installationRoot);
-            const session = await repository.create(projectId, creationInput(await readObject(request)), defaults ? { model: { provider: defaults.provider, id: defaults.modelId }, thinkingLevel: defaults.thinkingLevel } : undefined);
+            const session = await repository.create(projectId, input, defaults ? { model: { provider: defaults.provider, id: defaults.modelId }, thinkingLevel: defaults.thinkingLevel } : undefined);
             sendJson(response, 201, { projectId, sessionId: session.id, session });
           } else methodNotAllowed();
           return true;
@@ -136,7 +137,8 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         const body = await readObject(request);
         switch (endpoint) {
           case "continue": {
-            const session = await manager.withIdle(scope, () => repository.continue(projectId, scope.sessionId, creationInput(body)));
+            const input = creationInput(body);
+            const session = await manager.withIdle(scope, () => repository.continue(projectId, scope.sessionId, input));
             sendJson(response, 201, { projectId, sessionId: session.id, session }); break;
           }
           case "commands": {
@@ -184,8 +186,10 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
 }
 
 function creationInput(body: Record<string, unknown>): CreateSessionInput {
-  if ((body.operationId !== undefined && typeof body.operationId !== "string") || (body.name !== undefined && typeof body.name !== "string")) throw new WorkspaceError("invalid_creation", "Invalid session creation input", 400);
-  return { operationId: body.operationId as string | undefined, name: body.name as string | undefined };
+  const { operationId, name, workspaceMode } = body;
+  if ((operationId !== undefined && typeof operationId !== "string") || (name !== undefined && typeof name !== "string")
+    || (workspaceMode !== undefined && !isSessionWorkspaceMode(workspaceMode))) throw new WorkspaceError("invalid_creation", "Invalid session creation input", 400);
+  return { operationId, name, workspaceMode };
 }
 function methodNotAllowed(): never { throw new WorkspaceError("method_not_allowed", "Method is not allowed", 405); }
 async function readSettingsObject(request: IncomingMessage): Promise<Record<string, unknown>> {

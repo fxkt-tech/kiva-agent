@@ -23,6 +23,41 @@ function fixture() {
 }
 
 describe("ExecutionWorkspace", () => {
+  it("uses the registered current subdirectory with dirty contents and does not mutate Git", () => {
+    const { source, project, workspaces, registry, root } = fixture();
+    writeFileSync(join(source, "package", "file.txt"), "staged contents");
+    git(source, "add", "package/file.txt");
+    writeFileSync(join(source, "package", "file.txt"), "unstaged local contents");
+    writeFileSync(join(source, "package", "local.txt"), "untracked contents");
+    const index = readFileSync(join(source, ".git", "index"));
+    const registration = git(source, "worktree", "list", "--porcelain");
+    const refs = git(source, "show-ref");
+    const intent = workspaces.reserveCurrent(registry.resolve(project.id), "session_current", "operation");
+    const ready = workspaces.prepareCurrent(intent, registry.resolve(project.id));
+    assert.equal(workspaces.resolveCurrent(ready, registry.resolve(project.id)), project.path);
+    assert.equal(ready.treeRoot, source);
+    assert.equal(readFileSync(join(ready.executionRoot, "file.txt"), "utf8"), "unstaged local contents");
+    assert.equal(readFileSync(join(ready.executionRoot, "local.txt"), "utf8"), "untracked contents");
+    assert.deepEqual(readFileSync(join(source, ".git", "index")), index);
+    assert.equal(git(source, "worktree", "list", "--porcelain"), registration);
+    assert.equal(git(source, "show-ref"), refs);
+    assert.equal(existsSync(join(root, "managed")), false);
+    git(source, "switch", "-c", "user_selected_branch");
+    assert.equal(workspaces.resolveCurrent(ready, registry.resolve(project.id)), project.path, "follow the checkout without forcing its original branch");
+    assert.equal(ready.baseCommit, intent.baseCommit);
+  });
+
+  it("rejects a current directory other than the exact canonical registration or Git identity", () => {
+    const { project, source, root, workspaces, registry } = fixture();
+    const ready = workspaces.prepareCurrent(workspaces.reserveCurrent(project, "session_current", "operation"), project);
+    const other = join(source, "other"); mkdirSync(other);
+    assert.throws(() => workspaces.resolveCurrent({ ...ready, executionRoot: other, projectSubdirectory: "other" }, registry.resolve(project.id)), /ownership changed/);
+    assert.throws(() => workspaces.resolveCurrent({ ...ready, commonDirectory: join(root, "different-git") }, registry.resolve(project.id)), /ownership changed/);
+    const moved = join(source, "moved-package"); renameSync(project.path, moved); symlinkSync(moved, project.path);
+    assert.throws(() => workspaces.resolveCurrent(ready, registry.resolve(project.id)), /ownership changed/);
+    assert.equal(readFileSync(join(moved, "file.txt"), "utf8"), "base");
+  });
+
   it("pins the reservation and retains subdirectory context despite source HEAD movement", () => {
     const { source, project, workspaces, registry } = fixture();
     const intent = workspaces.reserve(project, "session_one", "operation", registry.list().map((entry) => entry.path));

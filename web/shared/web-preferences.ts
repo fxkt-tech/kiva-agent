@@ -1,3 +1,5 @@
+import { DEFAULT_SESSION_WORKSPACE_MODE, isSessionWorkspaceMode, type SessionWorkspaceMode } from "./workspace-contract";
+
 export const WEB_PREFERENCES_KEY = "kiva:web-preferences:v1";
 export const SHORTCUT_ACTIONS = ["newSession", "openCommands", "focusComposer", "openSettings"] as const;
 export type ShortcutAction = typeof SHORTCUT_ACTIONS[number];
@@ -8,7 +10,7 @@ export type SendMode = "enter" | "mod-enter";
 export interface WebPreferences {
   readonly version: 1;
   readonly appearance: Readonly<{ theme: ThemePreference; conversationFontSize: 14 | 16 | 18; wrapCode: boolean }>;
-  readonly conversation: Readonly<{ thinkingExpanded: boolean; toolsExpanded: boolean; queueMode: "steer" | "follow_up" }>;
+  readonly conversation: Readonly<{ thinkingExpanded: boolean; toolsExpanded: boolean; queueMode: "steer" | "follow_up"; workspaceMode: SessionWorkspaceMode }>;
   readonly shortcuts: Readonly<{ sendMode: SendMode; bindings: Readonly<Record<ShortcutAction, ShortcutBinding | null>> }>;
 }
 export type PreferenceGroup = "appearance" | "conversation" | "shortcuts";
@@ -20,7 +22,7 @@ const binding = (key: string): ShortcutBinding => Object.freeze({ key, mod: true
 export const DEFAULT_WEB_PREFERENCES: WebPreferences = Object.freeze({
   version: 1,
   appearance: Object.freeze({ theme: "system", conversationFontSize: 14, wrapCode: false }),
-  conversation: Object.freeze({ thinkingExpanded: false, toolsExpanded: false, queueMode: "steer" }),
+  conversation: Object.freeze({ thinkingExpanded: false, toolsExpanded: false, queueMode: "steer", workspaceMode: DEFAULT_SESSION_WORKSPACE_MODE }),
   shortcuts: Object.freeze({ sendMode: "enter", bindings: Object.freeze({ newSession: binding("n"), openCommands: binding("k"), focusComposer: null, openSettings: binding(",") }) }),
 });
 
@@ -110,6 +112,7 @@ export function decodeWebPreferences(value: unknown): WebPreferences {
       thinkingExpanded: typeof conversation.thinkingExpanded === "boolean" ? conversation.thinkingExpanded : false,
       toolsExpanded: typeof conversation.toolsExpanded === "boolean" ? conversation.toolsExpanded : false,
       queueMode: conversation.queueMode === "follow_up" ? "follow_up" : "steer",
+      workspaceMode: isSessionWorkspaceMode(conversation.workspaceMode) ? conversation.workspaceMode : DEFAULT_SESSION_WORKSPACE_MODE,
     }),
     shortcuts: Object.freeze({ sendMode: shortcuts.sendMode === "mod-enter" ? "mod-enter" : "enter", bindings: Object.freeze(bindings) }),
   });

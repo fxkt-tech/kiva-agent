@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Resource identity, Git worktree ownership, exact execution and safe cleanup contracts"}
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Browser preference persistence, scope, reset and settings behavior"}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Shared UI field boundaries and portal/focus behavior"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Config to request to metadata to filesystem propagation"}
+{"file": ".trellis/tasks/10-22-session-workspace-mode/design.md", "reason": "Approved choice, proposed contracts, boundaries and ownership"}

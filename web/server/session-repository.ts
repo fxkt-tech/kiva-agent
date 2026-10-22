@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { buildSessionProjection, migrateSessionEntries, parseSessionEntries, SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { decodeResourceId, WorkspaceError, type CreateSessionInput, type DeleteSessionInput, type DeletionOutcome, type DeletionPreview, type ExecutionDescriptor, type RepositoryAction, type SessionCollection, type SessionControls, type SessionRead, type SessionResource, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
+import { decodeResourceId, DEFAULT_SESSION_WORKSPACE_MODE, isSessionWorkspaceMode, WorkspaceError, type CreateSessionInput, type DeleteSessionInput, type DeletionOutcome, type DeletionPreview, type ExecutionDescriptor, type ProjectResource, type RepositoryAction, type SessionCollection, type SessionControls, type SessionRead, type SessionResource, type SessionWorkspace, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
 import { digest, ExecutionWorkspace } from "./execution-workspace";
 import { normalizeMessages } from "./runtime-hub";
 import { SessionCatalog } from "./session-catalog";
@@ -31,12 +31,13 @@ export class SessionRepository {
 
   list(projectId: string, collection: SessionCollection = "active"): SessionResource[] {
     this.projectRoot(projectId);
+    const project = this.registry.resolve(projectId);
     const catalog = this.catalog(projectId);
     const transcripts = catalog.all();
     const ids = new Set(transcripts.map((entry) => entry.id));
     const records = this.records(projectId);
     for (const record of records) ids.add(record.id);
-    return [...ids].map((id) => this.resource(projectId, id, records, transcripts))
+    return [...ids].map((id) => this.resource(projectId, id, records, transcripts, project))
       .filter((session) => session.collection === collection).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -61,19 +62,21 @@ export class SessionRepository {
 
   resolveExecution(projectId: string, sessionId: string): ExecutionDescriptor {
     const session = this.resource(projectId, sessionId);
-    if (!session.executable || !session.workspace) throw new WorkspaceError(session.legacy ? "legacy_read_only" : "session_read_only", session.legacy ? "Continue this conversation into a new isolated session before executing." : "Restore or repair this session before executing.", 409, { projectId, sessionId });
+    if (!session.executable || !session.workspace) throw new WorkspaceError(session.legacy ? "legacy_read_only" : "session_read_only", session.legacy ? "Continue this conversation into a new session before executing." : "Restore or repair this session before executing.", 409, { projectId, sessionId });
     return {
       installationRoot: this.installationRoot, historyRoot: join(this.projectRoot(projectId), ".kiva", "sessions"),
-      executionRoot: this.workspaces.resolve(session.workspace), projectId, sessionId,
+      executionRoot: this.executionRoot(session.workspace), projectId, sessionId,
       sessionFile: this.catalog(projectId).find(sessionId)?.absolutePath,
-      workspaceNotice: session.sourceSessionId ? `This dialogue continues session ${session.sourceSessionId}. Code starts from current committed revision ${session.workspace.baseCommit}, not the historical conversation's filesystem. Execute only in ${session.workspace.executionRoot}.` : undefined,
+      workspaceNotice: session.workspace.mode === "current-branch"
+        ? `${session.sourceSessionId ? `This dialogue continues session ${session.sourceSessionId}. ` : ""}This session uses the current project files in ${session.workspace.executionRoot}, including local changes, and shares this directory with other current-branch sessions. The directory follows the user's current checkout; do not assume the historical dialogue's filesystem. Execute only in ${session.workspace.executionRoot}.`
+        : session.sourceSessionId ? `This dialogue continues session ${session.sourceSessionId}. Code starts from current committed revision ${session.workspace.baseCommit}, not the historical conversation's filesystem. Execute only in ${session.workspace.executionRoot}.` : undefined,
     };
   }
 
   resolveWorkspace(projectId: string, sessionId: string): string {
     const session = this.resource(projectId, sessionId);
     if (!session.workspace) throw new WorkspaceError("legacy_no_workspace", "This original conversation has no isolated workspace. Inspect the original project explicitly or continue into a new session.");
-    return this.workspaces.resolve(session.workspace);
+    return this.executionRoot(session.workspace);
   }
 
   create(projectId: string, input: CreateSessionInput = {}, initialControls?: SessionControls): Promise<SessionResource> {
@@ -140,8 +143,10 @@ export class SessionRepository {
     return {
       projectId, sessionId, sessionName: session.name, collection: session.collection,
       confirmation: retry ? record.deletionConfirmation! : this.confirmation(session, workspace, lifecycleRevision), workspace,
-      removeWorktree: retry ? session.deletion!.removeWorktree : !!session.workspace && session.workspace.state !== "removed",
-      recovery: "History moves to recoverable trash. Removed working files are not recreated by restoring history; the session branch and committed results remain.",
+      removeWorktree: session.workspace?.mode === "current-branch" ? false : retry ? session.deletion!.removeWorktree : !!session.workspace && session.workspace.state !== "removed",
+      recovery: session.workspace?.mode === "current-branch"
+        ? "Only conversation history moves to recoverable trash. The shared project directory, local changes and current branch remain untouched."
+        : "History moves to recoverable trash. Removed working files are not recreated by restoring history; the session branch and committed results remain.",
       deletion: retry ? session.deletion : undefined,
     };
   }
@@ -150,6 +155,7 @@ export class SessionRepository {
   async delete(projectId: string, sessionId: string, input: DeleteSessionInput & { lifecycleRevision?: string }): Promise<DeletionOutcome> {
     return this.exclusive(projectId, () => {
       const session = this.resource(projectId, sessionId);
+      if (input.removeWorktree && session.workspace?.mode === "current-branch") throw new WorkspaceError("shared_workspace_cleanup", "Current-branch sessions support history-only deletion; the shared project directory is never removed.");
       const record = this.ensureRecord(projectId, sessionId);
       let inspection = this.inspect(session);
       const retry = record.deletion?.status === "pending" || record.deletion?.status === "partial";
@@ -162,7 +168,7 @@ export class SessionRepository {
       if (record.deletion?.status === "complete" && sameOperation) return record.deletion;
       if (session.collection === "trash" && !sameOperation) throw new WorkspaceError("already_deleted", "Session is already in trash.");
       // A persisted removal intent permits recovery after Git succeeded but the metadata write did not.
-      if (record.removalStarted && record.workspace && !existsSync(record.workspace.treeRoot)) {
+      if (record.removalStarted && record.workspace && record.workspace.mode !== "current-branch" && !existsSync(record.workspace.treeRoot)) {
         const removed = { ...record.workspace, state: "removed" as const };
         const recovered = this.workspaces.inspectRemoval(removed);
         if (recovered.state === "removed") { record.workspace = removed; inspection = recovered; }
@@ -181,7 +187,7 @@ export class SessionRepository {
         record.collection = "trash";
         record.deletion.history = "trashed";
         this.save(record);
-        if (input.removeWorktree && record.workspace && record.workspace.state !== "removed") {
+        if (input.removeWorktree && record.workspace && record.workspace.mode !== "current-branch" && record.workspace.state !== "removed") {
           // Persist before the non-atomic Git operation so a restart can identify its exact target.
           record.removalStarted = true;
           this.save(record);
@@ -193,7 +199,7 @@ export class SessionRepository {
         this.save(record);
       } catch (error) {
         if (this.catalog(projectId).find(sessionId)?.collection === "trash") { record.collection = "trash"; record.deletion.history = "trashed"; }
-        if (record.removalStarted && record.workspace && !existsSync(record.workspace.treeRoot)) {
+        if (record.removalStarted && record.workspace && record.workspace.mode !== "current-branch" && !existsSync(record.workspace.treeRoot)) {
           const removed = { ...record.workspace, state: "removed" as const };
           if (this.workspaces.inspectRemoval(removed).state === "removed") { record.workspace = removed; record.deletion.workspace = "removed"; }
         }
@@ -206,23 +212,27 @@ export class SessionRepository {
   }
 
   private provision(projectId: string, input: CreateSessionInput, sourceSessionId?: string): SessionResource {
+    if (input.workspaceMode !== undefined && !isSessionWorkspaceMode(input.workspaceMode)) throw new WorkspaceError("invalid_workspace_mode", "Workspace mode must be current-branch or worktree.", 400);
     const operationId = input.operationId ? decodeResourceId(input.operationId) : randomUUID();
     const existing = this.records(projectId).filter((record) => record.operationId === operationId);
     if (existing.length > 1) throw new WorkspaceError("ambiguous_operation", "Creation operation has duplicate records.");
     let record = existing[0];
     if (record && record.sourceSessionId !== sourceSessionId) throw new WorkspaceError("operation_conflict", "Creation operation belongs to another source.");
+    if (record && input.workspaceMode !== undefined && input.workspaceMode !== (record.workspace?.mode ?? "worktree")) throw new WorkspaceError("operation_conflict", "Retry the creation operation with its original workspace mode.");
     if (record?.workspace?.state === "ready") return this.resource(projectId, record.id);
     if (!record) {
       const project = this.registry.resolve(projectId);
       const id = randomUUID();
       const now = new Date().toISOString();
-      const workspace = this.workspaces.reserve(project, id, operationId, this.registry.listAll().map((registered) => registered.path));
+      const mode = input.workspaceMode ?? DEFAULT_SESSION_WORKSPACE_MODE;
+      const workspace = mode === "current-branch" ? this.workspaces.reserveCurrent(project, id, operationId)
+        : this.workspaces.reserve(project, id, operationId, this.registry.listAll().map((registered) => registered.path));
       record = { version: 1, operationId, projectId, id, name: input.name?.trim() || "未命名会话", nameOverride: input.name?.trim(), path: "", preview: "尚无消息预览", createdAt: now, updatedAt: now, collection: "active", legacy: false, executable: false, sourceSessionId, workspace, persisted: false };
       this.save(record);
     }
     if (!record.workspace) throw new WorkspaceError("workspace_missing", "Creation record has no workspace intent.");
     try {
-      record.workspace = this.workspaces.prepare(record.workspace);
+      record.workspace = record.workspace.mode === "current-branch" ? this.workspaces.prepareCurrent(record.workspace, this.registry.resolve(projectId)) : this.workspaces.prepare(record.workspace);
       if (sourceSessionId && !this.catalog(projectId).find(record.id)) {
         const source = this.catalog(projectId).find(sourceSessionId);
         if (!source) throw new WorkspaceError("source_missing", "Source dialogue is no longer available.");
@@ -242,6 +252,7 @@ export class SessionRepository {
   private inspect(session: SessionResource): WorkspaceRemovalInspection {
     if (!session.workspace) return { state: "none", localChanges: [], revision: "none" };
     const workspace = session.workspace;
+    if (workspace.mode === "current-branch") return { state: "none", treeRoot: workspace.executionRoot, branch: workspace.branch, localChanges: [], revision: digest(JSON.stringify(workspace)), message: "This session shares the registered project directory; only conversation history can be deleted." };
     if (this.registry.listAll().some((project) => project.path === workspace.treeRoot || project.path.startsWith(`${workspace.treeRoot}${sep}`))) return { state: "unavailable", treeRoot: workspace.treeRoot, branch: workspace.branch, localChanges: [], revision: digest(JSON.stringify(workspace)), message: "This workspace contains a registered project; cleanup is blocked." };
     return this.workspaces.inspectRemoval(workspace);
   }
@@ -252,7 +263,7 @@ export class SessionRepository {
     return digest(JSON.stringify({ session, inspection, lifecycleRevision, transcript: transcript?.absolutePath, size: stat?.size, modified: stat?.mtimeMs }));
   }
 
-  private resource(projectId: string, sessionId: string, records = this.records(projectId), transcripts = this.catalog(projectId).all()): SessionResource {
+  private resource(projectId: string, sessionId: string, records = this.records(projectId), transcripts = this.catalog(projectId).all(), registeredProject?: ProjectResource): SessionResource {
     decodeResourceId(sessionId);
     const matches = transcripts.filter((entry) => entry.id === sessionId);
     if (matches.length > 1) throw new WorkspaceError("ambiguous_session", "Multiple transcripts have the same ID; repair the duplicate before opening it.", 409, { projectId, sessionId });
@@ -266,11 +277,19 @@ export class SessionRepository {
     // Reads reconcile observable effects of an interrupted operation, without
     // writing metadata or recreating a checkout. Explicit retry persists them.
     if (deletion && collection === "trash") deletion.history = "trashed";
-    if (record?.removalStarted && workspace && workspace.state !== "removed" && !existsSync(workspace.treeRoot)) {
+    if (record?.removalStarted && workspace && workspace.mode !== "current-branch" && workspace.state !== "removed" && !existsSync(workspace.treeRoot)) {
       const removed = { ...workspace, state: "removed" as const };
       if (this.workspaces.inspectRemoval(removed).state === "removed") {
         workspace = removed;
         if (deletion) deletion.workspace = "removed";
+      }
+    }
+    if (workspace?.mode === "current-branch") {
+      const project = registeredProject ?? this.registry.resolve(projectId);
+      // Branch names follow this checkout; creation-time baseCommit remains durable.
+      if (project.capability.state === "ready" && project.path === workspace.executionRoot
+        && project.capability.repositoryRoot === workspace.repositoryRoot && project.capability.commonDirectory === workspace.commonDirectory) {
+        workspace = { ...workspace, branch: project.capability.branch };
       }
     }
     const controls: SessionControls = { ...record?.controls };
@@ -291,6 +310,9 @@ export class SessionRepository {
   private ensureRecord(projectId: string, sessionId: string): SessionRecord {
     return this.records(projectId).find((record) => record.id === sessionId) ?? { ...this.resource(projectId, sessionId), version: 1 };
   }
+  private executionRoot(workspace: SessionWorkspace): string {
+    return workspace.mode === "current-branch" ? this.workspaces.resolveCurrent(workspace, this.registry.resolve(workspace.projectId)) : this.workspaces.resolve(workspace);
+  }
   private catalog(projectId: string) { return this.catalogFactory(this.projectRoot(projectId)); }
   private projectRoot(projectId: string) {
     const project = this.registry.resolve(projectId);
@@ -309,7 +331,8 @@ export class SessionRepository {
       catch { throw new WorkspaceError("metadata_corrupt", `Cannot read session metadata: ${name}`); }
       if (record.version !== 1 || record.projectId !== projectId || decodeResourceId(record.id) !== name.slice(0, -5) || !["active", "archived", "trash"].includes(record.collection)
         || typeof record.name !== "string" || typeof record.preview !== "string" || typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt)) || typeof record.updatedAt !== "string" || !Number.isFinite(Date.parse(record.updatedAt))
-        || (record.workspace && (record.workspace.projectId !== projectId || record.workspace.sessionId !== record.id))) throw new WorkspaceError("metadata_corrupt", `Invalid session metadata: ${name}`);
+        || (record.workspace && (record.workspace.projectId !== projectId || record.workspace.sessionId !== record.id
+          || (record.workspace.mode !== undefined && !isSessionWorkspaceMode(record.workspace.mode))))) throw new WorkspaceError("metadata_corrupt", `Invalid session metadata: ${name}`);
       return record;
     });
   }

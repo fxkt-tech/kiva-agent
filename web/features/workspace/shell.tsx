@@ -15,7 +15,7 @@ import { useInstallationModels } from "@/features/settings/use-installation-mode
 import type { InstallationModelCatalog } from "@/shared/installation-settings";
 import type { BootstrapData } from "@/shared/types";
 import type { ModelCatalog } from "@/shared/model-configuration";
-import type { ProjectResource, RemoveProjectResult, SessionResource } from "@/shared/workspace-contract";
+import type { ProjectResource, RemoveProjectResult, SessionResource, SessionWorkspaceMode } from "@/shared/workspace-contract";
 import { DraftStore } from "@/features/sessions/drafts";
 import { SessionRows, useCollections } from "@/features/sessions/collections";
 import { ProjectPicker } from "./project-picker";
@@ -48,7 +48,7 @@ export function RoutedWorkspaceShell({ children }: { children: ReactNode }) {
 
 export function WorkspaceShell({ children, pathname, search = "", navigate }: { children: ReactNode; pathname: string; search?: string; navigate(href: string, replace?: boolean): void }) {
   // Theme and storage-event ownership must exist even on /projects with no composer.
-  useWebPreferences();
+  const { preferences } = useWebPreferences();
   const route = useMemo(() => parseWorkspaceRoute(pathname), [pathname]);
   const query = useMemo(() => new URLSearchParams(search), [search]);
   const queryError = query.has("projectId") || query.has("sessionId") ? "资源标识只能出现在路径中" : query.getAll("q").length > 1 ? "重复的 q 参数" : undefined;
@@ -68,7 +68,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const [removingProject, setRemovingProject] = useState<ProjectResource>();
   const [pendingRemovals, setPendingRemovals] = useState<string[]>([]);
   const [error, setError] = useState<{ projectId: string; message: string }>();
-  const operations = useRef(new Map<string, string>());
+  const operations = useRef(new Map<string, { operationId: string; workspaceMode: SessionWorkspaceMode }>());
   const registry = useResource<{ projects: ProjectResource[] }>("/api/projects", version);
   const current = useResource<{ project: ProjectResource; bootstrap?: BootstrapData }>(route.projectId ? `/api${projectUrl(route.projectId)}` : undefined, version);
   const modelCatalog = useInstallationModels(version);
@@ -85,10 +85,10 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
     setPending((items) => [...items, projectId]);
     setError(undefined);
     const source = locationRef.current;
-    const operationId = operations.current.get(projectId) ?? crypto.randomUUID();
-    operations.current.set(projectId, operationId);
+    const operation = operations.current.get(projectId) ?? { operationId: crypto.randomUUID(), workspaceMode: preferences.conversation.workspaceMode };
+    operations.current.set(projectId, operation);
     try {
-      const result = await mutate<{ projectId: string; sessionId: string; session: SessionResource; cancelled?: boolean }>(`/api${projectUrl(projectId)}/sessions`, { operationId });
+      const result = await mutate<{ projectId: string; sessionId: string; session: SessionResource; cancelled?: boolean }>(`/api${projectUrl(projectId)}/sessions`, operation);
       if (result.cancelled) return;
       if (result.projectId !== projectId || result.session.projectId !== projectId || result.sessionId !== result.session.id) throw new Error("创建返回的会话标识不匹配");
       operations.current.delete(projectId);
@@ -99,7 +99,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
     } catch (cause) {
       setError({ projectId, message: cause instanceof Error ? cause.message : String(cause) });
     } finally { creating.current.delete(projectId); setPending((items) => items.filter((id) => id !== projectId)); }
-  }, [navigate, refresh, navigationCurrent]);
+  }, [navigate, refresh, navigationCurrent, preferences.conversation.workspaceMode]);
   async function removeProject(projectId: string) {
     if (creating.current.has(projectId)) throw new Error("会话正在创建，请完成后重试移除。");
     if (removing.current.has(projectId)) return;

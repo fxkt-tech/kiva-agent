@@ -29,6 +29,9 @@ const p: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capabili
 function session(id: string, overrides: Partial<SessionResource> = {}): SessionResource {
   return { id, projectId: "alpha", name: `Session ${id}`, path: `/repo/.kiva/sessions/${id}.jsonl`, preview: id, updatedAt: "2026-10-20T16:00:00Z", createdAt: "2026-10-20T16:00:00Z", collection: "active", legacy: false, executable: true, workspace: { projectId: "alpha", sessionId: id, operationId: id, managedRoot: "/worktrees", treeRoot: `/worktrees/${id}`, executionRoot: `/worktrees/${id}`, repositoryRoot: "/repo", commonDirectory: "/repo/.git", projectSubdirectory: "", branch: `kiva/session/${id}`, baseCommit: "base", state: "ready" }, ...overrides };
 }
+function currentBranchSession(id: string, overrides: Partial<SessionResource> = {}): SessionResource {
+  return session(id, { workspace: { mode: "current-branch", projectId: "alpha", sessionId: id, operationId: id, treeRoot: "/repo", executionRoot: "/repo", repositoryRoot: "/repo", commonDirectory: "/repo/.git", projectSubdirectory: "", branch: "main", baseCommit: "base", state: "ready" }, ...overrides });
+}
 function snapshot(id = "one", changes: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
   return { status: "idle", session: { id, messageCount: 0 }, messages: [], thinkingLevel: "medium", thinkingLevels: ["off", "medium", "high"], model: { provider: "test", id: "test-model" }, models: [{ provider: "test", id: "test-model", contextWindow: 100_000, reasoning: true }], context: { tokens: 25_000, contextWindow: 100_000, percent: 25, input: 20_000, output: 5_000, cacheRead: 0, cacheWrite: 0, total: 30_000, cost: 0.1234 }, queue: { steering: [], followUp: [] }, commands: [], ...changes };
 }
@@ -116,14 +119,14 @@ describe("routed workspace features", () => {
         }
         return Response.json({ revision: "catalog_revision_1234", defaults, models: [{ ...snapshot().models[0], thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "alternate-model", thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "plain-model", reasoning: false, thinkingLevels: ["off"] }] });
       }
-      if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: session("created") });
+      if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: body.workspaceMode === "current-branch" ? currentBranchSession("created") : session("created") });
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
       if (url.endsWith("/workspace")) return Response.json({ ...bootstrap, project: { ...bootstrap.project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
       if (url.includes("/files?")) return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "# Real file" });
       if (url.includes("/changes?")) return Response.json({ path: "README.md", content: "diff --git a/README.md b/README.md" });
       if (url.startsWith("/api/project/directories")) { const path = new URL(url, "http://localhost").searchParams.get("path") ?? "/repo"; return Response.json({ path, parent: "/", directories: path === "/repo" ? [{ name: "other", path: "/repo/other" }] : [] }); }
       if (url.endsWith("/deletion-preview")) return Response.json(preview);
-      if (url.endsWith("/continue")) return Response.json({ projectId: "alpha", sessionId: "continued", session: session("continued") });
+      if (url.endsWith("/continue")) return Response.json({ projectId: "alpha", sessionId: "continued", session: body.workspaceMode === "current-branch" ? currentBranchSession("continued") : session("continued") });
       if (url.endsWith("/actions")) return Response.json({ status: "complete", history: "trashed", workspace: body.removeWorktree ? "removed" : "retained" });
       if (url.endsWith("/commands")) return Response.json({ accepted: true });
       if (url.endsWith("/jsonl")) { const parts = url.split("/"); const content = `${JSON.stringify({ type: "session", id: parts[5], version: 3 })}\r\n${JSON.stringify({ type: "message", id: "entry", parentId: null, message: { role: "user", content: "JSONL 原文" } })}\n`; return Response.json({ projectId: parts[3], sessionId: parts[5], fileName: "original.jsonl", content, bytes: Buffer.byteLength(content), totalBytes: Buffer.byteLength(content), truncated: false }); }
@@ -850,10 +853,87 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findByProps({ "data-status": "done" }).props.className, "tool-status");
   });
 
+  for (const mode of ["current-branch", "worktree"] as const) it(`passes ${mode} through sidebar, shortcut and first-send creation`, async () => {
+    if (mode === "worktree") webPreferences.update("conversation", { workspaceMode: mode });
+    await open("/projects/alpha/sessions");
+    await click(trigger("在 Alpha 中新建会话"));
+    assert.equal(currentHref, "/projects/alpha/sessions/created");
+    await open("/projects/alpha/sessions");
+    await act(async () => {
+      for (const listener of events.get("keydown") ?? []) listener({ key: "n", metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), altKey: false, shiftKey: false, preventDefault() {} });
+      await settle(); await pendingNavigation;
+    });
+    assert.equal(currentHref, "/projects/alpha/sessions/created");
+    await open("/projects/alpha/sessions");
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "first message" } }));
+    await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await pendingNavigation; });
+    const creations = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body);
+    assert.equal(creations.length, 3);
+    assert.ok(creations.every((entry) => entry.body?.workspaceMode === mode && typeof entry.body.operationId === "string"));
+    assert.equal(new Set(creations.map((entry) => entry.body!.operationId)).size, 3);
+    assert.ok(commandRequests().some((entry) => entry.body?.type === "prompt" && entry.body.message === "first message"));
+  });
+
+  it("retains the captured mode and operation across pending creation, failure and a changed default", async () => {
+    const pending = deferred<Response>();
+    let attempts = 0;
+    extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" && ++attempts === 1 ? pending.promise : undefined;
+    await open("/projects/alpha/sessions");
+    await act(async () => { trigger("在 Alpha 中新建会话").props.onClick(); await settle(); });
+    await act(() => webPreferences.update("conversation", { workspaceMode: "worktree" }));
+    await act(async () => { pending.resolve(Response.json({ error: "retry fixture" }, { status: 500 })); await settle(); });
+    await click(trigger("在 Alpha 中新建会话"));
+    const creations = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body);
+    assert.equal(creations.length, 2); assert.deepEqual(creations[1].body, creations[0].body);
+    assert.equal(creations[1].body?.workspaceMode, "current-branch");
+    await open("/projects/alpha/sessions"); await click(trigger("在 Alpha 中新建会话"));
+    const next = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body).at(-1)!;
+    assert.equal(next.body?.workspaceMode, "worktree"); assert.notEqual(next.body?.operationId, creations[0].body?.operationId);
+  });
+
   it("keeps legacy history read-only and explicitly continues to a confirmed new URL", async () => {
+    webPreferences.update("conversation", { workspaceMode: "worktree" });
     sessions[0] = session("one", { legacy: true, executable: false, workspace: undefined });
     await open(); assert.equal(renderer!.root.findAllByType("textarea").length, 0); assert.match(text(renderer!.root), /不会还原历史代码/); assert.equal(commandRequests().length, 0);
-    await click(button("在独立工作区继续")); assert.equal(currentHref, "/projects/alpha/sessions/continued");
+    await click(button("在独立 worktree 继续")); assert.equal(currentHref, "/projects/alpha/sessions/continued");
+    assert.equal(requests.find((entry) => entry.url.endsWith("/continue"))?.body?.workspaceMode, "worktree");
+  });
+
+  it("continues using current branch by default and retains its captured choice on retry", async () => {
+    sessions[0] = session("one", { legacy: true, executable: false, workspace: undefined });
+    sessions.push(currentBranchSession("continued", { sourceSessionId: "one" }));
+    let attempts = 0;
+    extraFetch = async (url) => url.endsWith("/continue") && ++attempts === 1 ? Response.json({ error: "continuation retry" }, { status: 500 }) : undefined;
+    await open(); assert.match(text(renderer!.root), /项目当前文件，包含未提交改动/);
+    await click(button("在当前分支继续"));
+    await act(() => webPreferences.update("conversation", { workspaceMode: "worktree" }));
+    assert.ok(button("在当前分支继续"), "failed operation continues advertising its captured mode");
+    await click(button("在当前分支继续"));
+    const continuations = requests.filter((entry) => entry.url.endsWith("/continue"));
+    assert.equal(continuations.length, 2); assert.deepEqual(continuations[1].body, continuations[0].body);
+    assert.equal(continuations[1].body?.workspaceMode, "current-branch");
+    assert.equal(currentHref, "/projects/alpha/sessions/continued");
+    const notice = renderer!.root.findByProps({ className: "session-workspace-notice" });
+    assert.match(text(notice), /当前分支.*共享项目目录.*未提交改动/);
+    assert.doesNotMatch(text(notice), /代码起点为创建时的已提交版本/);
+  });
+
+  it("keeps existing workspace modes, paths and captions independent of the new default", async () => {
+    await open();
+    const context = () => renderer!.root.findByProps({ className: "composer-project-context" });
+    assert.equal(context().props.title, "/worktrees/one"); assert.match(text(context()), /kiva\/session\/one/);
+    await act(() => webPreferences.update("conversation", { workspaceMode: "worktree" }));
+    await act(() => webPreferences.update("conversation", { workspaceMode: "current-branch" }));
+    assert.equal(context().props.title, "/worktrees/one");
+    assert.match(text(renderer!.root.findByProps({ className: "session-workspace-notice" })), /独立 worktree/);
+    sessions[0] = currentBranchSession("one", { sourceSessionId: "legacy" });
+    await open("/projects/alpha/sessions/two"); await open();
+    assert.equal(context().props.title, "/repo"); assert.match(text(context()), /main/);
+    assert.match(text(renderer!.root.findByProps({ className: "session-workspace-notice" })), /继承自会话 legacy；文件使用项目当前内容/);
+    for (const kind of ["files", "changes"] as const) {
+      await open(`/projects/alpha/sessions/one/${kind}`);
+      assert.equal(text(renderer!.root.findByProps({ className: "workspace-tree-scope" })), "当前分支 · 共享项目目录");
+    }
   });
 
   it("continues an assistant received in a running snapshot without duplicating it", async () => {
@@ -899,6 +979,29 @@ describe("routed workspace features", () => {
     await act(() => checkbox.props.onCheckedChange(false)); assert.equal(button("删除会话").props.disabled, false);
     await click(button("删除会话"));
     assert.ok(requests.some((entry) => entry.url.endsWith("/actions") && entry.body?.confirmation === "target-state-token" && entry.body.removeWorktree === false));
+  });
+
+  it("never offers current-branch cleanup during loading or errors and deletes history only", async () => {
+    const current = currentBranchSession("one");
+    sessions[0] = { ...current, workspace: { ...current.workspace!, executionRoot: "/repo/package", projectSubdirectory: "package" } };
+    const pending = deferred<Response>();
+    extraFetch = async (url) => url.endsWith("/deletion-preview") ? pending.promise : undefined;
+    await open(); await click(trigger("会话操作 Session one")); await click(button("删除"));
+    const checkboxes = () => renderer!.root.findAll((node) => typeof node.props.onCheckedChange === "function");
+    assert.equal(checkboxes().length, 0); assert.equal(button("删除会话").props.disabled, true);
+    assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /当前分支的项目文件不会被删除/);
+    assert.equal(renderer!.root.findByProps({ className: "deletion-details" }).findAllByType("dd")[1].children[0], "/repo/package");
+    await act(async () => { pending.resolve(Response.json({ error: "preview retry" }, { status: 409 })); await settle(); });
+    assert.equal(checkboxes().length, 0); assert.equal(button("删除会话").props.disabled, true);
+    assert.equal(renderer!.root.findByProps({ className: "deletion-details" }).findAllByType("dd")[1].children[0], "/repo/package");
+    extraFetch = undefined;
+    preview = { ...preview, removeWorktree: false, workspace: { ...preview.workspace, state: "none", treeRoot: "/repo/package", branch: "main" } };
+    await click(button("重新检查"));
+    assert.equal(checkboxes().length, 0); assert.equal(button("删除会话").props.disabled, false);
+    await click(button("删除会话"));
+    const deletion = requests.find((entry) => entry.url.endsWith("/actions"));
+    assert.equal(deletion?.body?.removeWorktree, false);
+    assert.equal(deletion?.body?.confirmation, "target-state-token");
   });
 
   it("keeps exact target visible on busy preview and reports raw partial deletion truthfully", async () => {
