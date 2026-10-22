@@ -105,7 +105,7 @@ describe("global settings dialog", () => {
   it("auto-saves preferences with per-group reset and keeps only browser-safe fields", async () => {
     await open();
     assert.equal(field("视觉风格").props.value, "flat");
-    assert.deepEqual(field("视觉风格").props.options.map((option: { label: string }) => option.label), ["线性扁平", "新拟态"]);
+    assert.deepEqual(field("视觉风格").props.options.map((option: { label: string }) => option.label), ["扁平化", "新拟态"]);
     await change("视觉风格", "neumorphic");
     assert.equal(field("主题").props.value, "system");
     await change("主题", "dark"); await change("会话字号", "18");
