@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Shared primitive/focus/module boundaries and browser verification."}
+{"file": ".trellis/spec/kiva-web/frontend/directory-structure.md", "reason": "Frontend ownership and naming."}
+{"file": ".trellis/spec/kiva-web/frontend/theme-system.md", "reason": "Three styles, material and color-mode lifecycle."}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Passive scoped reads, source ownership, drafts and URL identity."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing semantic/source helpers instead of divergent parsers."}
+{"file": ".trellis/tasks/10-22-owned-session-viewer/research/current-jsonl-contract.md", "reason": "Existing executable JSONL constraints with deliberate approved changes."}
+{"file": ".trellis/tasks/10-22-owned-session-viewer/research/pi-reference.md", "reason": "Pinned Pi source references and existing owners; no private exporter or iframe."}

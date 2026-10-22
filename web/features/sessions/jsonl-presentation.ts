@@ -1,4 +1,5 @@
-import { jsonValueSummary, type JsonlPage, type JsonlRecord } from "./jsonl-structure";
+import { jsonlField as own, jsonlObject as object, jsonValueSummary, type JsonlPage, type JsonlRecord } from "./jsonl-structure";
+import { JSONL_READING_WINDOW } from "./jsonl-session";
 
 export const JSONL_TEXT_LIMIT = 12_000;
 export const JSONL_TEXT_LINE_LIMIT = 240;
@@ -25,10 +26,9 @@ export interface JsonlPresentation {
   resultName?: string;
   resultStatus?: "success" | "error";
   relation?: ToolRelation;
+  hidden?: boolean;
 }
 
-function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
-function own(value: unknown, key: string): unknown { return object(value) && Object.hasOwn(value, key) ? value[key] : undefined; }
 function string(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
 export function textPreview(text: string, limit = JSONL_TEXT_LIMIT, lineLimit = JSONL_TEXT_LINE_LIMIT): TextPreview {
   let end = Math.min(text.length, limit);
@@ -78,8 +78,8 @@ function timestamp(value: unknown): string | undefined {
   return Number.isFinite(time) && Math.abs(time) <= 8.64e15 ? new Date(time).toISOString() : undefined;
 }
 
-/** File-order presentation only: never reduce through the SDK's current-leaf projection. */
-export function presentJsonlPage(page: JsonlPage): JsonlPresentation[] {
+/** Render only admitted records; callers own file order or selected branch order. */
+function presentRecords(records: readonly JsonlRecord[], associate = true): JsonlPresentation[] {
   let remaining = JSONL_PAGE_TEXT_LIMIT;
   let remainingLines = JSONL_PAGE_LINE_LIMIT;
   let remainingBlocks = JSONL_PAGE_BLOCK_LIMIT;
@@ -113,7 +113,7 @@ export function presentJsonlPage(page: JsonlPage): JsonlPresentation[] {
     }
     return blocks;
   }
-  const views = page.records.map((record): JsonlPresentation => {
+  const views = records.map((record): JsonlPresentation => {
     const value = record.value; const message = own(value, "message");
     const view: JsonlPresentation = { record, kind: "event", title: record.type, timestamp: timestamp(own(value, "timestamp")) ?? timestamp(own(message, "timestamp")), blocks: [] };
     if (record.error) return { ...view, kind: "invalid", title: "无法解析的记录", blocks: [{ kind: "text", ...take(record.raw) }] };
@@ -140,7 +140,7 @@ export function presentJsonlPage(page: JsonlPage): JsonlPresentation[] {
       case "thinking_level_change": view.title = "思考级别"; view.subtitle = label(own(value, "thinkingLevel"), "级别更新"); break;
       case "compaction": view.title = "上下文压缩"; view.subtitle = typeof own(value, "tokensBefore") === "number" ? `压缩前 ${own(value, "tokensBefore")} tokens` : undefined; view.blocks = content(own(value, "summary")); break;
       case "branch_summary": view.title = "分支摘要"; view.subtitle = label(own(value, "fromId")); view.blocks = content(own(value, "summary")); break;
-      case "custom_message": view.title = "扩展消息"; view.subtitle = label(own(value, "customType")); view.blocks = content(own(value, "content")); break;
+      case "custom_message": view.title = "扩展消息"; view.subtitle = label(own(value, "customType")); view.hidden = own(value, "display") === false; view.blocks = content(own(value, "content")); break;
       case "custom": view.title = "扩展事件"; view.subtitle = label(own(value, "customType")); break;
       case "label": view.title = "记录标签"; view.subtitle = label(own(value, "label"), "标签已移除"); break;
       case "usage": view.title = "用量记录"; view.subtitle = [label(own(value, "provider")), label(own(value, "model")), label(own(value, "note"))].filter(Boolean).join(" · "); break;
@@ -149,7 +149,89 @@ export function presentJsonlPage(page: JsonlPage): JsonlPresentation[] {
     }
     return view;
   });
-  associateTools(views, completeBlocks);
+  if (associate) associateTools(views, completeBlocks);
+  return views;
+}
+
+/** Compatibility for source pages; the owned viewer uses presentJsonlBranch. */
+export function presentJsonlPage(page: JsonlPage): JsonlPresentation[] {
+  return presentRecords(page.records);
+}
+
+interface BranchCall { line: number; name?: string; segment: number; valid: boolean }
+interface BranchResult { line: number; name?: string; segment: number; valid: boolean }
+interface BranchTools { calls: Map<string, BranchCall[]>; results: Map<string, BranchResult[]> }
+const branchToolsCache = new WeakMap<readonly JsonlRecord[], BranchTools>();
+
+/** Index raw tool metadata, not semantic previews. Every block participates in
+ * uniqueness even when it is beyond the mounted text/block/window budget. */
+function branchTools(records: readonly JsonlRecord[]): BranchTools {
+  const cached = branchToolsCache.get(records);
+  if (cached) return cached;
+  const calls = new Map<string, BranchCall[]>(); const results = new Map<string, BranchResult[]>();
+  const ids = new Map<string, number>();
+  for (const record of records) if (record.id !== undefined) ids.set(record.id, (ids.get(record.id) ?? 0) + 1);
+  let segment = 0;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]; const previous = records[index - 1];
+    const valid = record.id !== undefined && record.id.length > 0 && ids.get(record.id) === 1 && !record.error && !record.issues.length;
+    if (!previous || record.parentLine !== previous.line || !valid || previous.issues.length || previous.error) segment += 1;
+    const message = own(record.value, "message"); const role = own(message, "role");
+    if (record.type !== "message") continue;
+    if (role === "assistant") {
+      const content = own(message, "content");
+      if (Array.isArray(content)) for (let block = 0; block < content.length; block += 1) {
+        const value = content[block]; const id = own(value, "id");
+        if (own(value, "type") !== "toolCall" || typeof id !== "string" || !id) continue;
+        const call: BranchCall = { line: record.line, name: string(own(value, "name")), segment, valid };
+        const matches = calls.get(id); if (matches) matches.push(call); else calls.set(id, [call]);
+      }
+    } else if (role === "toolResult") {
+      const id = own(message, "toolCallId");
+      if (typeof id !== "string" || !id) continue;
+      const result: BranchResult = { line: record.line, name: string(own(message, "toolName")), segment, valid };
+      const matches = results.get(id); if (matches) matches.push(result); else results.set(id, [result]);
+    }
+  }
+  const tools = { calls, results }; branchToolsCache.set(records, tools); return tools;
+}
+
+function confirmedBranchRelation(calls: BranchCall[], results: BranchResult[]): string | undefined {
+  if (calls.length !== 1 || results.length > 1) return "调用 ID 不唯一，未关联";
+  if (results.length !== 1) return undefined;
+  const call = calls[0]; const result = results[0];
+  if (!call.valid || !result.valid) return "记录关系有歧义，未关联";
+  if (call.line >= result.line) return "结果早于调用，未关联";
+  if (call.segment !== result.segment) return "分支关系未确认，未关联";
+  if (call.name !== undefined && result.name !== undefined && call.name !== result.name) return "工具名称不一致，未关联";
+  return undefined;
+}
+
+/** A window gets its own semantic budget. Full-branch tool metadata is cached
+ * separately, so an off-window result still links without rendering the branch. */
+export function presentJsonlBranch(records: readonly JsonlRecord[], offset = 0, limit = JSONL_READING_WINDOW): JsonlPresentation[] {
+  offset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  limit = Number.isFinite(limit) ? Math.min(JSONL_READING_WINDOW, Math.max(1, Math.floor(limit))) : JSONL_READING_WINDOW;
+  const views = presentRecords(records.slice(offset, offset + limit), false);
+  const tools = branchTools(records);
+  for (const view of views) {
+    for (const block of view.blocks) if (block.kind === "tool") {
+      block.relation = { note: !block.id ? "缺少调用 ID，未关联输出" : "当前分支未找到对应输出" };
+      if (!block.id) continue;
+      const calls = tools.calls.get(block.id) ?? []; const results = tools.results.get(block.id) ?? [];
+      const issue = confirmedBranchRelation(calls, results);
+      if (issue) block.relation = { note: issue };
+      else if (calls.length === 1 && results.length === 1) block.relation = { line: results[0].line, note: "查看输出" };
+    }
+    if (view.kind === "tool-result") {
+      view.relation = { note: !view.resultId ? "缺少调用 ID，未关联输入" : "当前分支未找到对应调用" };
+      if (!view.resultId) continue;
+      const calls = tools.calls.get(view.resultId) ?? []; const results = tools.results.get(view.resultId) ?? [];
+      const issue = calls.length ? confirmedBranchRelation(calls, results) : undefined;
+      if (issue) view.relation = { note: issue };
+      else if (calls.length === 1 && results.length === 1) view.relation = { line: calls[0].line, note: "查看输入" };
+    }
+  }
   return views;
 }
 

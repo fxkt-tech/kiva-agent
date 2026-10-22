@@ -18,6 +18,7 @@ import type { ModelCatalog } from "@/shared/model-configuration";
 import type { ProjectResource, RemoveProjectResult, SessionResource, SessionWorkspaceMode } from "@/shared/workspace-contract";
 import { DraftStore } from "@/features/sessions/drafts";
 import { SessionRows, useCollections } from "@/features/sessions/collections";
+import { SessionViewerHost } from "@/features/sessions/session-viewer-host";
 import { ProjectPicker } from "./project-picker";
 import { RemoveProjectDialog } from "./remove-project-dialog";
 import { mutate, projectUrl, sessionUrl, useResource } from "./resources";
@@ -134,6 +135,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
   const context: WorkspaceContextValue = { route, query, project, projects, bootstrap: current.data?.bootstrap, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
   return <WorkspaceContext.Provider value={context}>
+    <SessionViewerHost route={route} pathname={pathname} query={query} navigate={navigate}>
     <main className={cn("workbench", mobileSidebarOpen && "sidebar-mobile-open")}>
       {mobileSidebarOpen && <button className="sidebar-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileSidebarOpen(false)} />}
       <aside className="sidebar">
@@ -154,6 +156,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
       {removingProject && <RemoveProjectDialog key={removingProject.id} project={removingProject} onClose={() => setRemovingProject(undefined)} onConfirm={() => removeProject(removingProject.id)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} catalog={modelCatalog.data} modelsLoading={modelCatalog.loading} modelsError={modelCatalog.error} onCatalog={modelCatalog.replace} onReloadCatalog={modelCatalog.reload} />}
     </main>
+    </SessionViewerHost>
   </WorkspaceContext.Provider>;
 }
 

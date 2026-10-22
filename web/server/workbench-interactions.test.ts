@@ -266,6 +266,71 @@ describe("routed workspace features", () => {
     assert.equal(FakeWebSocket.sockets.length, 1); assert.equal(commandRequests().length, 0);
   });
 
+  it("keeps one viewer host while reading another session and preserves active draft and attachments", async () => {
+    await open(); await publish();
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "正在编辑的草稿" } }));
+    await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [{ name: "retained.md", type: "text/plain", size: 3, text: async () => "abc" }], value: "file" } }));
+    const textarea = renderer!.root.findByType("textarea"); const socket = FakeWebSocket.sockets[0];
+    await click(trigger("会话操作 Session two")); await click(button("查看 JSONL"));
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-dialog session-jsonl-dialog").length, 1);
+    const tree = renderer!.root.findAllByProps({ role: "treeitem" }).find((node) => node.props["data-tree-line"] === 2)!;
+    await click(tree);
+    assert.equal(currentHref, "/projects/alpha/sessions/one");
+    assert.equal(renderer!.root.findByType("textarea"), textarea); assert.equal(textarea.props.value, "正在编辑的草稿");
+    assert.ok(renderer!.root.findByProps({ "aria-label": "移除 retained.md" }));
+    await click(trigger("关闭 JSONL"));
+    assert.equal(renderer!.root.findByType("textarea").props.value, "正在编辑的草稿");
+    assert.equal(socket.closed, false); assert.equal(FakeWebSocket.sockets.length, 1);
+    assert.equal(requests.some((entry) => entry.body), false);
+  });
+
+  it("opens exact linked branches outside sidebar limits even when normal transcript projection fails", async () => {
+    const content = [
+      { type: "message", id: "root", parentId: null, message: { role: "user", content: "根消息" } },
+      { type: "message", id: "old", parentId: "root", message: { role: "assistant", content: "历史分支" } },
+      { type: "message", id: "latest", parentId: "root", message: { role: "assistant", content: "最新分支" } },
+      null,
+    ].map((record) => JSON.stringify(record)).join("\r\n");
+    extraFetch = async (url) => {
+      if (url === "/api/projects/alpha/sessions/outside/jsonl") return Response.json({ projectId: "alpha", sessionId: "outside", fileName: "outside.jsonl", content, bytes: Buffer.byteLength(content), totalBytes: Buffer.byteLength(content), truncated: false });
+      if (url === "/api/projects/alpha/sessions/outside") return Response.json({ error: "normal projection unavailable" }, { status: 500 });
+      return undefined;
+    };
+    await open("/projects/alpha/sessions/outside?jsonl=1&leaf=old&target=root&q=preserve");
+    assert.equal(sessions.some((item) => item.id === "outside"), false);
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-dialog session-jsonl-dialog").length, 1);
+    const cards = renderer!.root.findAllByProps({ className: "jsonl-record" });
+    assert.deepEqual(cards.map((node) => node.props["data-jsonl-line"]), [1, 2]);
+    assert.match(text(cards[1]), /历史分支/); assert.equal(text(renderer!.root.findByProps({ "aria-label": "JSONL 原始文本" })), content);
+    await click(trigger("关闭 JSONL"));
+    assert.equal(currentHref, "/projects/alpha/sessions/outside?q=preserve");
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-dialog session-jsonl-dialog").length, 0);
+    assert.equal(requests.filter((entry) => entry.url.endsWith("/jsonl")).length, 1);
+    assert.equal(requests.some((entry) => entry.body), false);
+  });
+
+  it("opens archive and trash row histories through the same passive host", async () => {
+    sessions = [session("archived", { collection: "archived", executable: false }), session("trashed", { collection: "trash", executable: false })];
+    for (const [section, id] of [["archive", "archived"], ["trash", "trashed"]]) {
+      await open(`/projects/alpha/${section}`);
+      await click(trigger(`会话操作 Session ${id}`)); await click(button("查看 JSONL"));
+      assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-dialog session-jsonl-dialog").length, 1);
+      assert.match(text(renderer!.root.findByProps({ "aria-label": "JSONL 原始文本" })), new RegExp(`"id":"${id}"`));
+      await click(trigger("关闭 JSONL"));
+    }
+    assert.deepEqual(requests.filter((entry) => entry.url.endsWith("/jsonl")).map((entry) => entry.url), ["/api/projects/alpha/sessions/archived/jsonl", "/api/projects/alpha/sessions/trashed/jsonl"]);
+    assert.equal(requests.some((entry) => entry.body), false); assert.equal(FakeWebSocket.sockets.length, 0);
+  });
+
+  it("rejects duplicate viewer query identity without reading transcript data", async () => {
+    await open("/projects/alpha/sessions/one?jsonl=1&target=one&target=two&q=preserve");
+    assert.match(text(renderer!.root.findByProps({ className: "project-dialog session-jsonl-dialog" })), /重复的 target 参数/);
+    assert.equal(requests.some((entry) => entry.url.endsWith("/jsonl")), false);
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "JSONL 原始文本" }).length, 0);
+    await click(trigger("关闭 JSONL")); assert.equal(currentHref, "/projects/alpha/sessions/one?q=preserve");
+    assert.equal(commandRequests().length, 0);
+  });
+
   it("hides a project only after confirmation and restores its retained sessions on reimport", async () => {
     await open(); await publish();
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "keep this draft" } }));

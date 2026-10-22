@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { JSONL_BLOCK_LIMIT, JSONL_PAGE_BLOCK_LIMIT, JSONL_PAGE_LINE_LIMIT, JSONL_PAGE_TEXT_LIMIT, JSONL_TEXT_LIMIT, jsonInputPreview, presentJsonlPage, type JsonlContentBlock } from "../features/sessions/jsonl-presentation";
+import { JSONL_BLOCK_LIMIT, JSONL_PAGE_BLOCK_LIMIT, JSONL_PAGE_LINE_LIMIT, JSONL_PAGE_TEXT_LIMIT, JSONL_TEXT_LIMIT, jsonInputPreview, presentJsonlBranch, presentJsonlPage, type JsonlContentBlock } from "../features/sessions/jsonl-presentation";
 import { parseJsonlPage } from "../features/sessions/jsonl-structure";
+import { buildJsonlSession, JSONL_READING_WINDOW, selectJsonlBranch } from "../features/sessions/jsonl-session";
 
 const message = (id: string, parentId: string | null, role: string, content: unknown, rest = {}) => ({ type: "message", id, parentId, message: { role, content, ...rest } });
 const call = (id = "tool", name = "bash") => ({ type: "toolCall", id, name, arguments: { command: "git status --short" } });
@@ -84,5 +85,70 @@ describe("readable JSONL presentation", () => {
     const views = project([message("user", null, "user", [call()]), result()]);
     assert.equal(views[0].blocks[0].kind, "placeholder");
     assert.equal(views[1].relation?.line, undefined);
+  });
+
+  it("projects only a reading window while retaining confirmed tool relationships across all loaded records", () => {
+    const values: unknown[] = [message("assistant", null, "assistant", [call()])];
+    for (let index = 1; index < 450; index += 1) values.push(message(String(index), index === 1 ? "assistant" : String(index - 1), "user", "x".repeat(2000)));
+    values.push(result("tool", "449"), message("answer", "result", "assistant", "late **answer**"));
+    const session = buildJsonlSession(values.map((value) => JSON.stringify(value)).join("\n"));
+    const branch = selectJsonlBranch(session).records;
+    const start = presentJsonlBranch(branch, 0);
+    assert.equal(start.length, JSONL_READING_WINDOW);
+    assert.deepEqual(tool(start[0].blocks).relation, { line: 451, note: "查看输出" });
+    const end = presentJsonlBranch(branch, 450);
+    assert.deepEqual(end[0].relation, { line: 1, note: "查看输入" });
+    assert.equal(end[1].blocks[0].kind, "text");
+    assert.equal("text" in end[1].blocks[0] && end[1].blocks[0].text, "late **answer**");
+    assert.equal("clipped" in end[1].blocks[0] && end[1].blocks[0].clipped, false, "an earlier window cannot consume this window's preview budget");
+    assert.equal(presentJsonlBranch(branch, 0, 100_000).length, JSONL_READING_WINDOW);
+    assert.equal(presentJsonlBranch(branch, -10, 0).length, 1);
+    assert.equal(presentJsonlBranch(branch, Number.NaN, Number.NaN).length, JSONL_READING_WINDOW);
+  });
+
+  it("includes omitted and off-window tool calls in uniqueness checks without rendering their previews", () => {
+    const values = [message("assistant", null, "assistant", [call(), ...Array.from({ length: 60 }, (_, index) => call(`other-${index}`)), call()]), result()];
+    const branch = selectJsonlBranch(buildJsonlSession(values.map((value) => JSON.stringify(value)).join("\n"))).records;
+    const views = presentJsonlBranch(branch);
+    assert.equal(views[0].blocks.length, JSONL_BLOCK_LIMIT + 1);
+    assert.equal(tool(views[0].blocks).relation?.line, undefined);
+    assert.match(tool(views[0].blocks).relation!.note, /不唯一/);
+    assert.equal(views[1].relation?.line, undefined);
+    const later = [message("assistant", null, "assistant", [call()])];
+    for (let index = 1; index < 70; index += 1) later.push(message(String(index), index === 1 ? "assistant" : String(index - 1), "user", "between"));
+    later.push(message("duplicate-call", "69", "assistant", [call()]), result("tool", "duplicate-call"));
+    const laterBranch = selectJsonlBranch(buildJsonlSession(later.map((value) => JSON.stringify(value)).join("\n"))).records;
+    assert.match(tool(presentJsonlBranch(laterBranch)[0].blocks).relation!.note, /不唯一/);
+  });
+
+  it("never confirms a full-branch result across a broken path, sibling or duplicate record ID", () => {
+    const cases = [
+      [message("assistant", null, "assistant", [call()]), { ...result(), parentId: undefined }],
+      [message("assistant", null, "assistant", [call()]), message("sibling", null, "assistant", "branch"), result("tool", "sibling")],
+      [message("assistant", null, "assistant", [call()]), message("assistant", null, "assistant", "duplicate"), result()],
+      [message("assistant", null, "assistant", [call()]), result("tool", "assistant", "different-name")],
+      [message("assistant", null, "assistant", [call("")]), result("")],
+      [result(), message("assistant", null, "assistant", [call()])],
+    ];
+    for (const values of cases) {
+      const session = buildJsonlSession(values.map((value) => JSON.stringify(value)).join("\n"));
+      const views = presentJsonlBranch(session.records);
+      assert.equal(tool(views.flatMap((view) => view.blocks)).relation?.line, undefined);
+      assert.ok(views.filter((view) => view.kind === "tool-result").every((view) => view.relation?.line === undefined));
+    }
+  });
+
+  it("links each valid selected branch independently and marks hidden custom messages explicitly", () => {
+    const session = buildJsonlSession([
+      message("assistant", null, "assistant", [call()]), result(),
+      { ...result("tool", "assistant"), id: "other-result" },
+      { type: "custom_message", id: "hidden", parentId: "other-result", customType: "internal", display: false, content: "hidden text" },
+    ].map((value) => JSON.stringify(value)).join("\n"));
+    const left = presentJsonlBranch(selectJsonlBranch(session, 2).records);
+    const right = presentJsonlBranch(selectJsonlBranch(session, 3).records);
+    assert.equal(tool(left[0].blocks).relation?.line, 2);
+    assert.equal(tool(right[0].blocks).relation?.line, 3);
+    assert.equal(right.at(-1)?.hidden, true);
+    assert.equal(right.at(-1)?.blocks[0].kind, "text");
   });
 });

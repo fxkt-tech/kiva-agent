@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { mutate, resourceApi, sessionUrl, useResource, projectUrl } from "@/features/workspace/resources";
 import { ResourceState, useWorkspace } from "@/features/workspace/shell";
-import { SessionJsonlDialog } from "./session-jsonl-dialog";
+import { useSessionViewer } from "./session-viewer-host";
 
 function relativeTime(value: string, renderedAt: string) {
   const minutes = Math.max(0, Math.round((Date.parse(renderedAt) - Date.parse(value)) / 60_000));
@@ -30,11 +30,11 @@ export function SessionRows({ projectId, sessions, loading, error }: { projectId
   const [menu, setMenu] = useState<string>();
   const [deleting, setDeleting] = useState<SessionResource>();
   const [renaming, setRenaming] = useState<SessionResource>();
-  const [viewingJsonl, setViewingJsonl] = useState<SessionResource>();
+  const { openSessionViewer, viewingSession } = useSessionViewer();
   const sessionButtons = useRef(new Map<string, HTMLButtonElement>());
   const [actionError, setActionError] = useState<string>();
   const actionScope = useRef(0);
-  useEffect(() => { actionScope.current += 1; setMenu(undefined); setDeleting(undefined); setRenaming(undefined); setViewingJsonl(undefined); setActionError(undefined); }, [projectId, route.projectId, route.sessionId, route.section]);
+  useEffect(() => { actionScope.current += 1; setMenu(undefined); setDeleting(undefined); setRenaming(undefined); setActionError(undefined); }, [projectId, route.projectId, route.sessionId, route.section]);
   async function act(session: SessionResource, body: object) {
     const source = actionScope.current;
     setActionError(undefined);
@@ -49,8 +49,8 @@ export function SessionRows({ projectId, sessions, loading, error }: { projectId
         <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, bootstrap?.renderedAt ?? session.updatedAt)}</span></a>
         <DropdownMenu open={menu === session.id} onOpenChange={(open) => setMenu((current) => open ? session.id : current === session.id ? undefined : current)}>
           <DropdownMenuTrigger ref={(node: HTMLButtonElement | null) => { if (node) sessionButtons.current.set(session.id, node); else sessionButtons.current.delete(session.id); }} className="session-more" aria-label={`会话操作 ${session.name}`}><MoreHorizontal size={14} /></DropdownMenuTrigger>
-          <DropdownMenuContent className="session-actions-menu" align="end" aria-label={`会话操作 ${session.name}`} finalFocus={() => deleting?.id === session.id || renaming?.id === session.id || viewingJsonl?.id === session.id ? false : sessionButtons.current.get(session.id)}>
-            <DropdownMenuItem onClick={() => { setViewingJsonl(session); setMenu(undefined); }}><FileJson2 size={12} />查看 JSONL</DropdownMenuItem>
+          <DropdownMenuContent className="session-actions-menu" align="end" aria-label={`会话操作 ${session.name}`} finalFocus={() => deleting?.id === session.id || renaming?.id === session.id || (viewingSession?.projectId === projectId && viewingSession.id === session.id) ? false : sessionButtons.current.get(session.id)}>
+            <DropdownMenuItem onClick={() => { openSessionViewer(session, sessionButtons.current.get(session.id)); setMenu(undefined); }}><FileJson2 size={12} />查看 JSONL</DropdownMenuItem>
             {recovering ? <DropdownMenuItem variant="destructive" onClick={() => { setDeleting(session); setMenu(undefined); }}><RotateCcw size={12} />重试删除</DropdownMenuItem> : <>
               {session.collection === "active" ? <><DropdownMenuItem onClick={() => { setRenaming(session); setMenu(undefined); }}><Pencil size={12} />重命名</DropdownMenuItem><DropdownMenuItem onClick={() => void act(session, { type: "archive" })}><Archive size={12} />归档</DropdownMenuItem></> : <DropdownMenuItem onClick={() => void act(session, { type: session.collection === "trash" ? "restore_deleted" : "restore" })}><RotateCcw size={12} />{session.collection === "trash" ? "恢复删除" : "恢复"}</DropdownMenuItem>}
               {session.collection !== "trash" && <DropdownMenuItem variant="destructive" onClick={() => { setDeleting(session); setMenu(undefined); }}><Trash2 size={12} />删除</DropdownMenuItem>}
@@ -62,7 +62,6 @@ export function SessionRows({ projectId, sessions, loading, error }: { projectId
     {!sessions.length && <p className="sidebar-summary">{loading ? "正在读取会话…" : "还没有会话。"}</p>}{actionError && <Alert variant="error" title="会话操作失败" className="session-action-alert" onDismiss={() => setActionError(undefined)}>{actionError}</Alert>}
     {deleting && <DeleteSessionDialog key={`${deleting.projectId}:${deleting.id}`} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting((current) => current?.projectId === deleting.projectId && current.id === deleting.id ? undefined : current); refresh(); }} returnFocus={sessionButtons.current.get(deleting.id)} />}
     {renaming && <RenameSessionDialog key={`${renaming.projectId}:${renaming.id}`} session={renaming} onClose={() => setRenaming(undefined)} onRenamed={refresh} returnFocus={sessionButtons.current.get(renaming.id)} />}
-    {viewingJsonl && <SessionJsonlDialog key={`${viewingJsonl.projectId}:${viewingJsonl.id}`} session={viewingJsonl} onClose={() => setViewingJsonl(undefined)} returnFocus={sessionButtons.current.get(viewingJsonl.id)} />}
   </div>;
 }
 

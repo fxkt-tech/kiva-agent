@@ -16,8 +16,10 @@ export interface JsonlRecord {
 export interface JsonlPage { records: JsonlRecord[]; offset: number; hasMore: boolean }
 export const JSONL_PAGE_SIZE = 200;
 
-function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
-function own(value: unknown, key: string): unknown { return object(value) && Object.hasOwn(value, key) ? value[key] : undefined; }
+export function jsonlObject(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
+export function jsonlField(value: unknown, key: string): unknown { return jsonlObject(value) && Object.hasOwn(value, key) ? value[key] : undefined; }
+const object = jsonlObject;
+const own = jsonlField;
 function brief(value: string, length = 160) { return value.length > length ? `${value.slice(0, length)}…` : value; }
 
 export function jsonValueSummary(value: unknown, stringLimit = 2_000): string {
@@ -40,10 +42,8 @@ function describe(value: unknown) {
   };
 }
 
-/** Parse only one page. Blank lines still count toward original line numbers. */
-export function parseJsonlPage(content: string, offset = 0, requestedLimit = JSONL_PAGE_SIZE): JsonlPage {
-  offset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
-  const limit = Number.isFinite(requestedLimit) ? Math.min(JSONL_PAGE_SIZE, Math.max(1, Math.floor(requestedLimit))) : JSONL_PAGE_SIZE;
+/** Shared scanner: parse admitted records once and preserve their original raw slices. */
+function readJsonlRecords(content: string, offset = 0, limit = Infinity): JsonlPage {
   const records: JsonlRecord[] = [];
   const breaks = /\r\n|\n|\r/g;
   let start = 0; let line = 1; let skipped = 0; let hasMore = false;
@@ -69,6 +69,20 @@ export function parseJsonlPage(content: string, offset = 0, requestedLimit = JSO
     if (!end) break;
     start = breaks.lastIndex; line += 1;
   }
+  return { records, offset, hasMore };
+}
+
+/** Index the complete returned snapshot; render windows are applied after indexing. */
+export function parseJsonlSnapshot(content: string): JsonlRecord[] {
+  return readJsonlRecords(content).records;
+}
+
+/** Parse only one page. Blank lines still count toward original line numbers. */
+export function parseJsonlPage(content: string, offset = 0, requestedLimit = JSONL_PAGE_SIZE): JsonlPage {
+  offset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const limit = Number.isFinite(requestedLimit) ? Math.min(JSONL_PAGE_SIZE, Math.max(1, Math.floor(requestedLimit))) : JSONL_PAGE_SIZE;
+  const page = readJsonlRecords(content, offset, limit);
+  const { records, hasMore } = page;
   const ids = new Map<string, JsonlRecord[]>();
   for (const record of records) {
     if (record.id === undefined) continue;
@@ -92,7 +106,7 @@ export function parseJsonlPage(content: string, offset = 0, requestedLimit = JSO
     record.depth = Math.min(8, Math.max(0, path.length - 1));
   }
   for (const record of cyclic) { record.issues.push("父子关系成环"); record.depth = 0; }
-  return { records, offset, hasMore };
+  return page;
 }
 
 export const JSON_FIELD_PAGE_SIZE = 50;
