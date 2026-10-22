@@ -231,3 +231,43 @@ Added Swiss as a third independently selectable visual style with high contrast 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Owned Pi-style session reader
+<!-- trellis-session: v=2 fp=a3aa2116e7e7b998 -->
+
+**Date**: 2026-10-22
+**Task**: Owned Pi-style session reader
+**Package**: kiva-web
+**Branch**: `feat/owned-session-viewer`
+
+### Summary
+
+Implemented an owned React/TypeScript Pi-style JSONL reader with complete-snapshot branch navigation, bounded rendering, exact source/link/download actions and a compact54px header. Recovered stale live development CSS through a verified idle-only reload. Archived only this task; pending composer and pre-existing next-env changes remain uncommitted.
+
+### Main Changes
+
+- Added project-owned tree/branch/source models, responsive reader controls, single persistent viewer host, deep links and Pi MIT attribution.
+- Merged heading and toolbar into one54px band; preserved mobile controls, drafts, attachments and passive history reads.
+- Separated the task-only commit from pending composer work and made its integration test self-contained.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1fadac6c7625c15881d191e93481d271e6c54602` | feat(web): add owned Pi-style session reader |
+| `033b76d32090f84c8f38fd163a2b3291750954bc` | style(web): trim session viewer file endings |
+
+### Testing
+
+- [OK] Combined workspace338 tests and exact isolated commit329 tests passed; root/web typecheck, production build and independent review passed.
+- [OK] Browser:18 viewer layout cases,24 interaction/bounds groups,18 compact-header cases plus live9495 desktop/390/320 checks; zero commands/history writes.
+- [OK] Near8MiB/55,002-record browser snapshot opened in885ms with bounded160/60 tree/reader windows.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push the authorized feature branch; leave running-composer and bootstrap tasks active.
