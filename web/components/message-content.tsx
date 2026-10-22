@@ -1,25 +1,12 @@
 "use client";
 
-import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { memo, useState } from "react";
 import { useWebPreferences } from "@/lib/web-preferences";
 import { useStreamingText } from "@/lib/use-streaming-text";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Brain, Check, ChevronRight, CircleX, Copy, LoaderCircle, Wrench } from "lucide-react";
+import { Markdown } from "@/components/shared/Markdown";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ToolActivity } from "@/lib/use-runtime";
-
-const codeTheme: PrismTheme = {
-  plain: { color: "var(--code-text)", backgroundColor: "var(--subtle)" },
-  styles: [
-    { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "var(--code-comment)" } },
-    { types: ["keyword", "operator", "tag"], style: { color: "var(--code-keyword)" } },
-    { types: ["string", "char", "attr-value"], style: { color: "var(--code-string)" } },
-    { types: ["function", "class-name", "attr-name"], style: { color: "var(--code-function)" } },
-    { types: ["number", "boolean", "constant"], style: { color: "var(--code-number)" } },
-  ],
-};
 
 export const MessageContent = memo(function MessageContent({ message }: { message: ChatMessage }) {
   const { preferences } = useWebPreferences();
@@ -36,30 +23,6 @@ export const MessageContent = memo(function MessageContent({ message }: { messag
     </div>}
     {message.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
   </>;
-});
-
-const markdownComponents: Components = {
-  pre({ children: preChildren }) {
-    return <div className="markdown-pre">{preChildren}</div>;
-  },
-  code({ className, children: codeChildren, ...props }) {
-    const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
-    const code = String(codeChildren).replace(/\n$/, "");
-    if (!language) return <code className={className} {...props}>{codeChildren}</code>;
-    return <Highlight theme={codeTheme} code={code} language={language}>
-      {({ className: highlightClass, style, tokens, getLineProps, getTokenProps }) => <pre className={`${highlightClass} code-block`} style={style}>
-        <div className="code-language">{language}</div>
-        {tokens.map((line, index) => <div key={index} {...getLineProps({ line })}>
-          <span className="line-number">{index + 1}</span>
-          {line.map((token, tokenIndex) => <span key={tokenIndex} {...getTokenProps({ token })} />)}
-        </div>)}
-      </pre>}
-    </Highlight>;
-  },
-};
-
-const Markdown = memo(function Markdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{children}</ReactMarkdown>;
 });
 
 const ToolCard = memo(function ToolCard({ tool }: { tool: ToolActivity }) {

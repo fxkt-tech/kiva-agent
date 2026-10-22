@@ -1,67 +1,14 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { ChevronDown, ChevronRight, FileJson2, X } from "lucide-react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { resourceApi, useResource } from "@/features/workspace/resources";
 import type { SessionResource } from "@/shared/workspace-contract";
 import type { SessionJsonlDocument } from "@/shared/session-jsonl";
-import { JSON_FIELD_MAX_DEPTH, JSON_FIELD_PAGE_SIZE, JSONL_PAGE_SIZE, jsonFieldRows, jsonValueSummary, parseJsonlPage, type JsonlRecord } from "./jsonl-structure";
-
-function label(value: string, limit = 120) { return value.length > limit ? `${value.slice(0, limit)}…` : value; }
-
-function JsonFields({ record }: { record: JsonlRecord }) {
-  const [expanded, setExpanded] = useState(() => new Set(["[]"]));
-  const [pages, setPages] = useState(() => new Map<string, number>());
-  const fields = useMemo(() => jsonFieldRows(record.value, expanded, pages), [record.value, expanded, pages]);
-  return <div className="jsonl-field-tree" aria-label={`第 ${record.line} 行的 JSON 字段`}>
-    {fields.rows.map((row) => row.kind === "pagination" ? <div className="jsonl-field jsonl-field-pagination" key={`${row.path}-page`} style={{ paddingInlineStart: (row.depth + 1) * 16 }}>
-      <button type="button" disabled={row.page === 0} aria-label={`${label(row.label)} 上一页字段`} onClick={() => setPages((current) => new Map(current).set(row.path, row.page - 1))}>上一页</button>
-      <span>{row.page * JSON_FIELD_PAGE_SIZE + 1}–{Math.min(row.count, (row.page + 1) * JSON_FIELD_PAGE_SIZE)} / {row.count}</span>
-      <button type="button" disabled={(row.page + 1) * JSON_FIELD_PAGE_SIZE >= row.count} aria-label={`${label(row.label)} 下一页字段`} onClick={() => setPages((current) => new Map(current).set(row.path, row.page + 1))}>下一页</button>
-    </div> : <div className="jsonl-field" key={row.path} style={{ paddingInlineStart: row.depth * 16 }}>
-      {row.count > 0 ? <button className="jsonl-field-toggle" type="button" aria-label={`${row.expanded ? "收起" : "展开"}字段 ${label(row.label)}`} aria-expanded={row.expanded && row.depth < JSON_FIELD_MAX_DEPTH} disabled={row.depth >= JSON_FIELD_MAX_DEPTH} onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(row.path)) next.delete(row.path); else next.add(row.path); return next; })}>
-        {row.expanded && row.depth < JSON_FIELD_MAX_DEPTH ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
-      </button> : <span className="jsonl-field-spacer" />}
-      <span className="jsonl-field-key">{label(row.label)}{row.label.length > 120 && <span className="jsonl-field-limit">（字段名已截取）</span>}</span><span className="jsonl-field-separator">: </span>
-      <span className={`jsonl-value jsonl-value-${typeof row.value}`}>{jsonValueSummary(row.value)}</span>
-      {row.count > 0 && row.depth >= JSON_FIELD_MAX_DEPTH && <span className="jsonl-field-limit">展开已达深度限制，完整内容见原始文本</span>}
-    </div>)}
-    {fields.limited && <p className="jsonl-field-limit">当前展开内容过多，请收起部分字段后继续，或查看原始文本</p>}
-  </div>;
-}
-
-function RenderedJsonl({ content }: { content: string }) {
-  const [offset, setOffset] = useState(0);
-  const [selectedLine, setSelectedLine] = useState<number>();
-  const recordList = useRef<HTMLDivElement>(null);
-  const inspector = useRef<HTMLElement>(null);
-  const page = useMemo(() => parseJsonlPage(content, offset), [content, offset]);
-  const selected = page.records.find((record) => record.line === selectedLine) ?? page.records[0];
-  useEffect(() => { if (recordList.current) recordList.current.scrollTop = 0; }, [offset, content]);
-  useEffect(() => { if (inspector.current) inspector.current.scrollTop = 0; }, [selected?.line]);
-  function changePage(next: number) { setOffset(next); setSelectedLine(undefined); }
-  if (!selected) return <div className="jsonl-empty"><FileJson2 size={24} aria-hidden="true" /><p>此会话还没有 JSONL 记录</p></div>;
-  return <div className="jsonl-rendered">
-    <nav className="jsonl-records" aria-label="JSONL 记录">
-      <div ref={recordList} className="jsonl-record-list">{page.records.map((record) => <button type="button" className="jsonl-record" key={record.line} aria-current={selected.line === record.line ? "true" : undefined} data-invalid={Boolean(record.error) || undefined} style={{ "--jsonl-depth": record.depth } as CSSProperties} onClick={() => setSelectedLine(record.line)}>
-        <span className="jsonl-record-top"><span className="jsonl-record-line">L{record.line}</span><span className="jsonl-record-type">{record.type}</span></span>
-        <span className="jsonl-record-summary">{record.summary}</span>
-        {record.id !== undefined && <span className="jsonl-record-id">{label(record.id)}</span>}
-        {(record.error || record.issues.length > 0) && <span className="jsonl-record-issue">{record.error ? "此行不是有效 JSON" : record.issues.join(" · ")}</span>}
-      </button>)}</div>
-      <div className="jsonl-pagination"><button type="button" disabled={offset === 0} onClick={() => changePage(Math.max(0, offset - JSONL_PAGE_SIZE))}>上一页</button><span>{offset + 1}–{offset + page.records.length}</span><button type="button" disabled={!page.hasMore} onClick={() => changePage(offset + JSONL_PAGE_SIZE)}>下一页</button></div>
-    </nav>
-    <section ref={inspector} className="jsonl-inspector" aria-label={`第 ${selected.line} 行详情`}>
-      <div className="jsonl-inspector-heading"><strong>第 {selected.line} 行</strong><span>{selected.type}</span></div>
-      {selected.parentId !== undefined && <p className="jsonl-parent">父记录 {selected.parentLine !== undefined ? <button type="button" onClick={() => setSelectedLine(selected.parentLine)}>L{selected.parentLine}</button> : null}<code>{label(selected.parentId)}</code></p>}
-      {selected.issues.length > 0 && <Alert variant={selected.issues.some((issue) => issue !== "父记录未在本页载入") ? "warning" : "info"} title="记录关系提示" className="jsonl-notice">{selected.issues.join("；")}</Alert>}
-      {selected.error ? <><Alert variant="error" title={`第 ${selected.line} 行无法解析`} className="jsonl-notice">{selected.error}</Alert><pre className="jsonl-invalid-source">{selected.raw}</pre></> : <JsonFields key={selected.line} record={selected} />}
-    </section>
-  </div>;
-}
+import { RenderedJsonl } from "./jsonl-timeline";
 
 function size(bytes: number) { return bytes < 1_024 ? `${bytes} B` : bytes < 1_048_576 ? `${(bytes / 1_024).toFixed(1)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`; }
 
