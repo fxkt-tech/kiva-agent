@@ -44,4 +44,3 @@ const markdownWithoutImages: Components = {
 export const Markdown = memo(function Markdown({ children, allowImages = true }: { children: string; allowImages?: boolean }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={allowImages ? markdownComponents : markdownWithoutImages}>{children}</ReactMarkdown>;
 });
-
