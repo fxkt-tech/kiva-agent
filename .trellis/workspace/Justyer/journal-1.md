@@ -271,3 +271,25 @@ Implemented an owned React/TypeScript Pi-style JSONL reader with complete-snapsh
 ### Next Steps
 
 - Push the authorized feature branch; leave running-composer and bootstrap tasks active.
+
+
+## Session 10: Session tree pagination follow-up
+<!-- trellis-session: v=2 fp=a623d5077e1c20b9 -->
+
+**Date**: 2026-10-22
+**Task**: Session tree pagination follow-up
+**Branch**: `feat/owned-session-viewer`
+
+### Summary
+
+Added first/last-page controls and default first-page navigation while retaining the latest reader branch and manual mobile paging. Scoped snapshot passed 22 tests and web typecheck; desktop/mobile browser verification passed. Left running-composer work and next-env changes untouched; no task lifecycle changes.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e324aa4` | feat(web): improve session tree pagination |
+
+### Status
+
+[OK] **Completed**
