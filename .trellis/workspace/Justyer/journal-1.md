@@ -209,3 +209,25 @@ Added an independent flat/neumorphic visual style while preserving current defau
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Add Swiss visual style
+<!-- trellis-session: v=2 fp=732fbfe6a19be577 -->
+
+**Date**: 2026-10-22
+**Task**: Add Swiss visual style
+**Branch**: `feat/swiss-theme`
+
+### Summary
+
+Added Swiss as a third independently selectable visual style with high contrast neutrals, restrained red accents, square surfaces and heading hierarchy. Preserved flat/neumorphic appearance, mounted business state, persistence, first-frame restore, system mode and cross-tab synchronization. Passed 103 focused tests, 309 full tests, typecheck, fresh production build and independent review; browser matrix covered light/dark at 1440/390/320 and 12 old-style cases with 372 unchanged samples. Preserved user next-env edits and development server; diagnosed stale production CSS by isolating only production cache. User authorized commit/archive/journal and pushing feat/swiss-theme.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `892179e` | feat(web): add Swiss visual style |
+
+### Status
+
+[OK] **Completed**
