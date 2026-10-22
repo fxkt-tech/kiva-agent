@@ -142,3 +142,37 @@ Added browser-local default workspace selection with current branch as the initi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: Redesign JSONL as a full-screen conversation and inspector
+<!-- trellis-session: v=2 fp=6904e27c82912477 -->
+
+**Date**: 2026-10-22
+**Task**: Redesign JSONL as a full-screen conversation and inspector
+**Package**: kiva-web
+**Branch**: `main`
+
+### Summary
+
+Replaced generic JSONL field browsing with readable message/tool history and a selected-record inspector in full-height independently scrolling panes; retained exact raw source, bounded previews, scope isolation and keyboard focus.
+
+### Main Changes
+
+- Shared memoized Markdown presentation, conservative tool/result links and compact events.
+- Full-screen desktop/mobile viewer with card/keyboard selection, independent pane scrolling and reset semantics.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `20f6a09` | feat(web): redesign session JSONL viewer |
+| `e45a2c5` | style(web): remove trailing Markdown blank line |
+
+### Testing
+
+- [OK] pnpm typecheck, 304 tests, pnpm web:build and final committed-delta whitespace checks passed.
+- [OK] Chromium verified light/dark 1440px/390px/320px panes, deep fields, raw fidelity, source navigation, pagination, focus and zero command writes.
+
+### Status
+
+[OK] **Completed**
