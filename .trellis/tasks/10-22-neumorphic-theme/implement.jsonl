@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/10-22-neumorphic-theme/research/visual-contract.md","reason":"Scoped reading map for the oversized authoritative visual-system spec; read named source sections to preserve palette, layout, focus, content and browser verification contracts."}
+{"file":".trellis/spec/kiva-web/frontend/theme-system.md","reason":"Concrete independent appearance fields, lifecycle/bootstrap parity, material role ownership and verification contract for this implementation."}
+{"file":".trellis/spec/kiva-web/frontend/component-guidelines.md","reason":"Keep shared controls business-independent, reuse Base UI state/portal semantics and existing feature test boundaries."}
+{"file":".trellis/spec/kiva-web/frontend/global-settings.md","reason":"Extend the one browser-local preference owner with compatible defaults, pre-paint restoration, cross-tab sync, group reset and storage errors."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep stored preferences, runtime application, bootstrap and CSS consumers consistent across the appearance lifecycle."}
+{"file":".trellis/tasks/10-22-neumorphic-theme/research/current-behavior.md","reason":"Verified theme/control seams, native feature coverage, existing regression fixtures and task ownership boundaries."}

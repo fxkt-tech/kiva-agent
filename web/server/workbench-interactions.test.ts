@@ -650,29 +650,58 @@ describe("routed workspace features", () => {
     await open("/projects/alpha/sessions"); assert.match(text(renderer!.root.findByProps({ className: "workspace-feedback" })), /creation failed fixture/);
   });
 
-  it("initializes and synchronizes theme on the no-project route without first opening a dialog or conversation", async () => {
+  it("initializes and synchronizes both appearance dimensions on the no-project route", async () => {
     visibleProjects = [];
     webPreferences.destroy();
     const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
     const attributes = new Map<string, string>(); let writes = 0;
-    const stored = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "dark" } });
+    const stored = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "dark", visualStyle: "neumorphic" } });
     Object.defineProperty(window, "localStorage", { configurable: true, value: { getItem: () => stored, setItem() { writes++; } } });
     Object.defineProperty(globalThis, "document", { configurable: true, value: { documentElement: { setAttribute(name: string, value: string) { attributes.set(name, value); }, removeAttribute(name: string) { attributes.delete(name); } }, querySelector() { return null; } } });
     try {
       assert.equal(events.get("storage")?.size ?? 0, 0);
       await open("/projects");
       assert.equal(attributes.get("data-theme"), "dark"); assert.equal(events.get("storage")?.size, 1);
+      assert.equal(attributes.get("data-visual-style"), "neumorphic");
       assert.equal(renderer!.root.findAllByType("textarea").length, 0); assert.equal(renderer!.root.findAllByProps({ className: "settings-dialog" }).length, 0);
-      const light = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "light" } });
+      const light = JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, theme: "light", visualStyle: "neumorphic" } });
       await act(() => { for (const listener of events.get("storage") ?? []) listener({ key: WEB_PREFERENCES_KEY, newValue: light }); });
       assert.equal(attributes.get("data-theme"), "light", "an already-open root page must follow another tab's saved choice");
+      assert.equal(attributes.get("data-visual-style"), "neumorphic");
       await act(() => { for (const listener of events.get("storage") ?? []) listener({ key: WEB_PREFERENCES_KEY, newValue: JSON.stringify(DEFAULT_WEB_PREFERENCES) }); });
       assert.equal(attributes.has("data-theme"), false); assert.equal(writes, 0, "cross-tab changes do not echo writes");
+      assert.equal(attributes.has("data-visual-style"), false);
       assert.equal(requests.filter((entry) => entry.body).length, 0);
     } finally {
       webPreferences.destroy();
       if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument); else Reflect.deleteProperty(globalThis, "document");
     }
+  });
+
+  it("changes visual style from settings without recreating session, draft, attachments or disclosures", async () => {
+    await open();
+    await publish(snapshot("one", { messages: [{ id: "material-history", role: "assistant", text: "History", thinking: "Keep this open", tools: [{ id: "material-tool", name: "read", status: "done", args: { path: "a" } }] }] }));
+    const textarea = renderer!.root.findByType("textarea");
+    const thinking = renderer!.root.findByProps({ className: "thinking-block" });
+    const tool = renderer!.root.findByProps({ className: "tool-card tool-details" });
+    await act(() => textarea.props.onChange({ target: { value: "draft survives material changes" } }));
+    await act(() => { thinking.props.onToggle({ currentTarget: { open: true } }); tool.props.onToggle({ currentTarget: { open: true } }); });
+    const attachment = { name: "material-note.md", type: "text/plain", size: 3, text: async () => "abc" };
+    await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [attachment], value: "file" } }));
+    const sockets = FakeWebSocket.sockets.length;
+    await click(renderer!.root.findByProps({ "aria-label": "设置" }));
+    await act(() => field("视觉风格").props.onValueChange("neumorphic"));
+    await act(() => field("主题").props.onValueChange("dark"));
+    assert.equal(field("视觉风格").props.value, "neumorphic");
+    await click(renderer!.root.findByProps({ "aria-label": "关闭设置" }));
+    assert.equal(currentHref, "/projects/alpha/sessions/one");
+    assert.equal(renderer!.root.findByType("textarea"), textarea);
+    assert.equal(textarea.props.value, "draft survives material changes");
+    assert.equal(renderer!.root.findByProps({ className: "thinking-block" }), thinking);
+    assert.equal(thinking.props.open, true); assert.equal(tool.props.open, true);
+    assert.match(text(renderer!.root.findByProps({ className: "attachment-list" })), /material-note\.md/);
+    assert.equal(FakeWebSocket.sockets.length, sockets);
+    assert.equal(requests.filter((entry) => entry.body).length, 0);
   });
 
   it("uses saved Mod+Enter send mode, preserves native newlines and initializes queue mode only once", async () => {

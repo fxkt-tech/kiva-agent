@@ -2,11 +2,13 @@
 
 ## Scope and ownership
 
-The Kiva workbench follows the Codex desktop workspace visual direction while retaining Kiva branding. `web/app/globals.css` owns the palette and feature layout; `web/components/ui/primitives.css` owns common controls and overlay surfaces. Reuse shared Base UI primitives, Button, Badge and Radix ScrollArea; follow [Component Guidelines](./component-guidelines.md). Presentation changes must preserve runtime commands and project/session API calls.
+The Kiva workbench follows the Codex desktop workspace visual direction while retaining Kiva branding. `web/styles/themes.css` owns semantic palettes and material tokens; `web/app/globals.css` owns feature layout/presentation and imports the theme and primitive styles once. `web/components/ui/primitives.css` owns common controls and overlay surfaces. Reuse shared Base UI primitives, Button, Badge and Radix ScrollArea; follow [Component Guidelines](./component-guidelines.md). Presentation changes must preserve runtime commands and project/session API calls.
 
 ## Palette contract
 
 Use semantic CSS variables instead of light-only or dark-only colors. System preference is the default; `prefers-color-scheme: dark` overrides tokens only without an explicit root theme. `data-theme="light"` / `data-theme="dark"` overrides OS preference; see [Global Web Settings](./global-settings.md) for persistence/pre-paint behavior. Tailwind semantic colors are registered through `@theme inline`.
+
+Color mode is independent of visual material: flat is the default; `data-visual-style="neumorphic"` selects the alternate material in either mode. Follow [Appearance and Theme System](./theme-system.md) for preference/bootstrap parity and material roles. Feature components consume semantic tokens without style-dependent rendering or remounts; keep existing layout, typography and dense content presentation.
 
 ```css
 /* Good: responds to both color schemes. */
@@ -20,6 +22,8 @@ Neutral surfaces use `--background`, `--sidebar`, `--card` and `--subtle`. Inter
 ## Focus feedback contract
 
 Use one thin keyboard-focus treatment: the global `:focus-visible` rules for buttons, links, summaries and native fields own a 1px `var(--ring)` outline with 1px offset. Shared `Button` must not add a second Tailwind focus ring. The former 2px outline/3px offset plus 2px ring stacked into a wide gray halo; following the sibling Vera fix's single-thin-treatment principle, resolve this at shared styles rather than adding page-specific suppression. Do not globally erase keyboard focus. Preserve the composer's intentional focus-within border and textarea outline suppression, and the tree's local inset row outline. Browser-check computed outline/shadow for shared and native controls, keyboard navigation and light/dark desktop/mobile; the regression must reject stacked outlines/rings while still requiring a visible keyboard cue.
+
+Material shadows may remain alongside that outline: field/switch focus rules must not erase the selected theme's relief, and relief never replaces the keyboard cue.
 
 ## Typography contract
 

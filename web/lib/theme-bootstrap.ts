@@ -1,4 +1,4 @@
-import { WEB_PREFERENCES_KEY } from "../shared/web-preferences";
+import { WEB_PREFERENCES_KEY, WEB_PREFERENCES_MAX_LENGTH } from "../shared/web-preferences";
 
-// Only an allowlisted theme reaches the DOM. No stored content is interpolated into script.
-export const themeBootstrapScript = `(function(){try{var p=JSON.parse(localStorage.getItem(${JSON.stringify(WEB_PREFERENCES_KEY)}));var t=p&&p.version===1&&p.appearance&&p.appearance.theme;if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t);}else{document.documentElement.removeAttribute("data-theme");}}catch(_){document.documentElement.removeAttribute("data-theme");}})();`;
+// Only allowlisted appearance values reach the DOM. Stored content never becomes script.
+export const themeBootstrapScript = `(function(){var r=document.documentElement;try{var v=localStorage.getItem(${JSON.stringify(WEB_PREFERENCES_KEY)});var p=v&&v.length<=${WEB_PREFERENCES_MAX_LENGTH}?JSON.parse(v):null;var a=p&&p.version===1&&p.appearance;var t=a&&a.theme;if(t==="light"||t==="dark"){r.setAttribute("data-theme",t);}else{r.removeAttribute("data-theme");}if(a&&a.visualStyle==="neumorphic"){r.setAttribute("data-visual-style","neumorphic");}else{r.removeAttribute("data-visual-style");}}catch(_){r.removeAttribute("data-theme");r.removeAttribute("data-visual-style");}})();`;

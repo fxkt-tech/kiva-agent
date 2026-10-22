@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences, type PreferenceGroup, type PreferencePatch, type ThemePreference, type WebPreferences } from "../shared/web-preferences";
+import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences, type PreferenceGroup, type PreferencePatch, type WebPreferences } from "../shared/web-preferences";
 
 export interface WebPreferencesSnapshot {
   readonly preferences: WebPreferences;
@@ -12,15 +12,17 @@ export interface WebPreferencesEnvironment {
   read(): string | null;
   write(value: string): void;
   subscribe(listener: (value: string | null) => void): () => void;
-  applyTheme(theme: ThemePreference): void;
+  applyAppearance(appearance: WebPreferences["appearance"]): void;
 }
 
 const STORAGE_WARNING = "浏览器未能保存设置；当前选择仅在此页面生效。";
 const serverSnapshot: WebPreferencesSnapshot = Object.freeze({ preferences: DEFAULT_WEB_PREFERENCES, persistenceError: null });
 
-export function applyThemePreference(root: Pick<HTMLElement, "setAttribute" | "removeAttribute">, theme: ThemePreference) {
+export function applyAppearancePreference(root: Pick<HTMLElement, "setAttribute" | "removeAttribute">, { theme, visualStyle }: Pick<WebPreferences["appearance"], "theme" | "visualStyle">) {
   if (theme === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", theme);
+  if (visualStyle === "neumorphic") root.setAttribute("data-visual-style", "neumorphic");
+  else root.removeAttribute("data-visual-style");
 }
 
 /** One store owns both persisted and session-local choices, never drafts or server settings. */
@@ -45,10 +47,10 @@ export function createWebPreferencesStore(resolveEnvironment: (() => WebPreferen
     initialized = true;
     try { replace(parseWebPreferences(environment.read()), null); }
     catch { replace(snapshot.preferences, STORAGE_WARNING); }
-    environment.applyTheme(snapshot.preferences.appearance.theme);
+    environment.applyAppearance(snapshot.preferences.appearance);
     unsubscribeStorage = environment.subscribe((value) => {
       const changed = replace(parseWebPreferences(value), null);
-      environment?.applyTheme(snapshot.preferences.appearance.theme);
+      environment?.applyAppearance(snapshot.preferences.appearance);
       if (changed) notify();
     });
   };
@@ -61,7 +63,7 @@ export function createWebPreferencesStore(resolveEnvironment: (() => WebPreferen
       environment.write(JSON.stringify(preferences));
     } catch { persistenceError = STORAGE_WARNING; }
     const changed = replace(preferences, persistenceError);
-    environment?.applyTheme(preferences.appearance.theme);
+    environment?.applyAppearance(preferences.appearance);
     if (changed) notify();
   };
   return {
@@ -108,7 +110,7 @@ function browserEnvironment(): WebPreferencesEnvironment | undefined {
       window.addEventListener("storage", onStorage);
       return () => window.removeEventListener("storage", onStorage);
     },
-    applyTheme: (theme) => { if (typeof document !== "undefined") applyThemePreference(document.documentElement, theme); },
+    applyAppearance: (appearance) => { if (typeof document !== "undefined") applyAppearancePreference(document.documentElement, appearance); },
   };
 }
 

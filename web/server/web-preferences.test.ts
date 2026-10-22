@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWebPreferencesStore, webPreferences, type WebPreferencesEnvironment } from "../lib/web-preferences";
-import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences } from "../shared/web-preferences";
+import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences, type WebPreferences } from "../shared/web-preferences";
 
 function fixture(value: string | null = null) {
-  const writes: string[] = [], themes: string[] = [];
+  const writes: string[] = [], appearances: WebPreferences["appearance"][] = [];
   let storageListener: ((value: string | null) => void) | undefined;
   let denied = false, removed = 0;
   const environment: WebPreferencesEnvironment = {
     read: () => value,
     write: (next) => { if (denied) throw new Error("SECRET_STORAGE_FAILURE"); value = next; writes.push(next); },
     subscribe: (listener) => { storageListener = listener; return () => { removed += 1; storageListener = undefined; }; },
-    applyTheme: (theme) => themes.push(theme),
+    applyAppearance: (appearance) => appearances.push(appearance),
   };
   const store = createWebPreferencesStore(environment);
-  return { store, writes, themes, deny: () => { denied = true; }, allow: () => { denied = false; }, external: (next: string | null) => { value = next; storageListener?.(next); }, removed: () => removed };
+  return { store, writes, appearances, deny: () => { denied = true; }, allow: () => { denied = false; }, external: (next: string | null) => { value = next; storageListener?.(next); }, removed: () => removed };
 }
 
 describe("browser preference allowlist", () => {
@@ -26,7 +26,7 @@ describe("browser preference allowlist", () => {
       conversation: { thinkingExpanded: true, toolsExpanded: "true", queueMode: "follow_up" },
       shortcuts: { sendMode: "invalid" },
     });
-    assert.deepEqual(decoded.appearance, { theme: "dark", conversationFontSize: 14, wrapCode: true });
+    assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 14, wrapCode: true });
     assert.deepEqual(decoded.conversation, { thinkingExpanded: true, toolsExpanded: false, queueMode: "follow_up", workspaceMode: "current-branch" });
     assert.deepEqual(decoded.shortcuts, DEFAULT_WEB_PREFERENCES.shortcuts);
   });
@@ -36,6 +36,18 @@ describe("browser preference allowlist", () => {
     const decoded = parseWebPreferences(JSON.stringify({ version: 1, appearance: { theme: "<script>", conversationFontSize: 18 } }));
     assert.equal(decoded.appearance.theme, "system");
     assert.equal(decoded.appearance.conversationFontSize, 18);
+  });
+
+  it("decodes visual style independently while keeping legacy documents flat", () => {
+    for (const visualStyle of [undefined, null, "", "flat", "skeuomorphic", "<script>", true, {}]) {
+      const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "dark", visualStyle, conversationFontSize: 18, wrapCode: true }, conversation: { toolsExpanded: true } });
+      assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 18, wrapCode: true });
+      assert.equal(decoded.conversation.toolsExpanded, true);
+    }
+    const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "unknown", visualStyle: "neumorphic" } });
+    assert.equal(decoded.appearance.visualStyle, "neumorphic");
+    assert.equal(decoded.appearance.theme, "system");
+    assert.equal(DEFAULT_WEB_PREFERENCES.appearance.visualStyle, "flat");
   });
 
   it("drops all unknown fields and never persists secret/draft/server configuration fields", () => {
@@ -71,6 +83,44 @@ describe("browser preference allowlist", () => {
 });
 
 describe("browser preference store", () => {
+  it("applies both appearance dimensions on independent updates, reload, external changes and group reset", () => {
+    const current = fixture(JSON.stringify({ version: 1, appearance: { theme: "dark", wrapCode: true } }));
+    assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "flat");
+    assert.deepEqual(current.writes, [], "legacy documents load without migration writes");
+    current.store.update("appearance", { visualStyle: "neumorphic" });
+    assert.equal(current.store.getSnapshot().preferences.appearance.theme, "dark");
+    current.store.update("appearance", { theme: "light" });
+    assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "neumorphic");
+    const saved = current.writes.at(-1)!;
+    const reloaded = fixture(saved);
+    assert.deepEqual(reloaded.store.getSnapshot().preferences.appearance, { theme: "light", visualStyle: "neumorphic", conversationFontSize: 14, wrapCode: true });
+    assert.deepEqual(reloaded.appearances, [current.appearances.at(-1)]);
+    current.store.update("conversation", { toolsExpanded: true });
+    current.store.resetGroup("appearance");
+    assert.deepEqual(current.appearances.at(-1), DEFAULT_WEB_PREFERENCES.appearance);
+    assert.equal(current.store.getSnapshot().preferences.conversation.toolsExpanded, true);
+    const writesBeforeSync = current.writes.length;
+    current.external(saved);
+    assert.equal(current.appearances.at(-1)?.visualStyle, "neumorphic");
+    assert.equal(current.appearances.at(-1)?.theme, "light");
+    current.external(null);
+    assert.deepEqual(current.appearances.at(-1), DEFAULT_WEB_PREFERENCES.appearance);
+    assert.equal(current.writes.length, writesBeforeSync, "storage events never echo writes");
+    current.store.destroy(); reloaded.store.destroy();
+  });
+
+  it("retains and applies the whole appearance when storage is denied", () => {
+    const current = fixture();
+    current.deny();
+    current.store.update("appearance", { theme: "dark", visualStyle: "neumorphic" });
+    assert.equal(current.appearances.at(-1)?.theme, "dark");
+    assert.equal(current.appearances.at(-1)?.visualStyle, "neumorphic");
+    assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "neumorphic");
+    assert.match(current.store.getSnapshot().persistenceError ?? "", /未能保存/);
+    assert.deepEqual(current.writes, []);
+    current.store.destroy();
+  });
+
   it("persists, reloads, resets and synchronizes the browser-local workspace mode", () => {
     const current = fixture();
     current.store.update("appearance", { theme: "dark" });
@@ -98,7 +148,7 @@ describe("browser preference store", () => {
     assert.ok(Object.isFrozen(first));
     assert.equal(first.preferences.appearance.theme, "light");
     assert.deepEqual(current.writes, []);
-    assert.deepEqual(current.themes, ["light"]);
+    assert.deepEqual(current.appearances.map(({ theme, visualStyle }) => [theme, visualStyle]), [["light", "flat"]]);
     let notifications = 0;
     const unsubscribe = current.store.subscribe(() => { notifications += 1; });
     current.store.update("appearance", { theme: "dark" });
@@ -137,7 +187,7 @@ describe("browser preference store", () => {
     assert.equal(current.store.getSnapshot().preferences.appearance.theme, "dark");
     assert.match(current.store.getSnapshot().persistenceError ?? "", /未能保存/);
     assert.doesNotMatch(JSON.stringify(current.store.getSnapshot()), /SECRET_STORAGE_FAILURE/);
-    assert.deepEqual(current.themes, ["system", "dark"]);
+    assert.deepEqual(current.appearances.map(({ theme, visualStyle }) => [theme, visualStyle]), [["system", "flat"], ["dark", "flat"]]);
     current.allow();
     current.store.update("appearance", { theme: "dark" });
     assert.equal(current.store.getSnapshot().persistenceError, null);
@@ -147,7 +197,7 @@ describe("browser preference store", () => {
 
   it("handles denied reads without overwriting storage during initialization", () => {
     let writes = 0;
-    const store = createWebPreferencesStore({ read: () => { throw new Error("SECRET_READ"); }, write: () => { writes += 1; }, subscribe: () => () => {}, applyTheme: () => {} });
+    const store = createWebPreferencesStore({ read: () => { throw new Error("SECRET_READ"); }, write: () => { writes += 1; }, subscribe: () => () => {}, applyAppearance: () => {} });
     assert.equal(store.getSnapshot().preferences, DEFAULT_WEB_PREFERENCES);
     assert.match(store.getSnapshot().persistenceError ?? "", /当前选择/);
     assert.doesNotMatch(store.getSnapshot().persistenceError ?? "", /SECRET_READ/);
@@ -178,7 +228,7 @@ describe("browser preference store", () => {
     let environment: WebPreferencesEnvironment | undefined;
     const store = createWebPreferencesStore(() => environment);
     assert.equal(store.getSnapshot(), store.getServerSnapshot());
-    environment = { read: () => JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { theme: "dark" } }), write: () => {}, subscribe: () => () => {}, applyTheme: () => {} };
+    environment = { read: () => JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { theme: "dark" } }), write: () => {}, subscribe: () => () => {}, applyAppearance: () => {} };
     assert.equal(store.getSnapshot().preferences.appearance.theme, "dark");
     assert.equal(store.getServerSnapshot().preferences.appearance.theme, "system");
     store.destroy();

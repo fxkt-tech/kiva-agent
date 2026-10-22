@@ -17,6 +17,19 @@ describe("shared UI primitive contracts", () => {
   beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
   afterEach(async () => { if (renderer) await act(() => renderer!.unmount()); renderer = undefined; });
 
+  it("exposes semantic Button variants while preserving native and Slot state", () => {
+    const ordinary = renderToStaticMarkup(createElement(Button, { disabled: true, "aria-pressed": true }, "Apply"));
+    assert.match(ordinary, /data-variant="default"/);
+    assert.match(ordinary, /disabled=""/);
+    assert.match(ordinary, /aria-pressed="true"/);
+    for (const variant of ["ghost", "outline", "secondary", "destructive"] as const) {
+      const html = renderToStaticMarkup(createElement(Button, { variant, asChild: true }, createElement("a", { href: "/projects" }, "Projects")));
+      assert.match(html, new RegExp(`data-variant="${variant}"`));
+      assert.match(html, /<a[^>]*href="\/projects"/);
+      assert.match(html, /ui-button/);
+    }
+  });
+
   it("renders scalar labels and native form values while forwarding field identity, errors and disabled state", () => {
     const html = renderToStaticMarkup(createElement(Select<number>, {
       id: "effort", name: "effort", value: 0, options: [{ value: 0, label: "关闭 <reasoning>" }],

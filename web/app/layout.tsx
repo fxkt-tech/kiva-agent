@@ -12,6 +12,6 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // Only this root attribute boundary differs before hydration: the allowlisted
-  // boot script applies browser-local data-theme. Body/workbench warnings remain enabled.
+  // boot script applies browser-local appearance attributes. Body/workbench warnings remain enabled.
   return <html lang="zh-CN" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning><head><script id="kiva-theme-bootstrap" dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} /><script id="kiva-legacy-cache-recovery" dangerouslySetInnerHTML={{ __html: legacyCacheRecoveryScript }} /></head><body>{children}</body></html>;
 }

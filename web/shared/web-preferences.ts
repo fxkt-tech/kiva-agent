@@ -1,15 +1,17 @@
 import { DEFAULT_SESSION_WORKSPACE_MODE, isSessionWorkspaceMode, type SessionWorkspaceMode } from "./workspace-contract";
 
 export const WEB_PREFERENCES_KEY = "kiva:web-preferences:v1";
+export const WEB_PREFERENCES_MAX_LENGTH = 16_384;
 export const SHORTCUT_ACTIONS = ["newSession", "openCommands", "focusComposer", "openSettings"] as const;
 export type ShortcutAction = typeof SHORTCUT_ACTIONS[number];
 export type ShortcutBinding = Readonly<{ key: string; mod: boolean; alt: boolean; shift: boolean }>;
 export type ThemePreference = "system" | "light" | "dark";
+export type VisualStylePreference = "flat" | "neumorphic";
 export type SendMode = "enter" | "mod-enter";
 
 export interface WebPreferences {
   readonly version: 1;
-  readonly appearance: Readonly<{ theme: ThemePreference; conversationFontSize: 14 | 16 | 18; wrapCode: boolean }>;
+  readonly appearance: Readonly<{ theme: ThemePreference; visualStyle: VisualStylePreference; conversationFontSize: 14 | 16 | 18; wrapCode: boolean }>;
   readonly conversation: Readonly<{ thinkingExpanded: boolean; toolsExpanded: boolean; queueMode: "steer" | "follow_up"; workspaceMode: SessionWorkspaceMode }>;
   readonly shortcuts: Readonly<{ sendMode: SendMode; bindings: Readonly<Record<ShortcutAction, ShortcutBinding | null>> }>;
 }
@@ -21,7 +23,7 @@ export type PreferencePatch<G extends PreferenceGroup> = G extends "shortcuts"
 const binding = (key: string): ShortcutBinding => Object.freeze({ key, mod: true, alt: false, shift: false });
 export const DEFAULT_WEB_PREFERENCES: WebPreferences = Object.freeze({
   version: 1,
-  appearance: Object.freeze({ theme: "system", conversationFontSize: 14, wrapCode: false }),
+  appearance: Object.freeze({ theme: "system", visualStyle: "flat", conversationFontSize: 14, wrapCode: false }),
   conversation: Object.freeze({ thinkingExpanded: false, toolsExpanded: false, queueMode: "steer", workspaceMode: DEFAULT_SESSION_WORKSPACE_MODE }),
   shortcuts: Object.freeze({ sendMode: "enter", bindings: Object.freeze({ newSession: binding("n"), openCommands: binding("k"), focusComposer: null, openSettings: binding(",") }) }),
 });
@@ -105,6 +107,7 @@ export function decodeWebPreferences(value: unknown): WebPreferences {
     version: 1,
     appearance: Object.freeze({
       theme: appearance.theme === "light" || appearance.theme === "dark" ? appearance.theme : "system",
+      visualStyle: appearance.visualStyle === "neumorphic" ? "neumorphic" : "flat",
       conversationFontSize: appearance.conversationFontSize === 16 || appearance.conversationFontSize === 18 ? appearance.conversationFontSize : 14,
       wrapCode: typeof appearance.wrapCode === "boolean" ? appearance.wrapCode : false,
     }),
@@ -119,6 +122,6 @@ export function decodeWebPreferences(value: unknown): WebPreferences {
 }
 
 export function parseWebPreferences(value: string | null): WebPreferences {
-  if (value === null || value.length > 16_384) return DEFAULT_WEB_PREFERENCES;
+  if (value === null || value.length > WEB_PREFERENCES_MAX_LENGTH) return DEFAULT_WEB_PREFERENCES;
   try { return decodeWebPreferences(JSON.parse(value)); } catch { return DEFAULT_WEB_PREFERENCES; }
 }

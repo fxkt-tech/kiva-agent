@@ -21,6 +21,7 @@ This directory records the web package's component boundaries, presentation cont
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 | [Workspace Visual System](./visual-system.md) | Codex-style tokens, local Geist typography, responsive layout, Markdown and UI verification | Documented |
+| [Appearance and Theme System](./theme-system.md) | Independent color mode/visual style, compatible preference lifecycle, material tokens and browser verification | Documented |
 | [Scoped Workspace Resources](./workspace-routing.md) | URL identity, passive reads, isolated session execution, scoped events/drafts and safe cleanup | Documented |
 | [Global Web Settings](./global-settings.md) | Browser preferences/shortcuts, settings modal, safe provider credentials, installation endpoints and runtime refresh | Documented |
 

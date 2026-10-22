@@ -4,7 +4,8 @@ The web package lives in `web/` and uses Next App Router with a custom server.
 
 | Path | Responsibility |
 | --- | --- |
-| `app/` | Routes, root layout, global palette and feature layout CSS |
+| `app/` | Routes, root layout, global CSS imports and feature layout CSS |
+| `styles/` | Semantic color palettes and visual material tokens in `themes.css` |
 | `components/ui/` | Generic controls, overlays, feedback and scrolling primitives; local `primitives.css` |
 | `components/shared/` | Compositions reused across features, including `ModelConfigurationFields` and `ConfirmDialog` |
 | `components/` | Existing application-level rendering such as message content and extension dialogs |

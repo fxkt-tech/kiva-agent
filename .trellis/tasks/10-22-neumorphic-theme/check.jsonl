@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/10-22-neumorphic-theme/research/visual-contract.md","reason":"Scoped reading map for the oversized visual-system spec; review named source sections and check flat/layout/content preservation plus actual focus/mobile/served-CSS evidence."}
+{"file":".trellis/spec/kiva-web/frontend/theme-system.md","reason":"Review the new independent appearance/lifecycle/material contract against actual behavior and compatibility evidence."}
+{"file":".trellis/spec/kiva-web/frontend/component-guidelines.md","reason":"Verify unchanged controlled APIs, Base UI behavior, variant semantics, native/ARIA states and portal focus/layer ownership."}
+{"file":".trellis/spec/kiva-web/frontend/global-settings.md","reason":"Check independent appearance dimensions, v1 field-wise compatibility, pre-paint/runtime parity, resets, cross-tab and denied-storage behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit every preference-to-DOM path and ensure business consumers do not decode or branch on visual style."}
+{"file":".trellis/tasks/10-22-neumorphic-theme/research/current-behavior.md","reason":"Review against inspected owners, existing tests, native presentation coverage and unrelated dirty-file boundary."}

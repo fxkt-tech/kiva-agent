@@ -103,14 +103,22 @@ describe("global settings dialog", () => {
   });
 
   it("auto-saves preferences with per-group reset and keeps only browser-safe fields", async () => {
-    await open(); await change("主题", "dark"); await change("会话字号", "18");
+    await open();
+    assert.equal(field("视觉风格").props.value, "flat");
+    assert.deepEqual(field("视觉风格").props.options.map((option: { label: string }) => option.label), ["线性扁平", "新拟态"]);
+    await change("视觉风格", "neumorphic");
+    assert.equal(field("主题").props.value, "system");
+    await change("主题", "dark"); await change("会话字号", "18");
+    assert.equal(field("视觉风格").props.value, "neumorphic");
     await act(() => { const control = root().findAllByType(Switch).find((node) => node.props["aria-label"] === "代码自动换行")!; control.props.onCheckedChange(!control.props.checked); });
     await click(root().findByProps({ id: "settings-tab-conversation" })); await change("默认消息队列模式", "follow_up");
     assert.equal(webPreferences.getSnapshot().preferences.appearance.theme, "dark");
+    assert.equal(webPreferences.getSnapshot().preferences.appearance.visualStyle, "neumorphic");
     assert.equal(webPreferences.getSnapshot().preferences.conversation.queueMode, "follow_up");
     await click(root().findByProps({ id: "settings-tab-appearance" }));
     await click(root().findByProps({ id: "settings-panel-appearance" }).findAllByType("button").find((node) => text(node) === "恢复本组默认")!);
     assert.equal(webPreferences.getSnapshot().preferences.appearance.theme, "system");
+    assert.equal(field("视觉风格").props.value, "flat");
     assert.equal(webPreferences.getSnapshot().preferences.conversation.queueMode, "follow_up");
     assert.ok(root().findAllByProps({ role: "alert" }).some((node) => text(node).includes("偏好未持久保存")), "blocked storage must be honest");
     assert.equal(requests.filter((item) => item.body).length, 0);
