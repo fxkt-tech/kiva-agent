@@ -40,4 +40,3 @@ export function RecordDetails({ record, onNavigate }: { record: JsonlRecord; onN
     {record.error && textPreview(record.raw).clipped && <p className="jsonl-preview-limit">预览已截取，完整内容见原始文本。</p>}
   </div>;
 }
-
