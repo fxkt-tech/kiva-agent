@@ -1,0 +1,5 @@
+{"file":".trellis/spec/kiva-web/frontend/index.md","reason":"Frontend checklist"}
+{"file":".trellis/spec/kiva-web/frontend/component-guidelines.md","reason":"Shared components and overlay contracts"}
+{"file":".trellis/spec/kiva-web/frontend/visual-system.md","reason":"Styling and bounded JSONL fidelity; task supersedes split pane"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse parser and Markdown"}
+{"file":".trellis/tasks/10-22-jsonl-redesign/research/current-view.md","reason":"Local evidence and tests"}
