@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { runInNewContext } from "node:vm";
 import { applyAppearancePreference } from "../lib/web-preferences";
 import { themeBootstrapScript } from "../lib/theme-bootstrap";
-import { WEB_PREFERENCES_KEY, WEB_PREFERENCES_MAX_LENGTH, parseWebPreferences } from "../shared/web-preferences";
+import { VISUAL_STYLES, WEB_PREFERENCES_KEY, WEB_PREFERENCES_MAX_LENGTH, isVisualStylePreference, parseWebPreferences } from "../shared/web-preferences";
 
 function root() {
   const attributes = new Map<string, string>();
@@ -14,47 +14,51 @@ function root() {
 describe("pre-paint theme bootstrap", () => {
   it("matches the runtime decoder for every valid mode/style pair and invalid field", () => {
     for (const theme of ["light", "dark", "system", "<script>", null]) {
-      for (const visualStyle of ["flat", "neumorphic", "<script>", null, undefined]) {
+      for (const visualStyle of [...VISUAL_STYLES, "<script>", "SWISS", null, undefined, true, {}, []]) {
         const element = root(), runtime = root(), reads: string[] = [];
         const value = JSON.stringify({ version: 1, appearance: { theme, visualStyle }, apiKey: "SECRET" });
         // A stale attribute must be removed by either initialization path.
-        for (const target of [element, runtime]) { target.setAttribute("data-theme", "dark"); target.setAttribute("data-visual-style", "neumorphic"); }
+        for (const target of [element, runtime]) { target.setAttribute("data-theme", "dark"); target.setAttribute("data-visual-style", "swiss"); }
         runInNewContext(themeBootstrapScript, { localStorage: { getItem: (key: string) => { reads.push(key); return value; } }, document: { documentElement: element } });
         applyAppearancePreference(runtime, parseWebPreferences(value).appearance);
         assert.deepEqual(reads, [WEB_PREFERENCES_KEY]);
         assert.deepEqual(element.attributes, runtime.attributes);
         assert.equal(element.attributes.get("data-theme"), theme === "light" || theme === "dark" ? theme : undefined);
-        assert.equal(element.attributes.get("data-visual-style"), visualStyle === "neumorphic" ? "neumorphic" : undefined);
+        assert.equal(element.attributes.get("data-visual-style"), isVisualStylePreference(visualStyle) && visualStyle !== "flat" ? visualStyle : undefined);
       }
     }
   });
 
   it("matches runtime fallbacks for missing/malformed/versioned/oversized/denied storage", () => {
-    const oversized = JSON.stringify({ version: 1, appearance: { theme: "dark", visualStyle: "neumorphic" }, ignored: " ".repeat(WEB_PREFERENCES_MAX_LENGTH) });
-    for (const value of [null, "{", "null", "[]", JSON.stringify({ version: 2, appearance: { theme: "dark", visualStyle: "neumorphic" } }), oversized]) {
+    const oversized = JSON.stringify({ version: 1, appearance: { theme: "dark", visualStyle: "swiss" }, ignored: " ".repeat(WEB_PREFERENCES_MAX_LENGTH) });
+    for (const value of [null, "{", "null", "[]", JSON.stringify({ version: 2, appearance: { theme: "dark", visualStyle: "swiss" } }), oversized]) {
       const element = root(), runtime = root();
-      element.setAttribute("data-theme", "dark"); element.setAttribute("data-visual-style", "neumorphic");
+      element.setAttribute("data-theme", "dark"); element.setAttribute("data-visual-style", "swiss");
       runInNewContext(themeBootstrapScript, { localStorage: { getItem: () => value }, document: { documentElement: element } });
       applyAppearancePreference(runtime, parseWebPreferences(value).appearance);
       assert.deepEqual(element.attributes, runtime.attributes);
       assert.equal(element.attributes.size, 0);
     }
     const element = root();
-    element.setAttribute("data-theme", "dark"); element.setAttribute("data-visual-style", "neumorphic");
+    element.setAttribute("data-theme", "dark"); element.setAttribute("data-visual-style", "swiss");
     runInNewContext(themeBootstrapScript, { get localStorage() { throw new Error("storage denied"); }, document: { documentElement: element } });
     assert.equal(element.attributes.size, 0);
   });
 
   it("changes both dimensions immediately without leaving a stale override", () => {
     const element = root();
-    applyAppearancePreference(element, { theme: "dark", visualStyle: "flat" });
-    assert.deepEqual(Object.fromEntries(element.attributes), { "data-theme": "dark" });
-    applyAppearancePreference(element, { theme: "light", visualStyle: "neumorphic" });
-    assert.deepEqual(Object.fromEntries(element.attributes), { "data-theme": "light", "data-visual-style": "neumorphic" });
-    applyAppearancePreference(element, { theme: "system", visualStyle: "neumorphic" });
-    assert.deepEqual(Object.fromEntries(element.attributes), { "data-visual-style": "neumorphic" }, "OS media changes retain the material style");
-    applyAppearancePreference(element, { theme: "system", visualStyle: "flat" });
-    assert.equal(element.attributes.size, 0);
+    for (const previous of VISUAL_STYLES) {
+      for (const visualStyle of VISUAL_STYLES) {
+        for (const theme of ["dark", "light", "system"] as const) {
+          applyAppearancePreference(element, { theme: "dark", visualStyle: previous });
+          applyAppearancePreference(element, { theme, visualStyle });
+          assert.deepEqual(Object.fromEntries(element.attributes), {
+            ...(theme === "system" ? {} : { "data-theme": theme }),
+            ...(visualStyle === "flat" ? {} : { "data-visual-style": visualStyle }),
+          }, `${previous} → ${visualStyle} in ${theme} mode`);
+        }
+      }
+    }
   });
 
   it("coexists with local Geist/cache recovery and limits suppression to the root attribute seam", () => {

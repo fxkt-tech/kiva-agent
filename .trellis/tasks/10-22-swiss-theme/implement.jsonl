@@ -1,0 +1,5 @@
+{"file":".trellis/spec/kiva-web/frontend/theme-system.md","reason":"Preserve independent color mode/style, compatible v1 appearance lifecycle, root/bootstrap parity and semantic presentation ownership while extending to Swiss."}
+{"file":".trellis/spec/kiva-web/frontend/component-guidelines.md","reason":"Retain controlled APIs, Base UI state/portal/focus behavior, exact prior-style geometry and feature test boundaries."}
+{"file":".trellis/spec/kiva-web/frontend/global-settings.md","reason":"Reuse the single browser-local store, persistent /projects subscription, auto-save/reset/cross-tab behavior and denied-storage warnings."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the style allowlist through stored decoding, runtime/pre-paint application, controls and CSS without independent special-case decoders."}
+{"file":".trellis/tasks/10-22-swiss-theme/research/current-behavior.md","reason":"Verified third-style admission gaps, fixed geometry/typography coverage, named visual-system source sections, regression seams and preserved dirty-file boundary."}

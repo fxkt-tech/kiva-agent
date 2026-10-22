@@ -8,7 +8,7 @@ The Kiva workbench follows the Codex desktop workspace visual direction while re
 
 Use semantic CSS variables instead of light-only or dark-only colors. System preference is the default; `prefers-color-scheme: dark` overrides tokens only without an explicit root theme. `data-theme="light"` / `data-theme="dark"` overrides OS preference; see [Global Web Settings](./global-settings.md) for persistence/pre-paint behavior. Tailwind semantic colors are registered through `@theme inline`.
 
-Color mode is independent of visual material: flat is the default; `data-visual-style="neumorphic"` selects the alternate material in either mode. Follow [Appearance and Theme System](./theme-system.md) for preference/bootstrap parity and material roles. Feature components consume semantic tokens without style-dependent rendering or remounts; keep existing layout, typography and dense content presentation.
+Color mode is independent of visual style: flat (“扁平化”) is the default; `data-visual-style="neumorphic"` or `"swiss"` selects an alternate appearance in either mode. Follow [Appearance and Theme System](./theme-system.md) for shared style admission, preference/bootstrap parity and presentation roles. Feature components consume semantic tokens without style-dependent rendering or remounts. Keep existing layout, local font families, type scale and dense content presentation; Swiss may vary heading weight/tracking, corner geometry and selective emphasis through optional roles while preserving exact old-style fallbacks.
 
 ```css
 /* Good: responds to both color schemes. */

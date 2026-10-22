@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences, type PreferenceGroup, type PreferencePatch, type WebPreferences } from "../shared/web-preferences";
+import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, normalizeVisualStylePreference, parseWebPreferences, type PreferenceGroup, type PreferencePatch, type WebPreferences } from "../shared/web-preferences";
 
 export interface WebPreferencesSnapshot {
   readonly preferences: WebPreferences;
@@ -21,8 +21,9 @@ const serverSnapshot: WebPreferencesSnapshot = Object.freeze({ preferences: DEFA
 export function applyAppearancePreference(root: Pick<HTMLElement, "setAttribute" | "removeAttribute">, { theme, visualStyle }: Pick<WebPreferences["appearance"], "theme" | "visualStyle">) {
   if (theme === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", theme);
-  if (visualStyle === "neumorphic") root.setAttribute("data-visual-style", "neumorphic");
-  else root.removeAttribute("data-visual-style");
+  const style = normalizeVisualStylePreference(visualStyle);
+  if (style === "flat") root.removeAttribute("data-visual-style");
+  else root.setAttribute("data-visual-style", style);
 }
 
 /** One store owns both persisted and session-local choices, never drafts or server settings. */

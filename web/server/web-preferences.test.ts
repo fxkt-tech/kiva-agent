@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWebPreferencesStore, webPreferences, type WebPreferencesEnvironment } from "../lib/web-preferences";
-import { DEFAULT_WEB_PREFERENCES, WEB_PREFERENCES_KEY, decodeWebPreferences, parseWebPreferences, type WebPreferences } from "../shared/web-preferences";
+import { DEFAULT_WEB_PREFERENCES, VISUAL_STYLES, WEB_PREFERENCES_KEY, decodeWebPreferences, isVisualStylePreference, normalizeVisualStylePreference, parseWebPreferences, type WebPreferences } from "../shared/web-preferences";
 
 function fixture(value: string | null = null) {
   const writes: string[] = [], appearances: WebPreferences["appearance"][] = [];
@@ -39,14 +39,24 @@ describe("browser preference allowlist", () => {
   });
 
   it("decodes visual style independently while keeping legacy documents flat", () => {
-    for (const visualStyle of [undefined, null, "", "flat", "skeuomorphic", "<script>", true, {}]) {
+    for (const visualStyle of [undefined, null, "", "flat", "skeuomorphic", "SWISS", "<script>", true, {}, []]) {
       const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "dark", visualStyle, conversationFontSize: 18, wrapCode: true }, conversation: { toolsExpanded: true } });
       assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 18, wrapCode: true });
       assert.equal(decoded.conversation.toolsExpanded, true);
     }
-    const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "unknown", visualStyle: "neumorphic" } });
-    assert.equal(decoded.appearance.visualStyle, "neumorphic");
-    assert.equal(decoded.appearance.theme, "system");
+    assert.deepEqual(VISUAL_STYLES, ["flat", "neumorphic", "swiss"]);
+    assert.ok(Object.isFrozen(VISUAL_STYLES));
+    for (const visualStyle of VISUAL_STYLES) {
+      const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "unknown", visualStyle } });
+      assert.equal(isVisualStylePreference(visualStyle), true);
+      assert.equal(normalizeVisualStylePreference(visualStyle), visualStyle);
+      assert.equal(decoded.appearance.visualStyle, visualStyle);
+      assert.equal(decoded.appearance.theme, "system");
+    }
+    for (const invalid of [undefined, null, "SWISS", "<script>", true, {}, []]) {
+      assert.equal(isVisualStylePreference(invalid), false);
+      assert.equal(normalizeVisualStylePreference(invalid), "flat");
+    }
     assert.equal(DEFAULT_WEB_PREFERENCES.appearance.visualStyle, "flat");
   });
 
@@ -91,9 +101,11 @@ describe("browser preference store", () => {
     assert.equal(current.store.getSnapshot().preferences.appearance.theme, "dark");
     current.store.update("appearance", { theme: "light" });
     assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "neumorphic");
+    current.store.update("appearance", { visualStyle: "swiss" });
+    assert.equal(current.store.getSnapshot().preferences.appearance.theme, "light");
     const saved = current.writes.at(-1)!;
     const reloaded = fixture(saved);
-    assert.deepEqual(reloaded.store.getSnapshot().preferences.appearance, { theme: "light", visualStyle: "neumorphic", conversationFontSize: 14, wrapCode: true });
+    assert.deepEqual(reloaded.store.getSnapshot().preferences.appearance, { theme: "light", visualStyle: "swiss", conversationFontSize: 14, wrapCode: true });
     assert.deepEqual(reloaded.appearances, [current.appearances.at(-1)]);
     current.store.update("conversation", { toolsExpanded: true });
     current.store.resetGroup("appearance");
@@ -101,7 +113,7 @@ describe("browser preference store", () => {
     assert.equal(current.store.getSnapshot().preferences.conversation.toolsExpanded, true);
     const writesBeforeSync = current.writes.length;
     current.external(saved);
-    assert.equal(current.appearances.at(-1)?.visualStyle, "neumorphic");
+    assert.equal(current.appearances.at(-1)?.visualStyle, "swiss");
     assert.equal(current.appearances.at(-1)?.theme, "light");
     current.external(null);
     assert.deepEqual(current.appearances.at(-1), DEFAULT_WEB_PREFERENCES.appearance);
@@ -112,10 +124,10 @@ describe("browser preference store", () => {
   it("retains and applies the whole appearance when storage is denied", () => {
     const current = fixture();
     current.deny();
-    current.store.update("appearance", { theme: "dark", visualStyle: "neumorphic" });
+    current.store.update("appearance", { theme: "dark", visualStyle: "swiss" });
     assert.equal(current.appearances.at(-1)?.theme, "dark");
-    assert.equal(current.appearances.at(-1)?.visualStyle, "neumorphic");
-    assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "neumorphic");
+    assert.equal(current.appearances.at(-1)?.visualStyle, "swiss");
+    assert.equal(current.store.getSnapshot().preferences.appearance.visualStyle, "swiss");
     assert.match(current.store.getSnapshot().persistenceError ?? "", /未能保存/);
     assert.deepEqual(current.writes, []);
     current.store.destroy();

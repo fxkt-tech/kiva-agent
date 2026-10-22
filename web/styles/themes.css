@@ -141,3 +141,85 @@
   --relief-light: #44474780;
   --relief-shade: #151616a6;
 }
+
+/* Swiss: paper, ink and a selective red accent; geometry never changes density. */
+:root[data-visual-style="swiss"] {
+  --background: #fafaf8;
+  --foreground: #171717;
+  --card: #ffffff;
+  --sidebar: #f0f0ed;
+  --subtle: #eeeeeb;
+  --hover: #e5e5e1;
+  --selected: #ddddd8;
+  --primary: #ba291b;
+  --primary-foreground: #ffffff;
+  --muted-foreground: #575754;
+  --faint: #74746d;
+  --border: #ccccc5;
+  --strong-border: #888882;
+  --ring: #2a2a27;
+  --success: #226844;
+  --danger: #a31d3f;
+  --warning: #8a5f12;
+  --overlay: #00000050;
+  --control-radius: 0px;
+  --popup-radius: 0px;
+  --dialog-radius: 0px;
+  --action-radius: 0px;
+  --item-radius: 0px;
+  --surface-radius: 0px;
+  --heading-weight: 700;
+  --heading-tracking: -.015em;
+  --control-shadow: none;
+  --control-hover-shadow: none;
+  --control-pressed-shadow: none;
+  --field-shadow: none;
+  --selection-shadow: none;
+  --thumb-shadow: none;
+  --composer-shadow: none;
+  --shadow: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-visual-style="swiss"]:not([data-theme="light"]) {
+    --background: #141413;
+    --foreground: #f5f5f0;
+    --card: #1c1c1a;
+    --sidebar: #10100f;
+    --subtle: #232320;
+    --hover: #2b2b27;
+    --selected: #34342e;
+    --primary: #ff7666;
+    --primary-foreground: #141413;
+    --muted-foreground: #b8b8ac;
+    --faint: #99998e;
+    --border: #3e3e37;
+    --strong-border: #696960;
+    --ring: #f5f5f0;
+    --success: #91c7a2;
+    --danger: #f3a0b5;
+    --warning: #e6c178;
+    --overlay: #00000080;
+  }
+}
+
+:root[data-theme="dark"][data-visual-style="swiss"] {
+  --background: #141413;
+  --foreground: #f5f5f0;
+  --card: #1c1c1a;
+  --sidebar: #10100f;
+  --subtle: #232320;
+  --hover: #2b2b27;
+  --selected: #34342e;
+  --primary: #ff7666;
+  --primary-foreground: #141413;
+  --muted-foreground: #b8b8ac;
+  --faint: #99998e;
+  --border: #3e3e37;
+  --strong-border: #696960;
+  --ring: #f5f5f0;
+  --success: #91c7a2;
+  --danger: #f3a0b5;
+  --warning: #e6c178;
+  --overlay: #00000080;
+}

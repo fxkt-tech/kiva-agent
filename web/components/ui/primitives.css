@@ -1,4 +1,5 @@
 /* Shared controls use the root semantic palette, including portaled surfaces. */
+:where(.badge) { border-radius: var(--item-radius, .375rem); }
 :where(.ui-button:not([data-variant="ghost"])) { box-shadow: var(--control-shadow); }
 :where(.ui-button:not([data-variant="ghost"]):hover:not(:disabled)) { box-shadow: var(--control-hover-shadow); }
 :where(.ui-button[data-variant="ghost"]:hover:not(:disabled)) { box-shadow: var(--selection-shadow); }
@@ -69,9 +70,9 @@
 }
 .ui-option-popup { width: var(--anchor-width); min-width: min(140px, calc(100vw - 16px)); max-width: calc(100vw - 16px); overflow: hidden; padding: 4px; }
 .ui-option-list { max-height: min(288px, calc(var(--available-height) - 10px)); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 4px; outline: none; }
-.ui-option { position: relative; display: flex; min-height: 30px; min-width: 0; align-items: center; gap: 8px; padding: 6px 28px 6px 8px; border-radius: 4px; font-size: 13px; line-height: 1.4; cursor: default; user-select: none; outline: none; }
+.ui-option { position: relative; display: flex; min-height: 30px; min-width: 0; align-items: center; gap: 8px; padding: 6px 28px 6px 8px; border-radius: var(--item-radius, 4px); font-size: 13px; line-height: 1.4; cursor: default; user-select: none; outline: none; }
 .ui-option[data-highlighted] { background: var(--hover); box-shadow: var(--selection-shadow); }
-.ui-option[data-selected] { font-weight: 500; }
+.ui-option[data-selected] { color: var(--primary); font-weight: 500; }
 .ui-option[data-disabled] { opacity: .4; }
 .ui-option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-option-indicator { position: absolute; right: 7px; display: grid; width: 16px; height: 16px; flex: none; place-items: center; }
@@ -82,7 +83,7 @@
 .ui-combobox-input { width: 100%; height: 100%; min-width: 0; flex: 1; padding: 5px 5px 5px 9px; border: 0; border-radius: inherit; background: transparent; color: inherit; text-overflow: ellipsis; font: inherit; }
 .ui-combobox-input:focus-visible,
 .ui-combobox-action:focus-visible { outline: none; box-shadow: none; }
-.ui-combobox-action { display: inline-grid; width: 24px; height: 24px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; }
+.ui-combobox-action { display: inline-grid; width: 24px; height: 24px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--action-radius, 4px); color: var(--muted-foreground); background: transparent; }
 .ui-combobox-action:hover:not(:disabled) { background: var(--hover); color: var(--foreground); box-shadow: var(--selection-shadow); }
 .ui-combobox-action:active:not(:disabled) { box-shadow: var(--control-pressed-shadow); }
 .ui-combobox-action:disabled { opacity: .45; }
@@ -97,7 +98,7 @@
 .ui-switch[data-size="sm"] .ui-switch-thumb { width: 12px; height: 12px; }
 .ui-switch[data-size="sm"] .ui-switch-thumb[data-checked] { transform: translateX(10px); }
 .ui-switch[data-disabled] { cursor: default; opacity: .45; }
-.ui-checkbox { display: inline-grid; width: 16px; height: 16px; flex: none; place-items: center; padding: 0; border: 1px solid var(--strong-border); border-radius: 4px; background: var(--background); color: var(--primary-foreground); box-shadow: var(--field-shadow); cursor: pointer; }
+.ui-checkbox { display: inline-grid; width: 16px; height: 16px; flex: none; place-items: center; padding: 0; border: 1px solid var(--strong-border); border-radius: var(--action-radius, 4px); background: var(--background); color: var(--primary-foreground); box-shadow: var(--field-shadow); cursor: pointer; }
 .ui-checkbox[data-checked],
 .ui-checkbox[data-indeterminate] { border-color: var(--primary); background: var(--primary); box-shadow: var(--control-pressed-shadow); }
 .ui-checkbox[data-disabled] { cursor: default; opacity: .45; }
@@ -106,13 +107,13 @@
 .ui-dialog-overlay { position: fixed; inset: 0; background: var(--overlay); }
 .ui-dialog-content { position: fixed; top: 50%; left: 50%; display: flex; width: min(440px, calc(100vw - 32px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 32px); min-width: 0; min-height: 0; flex-direction: column; gap: 16px; overflow-y: auto; padding: 20px; transform: translate(-50%, -50%); border: 1px solid var(--strong-border); border-radius: var(--dialog-radius); color: var(--foreground); background: var(--card); box-shadow: var(--shadow); outline: none; font-size: 13px; }
 .ui-dialog-header { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding-right: 22px; }
-.ui-dialog-title { margin: 0; font-size: 16px; line-height: 1.5; font-weight: 600; letter-spacing: -.02em; }
+.ui-dialog-title { margin: 0; font-size: 16px; line-height: 1.5; font-weight: var(--heading-weight, 600); letter-spacing: var(--heading-tracking, -.02em); }
 .ui-dialog-description { margin: 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .ui-dialog-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .ui-dialog-close { position: absolute; top: 10px; right: 10px; }
 .ui-popover-content { width: 280px; max-width: calc(100vw - 16px); max-height: var(--available-height); overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
 .ui-dropdown-menu { min-width: 160px; max-width: calc(100vw - 16px); max-height: var(--available-height); overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
-.ui-dropdown-menu-item { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 12px; line-height: 1.5; user-select: none; outline: none; cursor: default; }
+.ui-dropdown-menu-item { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--item-radius, 4px); font-size: 12px; line-height: 1.5; user-select: none; outline: none; cursor: default; }
 .ui-dropdown-menu-item svg { width: 14px; height: 14px; flex: none; }
 .ui-dropdown-menu-item[data-highlighted] { color: var(--foreground); background: var(--hover); box-shadow: var(--selection-shadow); }
 .ui-dropdown-menu-item[data-variant="destructive"] { color: var(--danger); }

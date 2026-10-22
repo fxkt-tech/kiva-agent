@@ -1,0 +1,5 @@
+{"file":".trellis/spec/kiva-web/frontend/theme-system.md","reason":"Check three-style admission/parity, flat fallback, style/mode independence and unchanged old-style presentation/lifecycle."}
+{"file":".trellis/spec/kiva-web/frontend/component-guidelines.md","reason":"Review shared/native material roles, public interfaces, exact fallbacks, circular controls, focus cues and overlay behavior."}
+{"file":".trellis/spec/kiva-web/frontend/global-settings.md","reason":"Verify setting labels, browser persistence/first paint, /projects cross-tab updates, reset, storage failures and retained current work."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit the single style contract across preference, bootstrap, root and CSS boundaries; reject business/rendering style branches."}
+{"file":".trellis/tasks/10-22-swiss-theme/research/current-behavior.md","reason":"Review against actual ownership, permitted compact Swiss scope, authoritative visual sections, regression seams and existing unrelated work."}

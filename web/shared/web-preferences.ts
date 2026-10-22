@@ -6,8 +6,17 @@ export const SHORTCUT_ACTIONS = ["newSession", "openCommands", "focusComposer", 
 export type ShortcutAction = typeof SHORTCUT_ACTIONS[number];
 export type ShortcutBinding = Readonly<{ key: string; mod: boolean; alt: boolean; shift: boolean }>;
 export type ThemePreference = "system" | "light" | "dark";
-export type VisualStylePreference = "flat" | "neumorphic";
+export const VISUAL_STYLES = Object.freeze(["flat", "neumorphic", "swiss"] as const);
+export type VisualStylePreference = typeof VISUAL_STYLES[number];
 export type SendMode = "enter" | "mod-enter";
+
+export function isVisualStylePreference(value: unknown): value is VisualStylePreference {
+  return typeof value === "string" && VISUAL_STYLES.some((style) => style === value);
+}
+
+export function normalizeVisualStylePreference(value: unknown): VisualStylePreference {
+  return isVisualStylePreference(value) ? value : "flat";
+}
 
 export interface WebPreferences {
   readonly version: 1;
@@ -107,7 +116,7 @@ export function decodeWebPreferences(value: unknown): WebPreferences {
     version: 1,
     appearance: Object.freeze({
       theme: appearance.theme === "light" || appearance.theme === "dark" ? appearance.theme : "system",
-      visualStyle: appearance.visualStyle === "neumorphic" ? "neumorphic" : "flat",
+      visualStyle: normalizeVisualStylePreference(appearance.visualStyle),
       conversationFontSize: appearance.conversationFontSize === 16 || appearance.conversationFontSize === 18 ? appearance.conversationFontSize : 14,
       wrapCode: typeof appearance.wrapCode === "boolean" ? appearance.wrapCode : false,
     }),
