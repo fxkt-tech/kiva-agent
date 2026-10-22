@@ -17,19 +17,26 @@ export function useJsonlTreeNavigation() {
   const [filter, setFilter] = useState<TreeFilter>("default");
   const [page, setPage] = useState(0);
   const [focused, setFocused] = useState<number>();
-  return { search, setSearch, filter, setFilter, page, setPage, focused, setFocused };
+  const synchronizedSelection = useRef<{ activeLine?: number; search: string; filter: TreeFilter } | undefined>(undefined);
+  return { search, setSearch, filter, setFilter, page, setPage, focused, setFocused, synchronizedSelection };
 }
 export function JsonlTree({ session, activeLine, branchLines, onSelect, navigation }: { session: JsonlSession; activeLine?: number; branchLines: ReadonlySet<number>; onSelect(line: number): void; navigation: ReturnType<typeof useJsonlTreeNavigation> }) {
-  const { search, setSearch, filter, setFilter, page, setPage, focused, setFocused } = navigation;
+  const { search, setSearch, filter, setFilter, page, setPage, focused, setFocused, synchronizedSelection } = navigation;
   const list = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef(false);
   const rows = useMemo(() => filterJsonlTree(session, { filter, search, activeLine }), [session, filter, search, activeLine]);
-  const offset = Math.min(page * JSONL_TREE_WINDOW, Math.max(0, Math.floor((rows.length - 1) / JSONL_TREE_WINDOW) * JSONL_TREE_WINDOW));
+  const lastPage = Math.max(0, Math.ceil(rows.length / JSONL_TREE_WINDOW) - 1);
+  const offset = Math.min(page, lastPage) * JSONL_TREE_WINDOW;
   const visible = rows.slice(offset, offset + JSONL_TREE_WINDOW);
   useEffect(() => {
+    const previous = synchronizedSelection.current;
+    synchronizedSelection.current = { activeLine, search, filter };
+    // Start at page one; retain manual paging when the mobile tree remounts.
+    if (!previous) { setFocused(activeLine); return; }
+    if (previous.activeLine === activeLine && previous.search === search && previous.filter === filter) return;
     const position = rows.findIndex((row) => row.record.line === activeLine);
     setPage(position < 0 ? 0 : Math.floor(position / JSONL_TREE_WINDOW)); setFocused(activeLine);
-  }, [activeLine, rows]);
+  }, [activeLine, rows, search, filter, synchronizedSelection]);
   useEffect(() => { if (list.current) list.current.scrollTop = 0; }, [offset]);
   function focusAt(index: number) {
     const row = rows[Math.max(0, Math.min(rows.length - 1, index))];
@@ -62,7 +69,7 @@ export function JsonlTree({ session, activeLine, branchLines, onSelect, navigati
       </button>)}
       {!rows.length && <p className="jsonl-tree-empty">没有匹配记录</p>}
     </div>
-    <nav className="jsonl-tree-pagination" aria-label="会话树分页"><button type="button" disabled={offset === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>上一页</button><span>{rows.length ? `${offset + 1}–${Math.min(offset + JSONL_TREE_WINDOW, rows.length)} / ${rows.length}` : "0 条"}</span><button type="button" disabled={offset + JSONL_TREE_WINDOW >= rows.length} onClick={() => setPage((value) => value + 1)}>下一页</button></nav>
+    <nav className="jsonl-tree-pagination" aria-label="会话树分页"><button type="button" disabled={offset === 0} onClick={() => setPage(0)}>首页</button><button type="button" disabled={offset === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>上一页</button><span>{rows.length ? `${offset + 1}–${Math.min(offset + JSONL_TREE_WINDOW, rows.length)} / ${rows.length}` : "0 条"}</span><button type="button" disabled={offset + JSONL_TREE_WINDOW >= rows.length} onClick={() => setPage((value) => Math.min(lastPage, value + 1))}>下一页</button><button type="button" disabled={offset + JSONL_TREE_WINDOW >= rows.length} onClick={() => setPage(lastPage)}>尾页</button></nav>
     {session.diagnostics.length > 0 && <p className="jsonl-tree-diagnostics"><AlertTriangle size={12} />{session.diagnostics.length} 条记录需核对来源，可在树中查看。</p>}
   </section>;
 }

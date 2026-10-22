@@ -134,7 +134,9 @@ describe("owned session JSONL reader", () => {
   it("bounds tree and reading DOM and reveals a searched target beyond both windows", async () => {
     const source = jsonl(Array.from({ length: 401 }, (_, index) => message(`id-${index}`, index ? `id-${index - 1}` : null, `消息 ${index + 1}`)));
     await open(document(source));
-    assert.ok(records().length <= 60); assert.equal(tree(401).props["aria-selected"], true);
+    assert.ok(records().length <= 60); assert.equal(record(401).props["data-selected"], true, "reader still starts on the latest leaf");
+    assert.ok(tree(1)); assert.equal(tree(401), undefined, "tree starts on the first page independently of the reader");
+    assert.match(text(renderer!.root.findByProps({ className: "jsonl-tree-pagination" })), /1–160 \/ 401/);
     assert.ok(renderer!.root.findAllByProps({ role: "treeitem" }).length <= 160);
     const search = renderer!.root.findByProps({ "aria-label": "搜索会话树" });
     await act(() => search.props.onChange({ target: { value: '"content":"消息 201"' } }));
@@ -214,6 +216,32 @@ describe("owned session JSONL reader", () => {
     assert.ok(popup.props.initialFocus); assert.ok(popup.props.finalFocus); assert.equal(popup.props.onKeyDown, undefined);
     await act(() => renderer!.root.findAllByType(Dialog).at(-1)!.props.onOpenChange(false));
     assert.equal(closed, 0); assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 1);
+  });
+
+  it("retains manual tree paging across mobile remounts and reveals a later selected target", async () => {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { location: { origin: "http://localhost:9495" }, matchMedia() { return { matches: true, addEventListener() {}, removeEventListener() {} }; } } });
+    const source = jsonl(Array.from({ length: 401 }, (_, index) => message(`id-${index}`, index ? `id-${index - 1}` : null, `消息 ${index + 1}`)));
+    await open(document(source));
+    assert.equal(record(401).props["data-selected"], true);
+    await act(() => control("打开会话树").props.onClick()); assert.ok(tree(1)); assert.equal(tree(401), undefined);
+    const pagination = () => renderer!.root.findByProps({ className: "jsonl-tree-pagination" });
+    await act(() => pagination().findAllByType("button").find((node) => text(node) === "尾页")!.props.onClick());
+    assert.ok(tree(401)); assert.equal(tree(1), undefined);
+    await act(() => control("关闭会话树").props.onClick());
+    await act(() => toggle("展开思考").props.onChange({ target: { checked: true } }));
+    await act(() => control("打开会话树").props.onClick()); assert.ok(tree(401)); assert.equal(tree(1), undefined, "manual last page survives unrelated reader changes and tree remount");
+    await act(() => tree(350).props.onClick());
+    assert.equal(record(350).props["data-selected"], true);
+    await act(() => control("打开会话树").props.onClick()); assert.equal(tree(350).props["aria-selected"], true);
+    await act(() => pagination().findAllByType("button").find((node) => text(node) === "首页")!.props.onClick()); assert.ok(tree(1));
+    await act(() => control("关闭会话树").props.onClick());
+    await act(() => control("打开会话树").props.onClick()); assert.ok(tree(1)); assert.equal(tree(350), undefined, "manual first page is not replaced by the active target on reopen");
+    assert.equal(record(350).props["data-selected"], true);
+    await act(() => control("关闭会话树").props.onClick());
+    await act(() => renderer!.update(createElement(SessionJsonlDialog, { session: session(), onClose, initialSelection: { target: "id-200" } })));
+    await act(() => control("打开会话树").props.onClick());
+    assert.equal(tree(201).props["aria-selected"], true); assert.equal(tree(1), undefined, "a later real target change reveals its page");
+    assert.equal(record(201).props["data-selected"], true); assert.equal(requests.length, 1);
   });
 
   it("downloads the exact returned UTF-8 snapshot and names truncated snapshots explicitly", async () => {
