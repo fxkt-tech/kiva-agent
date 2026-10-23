@@ -293,3 +293,25 @@ Added first/last-page controls and default first-page navigation while retaining
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Complete running composer and prepare main integration
+<!-- trellis-session: v=2 fp=b48da3d9f92c1776 -->
+
+**Date**: 2026-10-23
+**Task**: Complete running composer and prepare main integration
+**Branch**: `feat/owned-session-viewer`
+
+### Summary
+
+Committed the approved shared send/stop action and authoritative queue cards, reconciled final task documents and archived running-composer. Independent combined review passed all 339 tests (5 root + 334 web), typecheck and diff checks. Fetched origin/main ce5f2f1 (brand logo/favicon update) for the user-authorized main merge. Preserved and excluded the original generated next-env declaration; no service restart or user session mutation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7c35157` | feat(web): align running composer interactions |
+
+### Status
+
+[OK] **Completed**
