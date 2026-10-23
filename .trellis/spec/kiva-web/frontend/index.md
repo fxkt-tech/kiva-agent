@@ -24,6 +24,7 @@ This directory records the web package's component boundaries, presentation cont
 | [Appearance and Theme System](./theme-system.md) | Independent color mode/visual style, compatible preference lifecycle, material tokens and browser verification | Documented |
 | [Scoped Workspace Resources](./workspace-routing.md) | URL identity, passive reads, isolated session execution, scoped events/drafts and safe cleanup | Documented |
 | [Global Web Settings](./global-settings.md) | Browser preferences/shortcuts, settings modal, safe provider credentials, installation endpoints and runtime refresh | Documented |
+| [OpenAI Authorization](./openai-authorization.md) | Explicit ChatGPT login, bounded attempts, guarded credential commit/sign-out and passive-read boundaries | Documented |
 
 ---
 

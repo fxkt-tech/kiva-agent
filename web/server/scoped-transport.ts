@@ -12,6 +12,8 @@ import { readModelDefaults } from "./model-catalog";
 import { isModelConfiguration } from "../shared/model-configuration";
 import { isProviderId, isSaveCredentialInput, isSaveDefaultsInput, isSaveProviderInput } from "../shared/installation-settings";
 import { InstallationSettingsService } from "./installation-settings";
+import type { AuthorizationOptions } from "./provider-authorization";
+import { isAuthorizationId, isAuthorizationInput, isAuthorizationRevisionInput, isBeginAuthorizationInput } from "../shared/provider-authorization";
 import { parseSettingsJson } from "./settings-files";
 
 export interface ScopedTransportOptions {
@@ -19,15 +21,17 @@ export interface ScopedTransportOptions {
   repository: SessionRepository;
   manager: RuntimeManager;
   allowedOrigins: string[];
+  authorization?: AuthorizationOptions;
 }
 
 /** Importable composition seam used by the production server and isolated browser fixtures. */
-export function createScopedTransport({ registry, repository, manager, allowedOrigins }: ScopedTransportOptions) {
+export function createScopedTransport({ registry, repository, manager, allowedOrigins, authorization }: ScopedTransportOptions) {
   const allowed = (request: IncomingMessage) => !request.headers.origin || allowedOrigins.includes(request.headers.origin);
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
-  const settings = new InstallationSettingsService(registry.installationRoot, manager);
+  const settings = new InstallationSettingsService(registry.installationRoot, manager, authorization);
 
   return {
+    close: () => settings.close(),
     allowed,
     isEventPath(request: IncomingMessage) { return /^\/api\/projects\/[^/]+\/sessions\/[^/]+\/events$/.test(parse(request).pathname); },
     async handle(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
@@ -40,6 +44,34 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         if (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/")) {
           if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "安装设置不接受查询参数。", 400);
           const path = url.pathname;
+          const oauthBase = "/api/settings/providers/openai/oauth";
+          if (path === oauthBase || path.startsWith(`${oauthBase}/`)) {
+            if (!allowed(request)) throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
+            if (path === oauthBase && request.method === "POST") {
+              const body = await readSettingsObject(request);
+              if (!isBeginAuthorizationInput(body)) throw new WorkspaceError("invalid_authorization", "请重新加载授权状态后重试。", 400);
+              sendJson(response, 202, await settings.authorization.begin(body));
+            } else if (path === `${oauthBase}/logout` && request.method === "POST") {
+              const body = await readSettingsObject(request);
+              if (!isAuthorizationRevisionInput(body)) throw new WorkspaceError("invalid_authorization", "请重新加载授权状态后重试。", 400);
+              sendJson(response, 200, await settings.logoutOpenAI(body.revision));
+            } else {
+              const route = /^\/api\/settings\/providers\/openai\/oauth\/([^/]+)(?:\/(input|cancel))?$/.exec(path);
+              if (!route || !isAuthorizationId(route[1])) throw new WorkspaceError("invalid_authorization", "授权记录无效。", 400);
+              const [, id, action] = route;
+              if (!action && request.method === "GET") sendJson(response, 200, settings.authorization.read(id));
+              else if (action === "input" && request.method === "POST") {
+                const body = await readSettingsObject(request);
+                if (!isAuthorizationInput(body)) throw new WorkspaceError("invalid_authorization_input", "请粘贴完整的授权回调地址。", 400);
+                sendJson(response, 200, settings.authorization.submit(id, body));
+              } else if (action === "cancel" && request.method === "POST") {
+                const body = await readSettingsObject(request);
+                if (Object.keys(body).length) throw new WorkspaceError("invalid_authorization", "取消授权请求无效。", 400);
+                sendJson(response, 200, await settings.authorization.cancel(id));
+              } else methodNotAllowed();
+            }
+            return true;
+          }
           if (path === "/api/settings" && request.method === "GET") sendJson(response, 200, await settings.read());
           else if (path === "/api/settings/models" && request.method === "GET") sendJson(response, 200, await settings.catalog());
           else if (path === "/api/settings/defaults" && request.method === "POST") {

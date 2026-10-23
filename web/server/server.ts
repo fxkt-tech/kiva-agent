@@ -41,6 +41,7 @@ server.listen(port, host, () => console.log(`Kiva Web listening on http://${host
 async function shutdown() {
   sockets.clients.forEach((socket) => socket.close(1001, "Server shutting down"));
   server.close(); server.closeAllConnections();
+  await transport.close();
   await manager.stop();
   process.exit(0);
 }

@@ -1,3 +1,4 @@
+import type { Credential, CredentialStore, OAuthCredential } from "@earendil-works/pi-ai";
 import { ModelRuntime, CredentialSynchronizationError } from "@earendil-works/pi-coding-agent";
 import { lstat, mkdir, mkdtemp, open, rename, rmdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -5,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { isProviderDefinition, isProviderId, isSaveCredentialInput, type InstallationSettings, type ProviderCredentialStatus, type ProviderDefinition, type ProviderSettings } from "../shared/installation-settings";
+import { isProviderDefinition, isProviderId, isSaveCredentialInput, type AuthorizationCapability, type InstallationSettings, type ProviderCredentialStatus, type ProviderDefinition, type ProviderSettings } from "../shared/installation-settings";
 import { agentDirectory, EditRevisions, isRecord, ownValue, readSettingsFile, settingsError, type FileSnapshot } from "./settings-files";
 
 // Verified Pi 1.3.0 envApiKeyAuth single-secret flows. Ambient/multi-field providers stay read-only.
@@ -56,6 +57,16 @@ function safeDefinition(id: string, value: unknown): ProviderDefinition | undefi
   return isProviderDefinition(result) ? result : undefined;
 }
 
+
+function isStoredOAuth(value: unknown): value is OAuthCredential {
+  return isRecord(value) && value.type === "oauth" && typeof value.access === "string" && !!value.access && typeof value.refresh === "string" && !!value.refresh && typeof value.expires === "number" && Number.isFinite(value.expires);
+}
+function openAICapability(source: Awaited<ReturnType<ProviderConfiguration["sources"]>> | undefined, raw: unknown): AuthorizationCapability {
+  const safeKey = simpleStoredCredential(raw) && isRecord(raw) && isSaveCredentialInput({ revision: "authorization_revision", apiKey: raw.key });
+  const allowed = !!source && ownValue(source.providers, "openai") === undefined && (raw === undefined || safeKey || isStoredOAuth(raw));
+  return { canLogin: allowed, canLogout: allowed && isStoredOAuth(raw), ...(!allowed ? { reason: "OpenAI 使用自定义接口、高级认证或不可用配置，请在配置文件中管理。" } : {}) };
+}
+
 export class ProviderConfiguration {
   readonly revisions = new EditRevisions();
   constructor(readonly root: string) {}
@@ -83,7 +94,7 @@ export class ProviderConfiguration {
       const rawAuth = source ? ownValue(source.auth.value, id) : undefined;
       const credential = this.credential(id, configured, rawAuth, source?.auth, source?.models.fingerprint, !!source, !!builtin, !!definition);
       const editable = !!source && !!definition && (rawAuth === undefined || simpleStoredCredential(rawAuth));
-      providers.push({ id, name: configured ? id : builtin?.name ?? id, kind: configured ? "configured" : "builtin", editable, ...(!editable ? { readOnlyReason: configured ? readOnlyReason : "内置提供方的定义由 Pi 管理；可新增兼容提供方。" } : {}), ...(definition ? { definition } : {}), credential });
+      providers.push({ ...(id === "openai" ? { authorization: openAICapability(source, rawAuth) } : {}), id, name: configured ? id : builtin?.name ?? id, kind: configured ? "configured" : "builtin", editable, ...(!editable ? { readOnlyReason: configured ? readOnlyReason : "内置提供方的定义由 Pi 管理；可新增兼容提供方。" } : {}), ...(definition ? { definition } : {}), credential });
     }
     providers.sort((a, b) => a.id.localeCompare(b.id));
     return { revision: this.revisions.issue("definitions", source?.models.fingerprint ?? "unavailable"), providers, canAddProvider: !!source, ...(!source ? { issue: "配置文件不可用或不安全，编辑已禁用；修复后请重新加载。" } : {}), versions, check: { status: "ok", checkedAt: new Date().toISOString() } };
@@ -101,6 +112,71 @@ export class ProviderConfiguration {
     if (definition && !compatible) safe = false;
     return { source, configured: configuredProvider(id, definition, raw), editable: safe, revision: this.revisions.issue(`credential:${id}`, `${auth?.fingerprint ?? "unavailable"}:${modelsFingerprint ?? "unavailable"}`), ...(!safe ? { readOnlyReason } : {}) };
   }
+
+  async requireOpenAIAuthorization(revision: string, logout = false) {
+    const source = await this.sources();
+    const provider = (await this.metadata()).providers.find((entry) => entry.id === "openai");
+    if (!provider?.authorization?.[logout ? "canLogout" : "canLogin"]) throw settingsError("authorization_unavailable", "当前 OpenAI 配置不支持此授权操作，请检查高级配置后重试。");
+    if (provider.credential.revision !== revision) throw settingsError("configuration_conflict", "认证配置已变化，请重新加载后再试。");
+    return source;
+  }
+
+  /** Narrow public CredentialStore adapter: shares Pi's auth.json.lock, never resolves keys. */
+  async mutateOpenAIAuthorization(revision: string, credential: OAuthCredential | undefined, signal: AbortSignal) {
+    if (credential !== undefined && !isStoredOAuth(credential)) throw settingsError("authorization_failed", "授权响应无效，请重试。", 502);
+    const before = await this.requireOpenAIAuthorization(revision, credential === undefined);
+    signal.throwIfAborted();
+    const directory = await agentDirectory(this.root, true), identity = await lstat(directory);
+    const locks: { path: string; dev: number; ino: number }[] = [];
+    let temporary: string | undefined;
+    try {
+      // The first lock cooperates with Web configuration writers, the second with Pi.
+      // Fail fast on either live or stale locks; never remove another process's lock.
+      for (const name of [".models.json.kiva-lock", "auth.json.lock"]) {
+        const path = join(directory, name);
+        try { await mkdir(path, { mode: 0o700 }); } catch { throw settingsError("configuration_locked", "认证配置正在被另一操作保存，请稍后重试。"); }
+        const stat = await lstat(path); locks.push({ path, dev: stat.dev, ino: stat.ino });
+      }
+      const verify = async () => {
+        signal.throwIfAborted();
+        const current = await this.sources(), stat = await lstat(await agentDirectory(this.root));
+        if (stat.dev !== identity.dev || stat.ino !== identity.ino || current.models.fingerprint !== before.models.fingerprint || current.auth.fingerprint !== before.auth.fingerprint) throw settingsError("configuration_conflict", "认证配置已变化，请重新加载后再试。");
+        for (const lock of locks) { const actual = await lstat(lock.path); if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev !== lock.dev || actual.ino !== lock.ino) throw settingsError("configuration_locked", "认证配置锁已变化，请重试。"); }
+        return current;
+      };
+      const persist = async (change: (value: Record<string, unknown>) => Promise<void>) => {
+        const current = await verify(), value = { ...current.auth.value };
+        await change(value);
+        temporary = join(directory, `.auth-${randomUUID()}.tmp`);
+        const file = await open(temporary, "wx", 0o600);
+        try { await file.writeFile(`${JSON.stringify(value, null, 2)}\n`); await file.sync(); } finally { await file.close(); }
+        await verify();
+        await rename(temporary, join(directory, "auth.json")); temporary = undefined;
+      };
+      const store: CredentialStore = {
+        read: async () => undefined,
+        list: async () => [],
+        modify: async (id, change) => {
+          if (id !== "openai") throw settingsError("authorization_unavailable");
+          let saved: Credential | undefined;
+          await persist(async (value) => { const raw = ownValue(value, id); saved = await change(raw as Credential | undefined); if (!saved) throw settingsError("authorization_failed"); value[id] = saved; });
+          return saved;
+        },
+        delete: async (id) => {
+          if (id !== "openai") throw settingsError("authorization_unavailable");
+          await persist(async (value) => { if (!isStoredOAuth(ownValue(value, id))) throw settingsError("configuration_conflict"); delete value[id]; });
+        },
+      };
+      if (credential) await store.modify("openai", async () => credential, { signal });
+      else await store.delete("openai", { signal });
+    } finally {
+      if (temporary) await unlink(temporary).catch(() => {});
+      for (const lock of locks.reverse()) {
+        try { const actual = await lstat(lock.path); if (actual.dev === lock.dev && actual.ino === lock.ino && actual.isDirectory() && !actual.isSymbolicLink()) await rmdir(lock.path); } catch { /* Never remove a substituted lock. */ }
+      }
+    }
+  }
+
   async saveDefinition(definition: ProviderDefinition, revision: string) {
     if (!isProviderDefinition(definition)) throw settingsError("invalid_provider", "提供方配置无效，请检查接口、地址和模型字段。", 400);
     const preflight = await this.sources();

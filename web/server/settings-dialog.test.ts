@@ -87,6 +87,115 @@ describe("global settings dialog", () => {
     for (const [name, value] of [["window", original.window], ["navigator", original.navigator]] as const) Object.defineProperty(globalThis, name, { configurable: true, value });
   });
 
+  function openAIMetadata(source: "none" | "stored" | "oauth" = "none") {
+    settings = { ...settings, providers: [...settings.providers.filter((entry) => entry.id !== "openai"), { id: "openai", name: "OpenAI", kind: "builtin", editable: false, authorization: { canLogin: true, canLogout: source === "oauth" }, credential: { source, configured: source !== "none", editable: source !== "oauth", revision: `openai_revision_${source}_1234` } }] };
+    return settings;
+  }
+  const authRoute = "/api/settings/providers/openai/oauth";
+  const authAttempt = (id = "auth_attempt_first_123456") => ({ id, status: "awaiting_authorization", expiresAt: "2027-01-01T00:00:00.000Z", authorizationUrl: "https://auth.openai.com/api/accounts/authorize?state=fixture", promptId: "auth_prompt_first_123456" });
+
+  it("connects ChatGPT from Models, confirms replacement and local logout, and leaves model defaults explicit", async () => {
+    openAIMetadata("stored");
+    extra = async (path) => {
+      if (path === authRoute) { openAIMetadata("oauth"); return Response.json({ ...authAttempt(), status: "succeeded", authorizationUrl: undefined, promptId: undefined, result: { settings, catalog: { ...catalog, revision: "catalog_auth_confirmed" } } }); }
+      if (path === `${authRoute}/logout`) { openAIMetadata(); return Response.json({ settings, catalog }); }
+    };
+    await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("使用 ChatGPT 登录")); assert.equal(requests.filter((request) => request.body).length, 0);
+    assert.match(text(root()), /替换 OpenAI 认证/);
+    await click(button("继续授权"));
+    assert.match(text(root().findByProps({ "aria-label": "OpenAI ChatGPT 授权" })), /已连接 ChatGPT/);
+    await click(button("退出登录")); assert.match(text(root()), /不会撤销 OpenAI 端授权/);
+    await click(button("确认退出")); assert.match(text(root()), /尚未连接 ChatGPT/);
+    assert.equal(requests.filter((request) => request.path === "/api/settings/defaults").length, 0);
+  });
+
+  it("keeps cancelled or newer attempts safe from delayed polling responses", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    openAIMetadata(); const delayed = deferred<Response>(); let begins = 0;
+    extra = async (path) => {
+      if (path === authRoute) return Response.json(authAttempt(++begins === 1 ? "auth_attempt_first_123456" : "auth_attempt_second_123456"));
+      if (path === `${authRoute}/auth_attempt_first_123456`) return delayed.promise;
+      if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(path.includes("second") ? "auth_attempt_second_123456" : undefined), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
+    };
+    await open(); await click(button("使用 ChatGPT 登录"));
+    await act(async () => { t.mock.timers.tick(250); await settle(); });
+    await click(button("取消授权")); assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+    await click(button("使用 ChatGPT 登录"));
+    await act(async () => { delayed.resolve(Response.json(authAttempt())); await settle(); });
+    const link = root().findByProps({ href: authAttempt().authorizationUrl }); assert.equal(link.props.rel, "noopener noreferrer");
+    await click(button("取消授权")); assert.match(text(root()), /授权已取消/);
+  });
+
+  it("shows saved-with-warning and reloads safe metadata after login and logout confirmation failures", async () => {
+    openAIMetadata();
+    extra = async (path) => {
+      if (path === authRoute) {
+        openAIMetadata("oauth");
+        return Response.json({ ...authAttempt(), status: "succeeded", authorizationUrl: undefined, promptId: undefined, refreshRequired: true });
+      }
+      if (path === `${authRoute}/logout`) { openAIMetadata(); return Response.json({ refreshRequired: true }); }
+    };
+    await open(); await click(button("使用 ChatGPT 登录"));
+    assert.match(text(root()), /已连接 ChatGPT/);
+    assert.match(text(root()), /授权设置已保存，但状态暂时无法刷新/);
+    assert.equal(text(root()).includes("ChatGPT 授权未确认"), false);
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+    assert.equal(requests.filter((request) => request.path === "/api/settings" && !request.body).length, 2);
+    await click(button("退出登录")); await click(button("确认退出"));
+    assert.match(text(root()), /尚未连接 ChatGPT/);
+    assert.match(text(root()), /授权设置已保存，但状态暂时无法刷新/);
+    assert.equal(text(root()).includes("ChatGPT 授权未确认"), false);
+    assert.equal(requests.filter((request) => request.path === "/api/settings" && !request.body).length, 3);
+    assert.equal(requests.filter((request) => request.path === "/api/settings/defaults").length, 0);
+  });
+
+  it("recovers missing authorization records after a server restart so Settings can close and login can restart", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.startsWith(authRoute + "/") ? Response.json({ code: "authorization_not_found", error: "SECRET_NOT_FOR_UI" }, { status: 404 }) : undefined;
+    await open(); await click(button("使用 ChatGPT 登录"));
+    await act(async () => { t.mock.timers.tick(250); await settle(); });
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+    assert.ok(button("使用 ChatGPT 登录")); assert.equal(text(root()).includes("SECRET_NOT_FOR_UI"), false);
+    await click(root().findByProps({ "aria-label": "关闭设置" })); assert.equal(closes, 1);
+  });
+
+  it("recovers a cancel response that no longer has a server-side attempt", async () => {
+    openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ code: "authorization_not_found" }, { status: 404 }) : undefined;
+    await open(); await click(button("使用 ChatGPT 登录")); await click(button("取消授权"));
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false); assert.ok(button("使用 ChatGPT 登录"));
+  });
+
+  it("clears transient polling failures after recovery and never retains callback codes after submission", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] }); openAIMetadata(); let polls = 0;
+    extra = async (path) => {
+      if (path === authRoute) return Response.json(authAttempt());
+      if (path.endsWith("/input")) return Response.json({ ...authAttempt(), promptId: undefined });
+      if (path === `${authRoute}/auth_attempt_first_123456`) return ++polls === 1 ? Response.json({ code: "authorization_failed", error: "SECRET_NOT_FOR_UI" }, { status: 503 }) : Response.json(authAttempt());
+      if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
+    };
+    await open(); await click(button("使用 ChatGPT 登录"));
+    await act(async () => { t.mock.timers.tick(250); await settle(); }); assert.match(text(root()), /ChatGPT 授权未确认/);
+    await act(async () => { t.mock.timers.tick(750); await settle(); }); assert.equal(text(root()).includes("ChatGPT 授权未确认"), false);
+    await change("ChatGPT 授权回调地址", "http://127.0.0.1:1455/auth/callback?code=CALLBACK_PRIVATE&state=fixture");
+    await click(button("提交回调地址"));
+    assert.equal(text(root()).includes("CALLBACK_PRIVATE"), false);
+    assert.equal(root().findAllByProps({ "aria-label": "ChatGPT 授权回调地址" }).length, 0);
+    await click(button("取消授权"));
+  });
+
+  it("retries an ambiguous authorization begin using the same operation identity", async () => {
+    openAIMetadata(); const ids: string[] = [];
+    extra = async (path, body) => {
+      if (path === authRoute) { ids.push(String(body?.operationId)); if (ids.length === 1) throw new Error("SECRET_NOT_FOR_UI"); return Response.json(authAttempt()); }
+      if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
+    };
+    await open(); await click(button("使用 ChatGPT 登录")); assert.equal(text(root()).includes("SECRET_NOT_FOR_UI"), false);
+    await click(button("重试授权")); assert.equal(ids.length, 2); assert.equal(ids[0], ids[1]); await click(button("取消授权"));
+  });
+
   it("opens five keyboard categories without commands and blocks global dispatch until unmount", async () => {
     await open();
     assert.deepEqual(root().findAllByProps({ role: "tab" }).map(text), ["外观", "快捷键", "模型", "会话", "关于"]);
