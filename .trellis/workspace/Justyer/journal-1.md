@@ -349,3 +349,25 @@ Added Settings > Models ChatGPT authorization with KivA agent hint and guarded l
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Optimize project directory loading
+<!-- trellis-session: v=2 fp=554d41c0c3384a1a -->
+
+**Date**: 2026-10-23
+**Task**: Optimize project directory loading
+**Branch**: `perf/project-files-loading`
+
+### Summary
+
+Removed duplicate bootstrap directory reads; added bounded async Git/filesystem enumeration, in-flight sharing and stable tree inputs; restored listings beyond 1000 files. Verified root checks, 360 web tests, production build and isolated desktop/mobile browser flows. Paired directory-request benchmarks improved P50 about 59% on small/10000-file fixtures; remaining sidebar/registry bottlenecks documented. User approved commit, main merge, temporary branch deletion and push. Preserved unrelated web/next-env.d.ts change.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `38ccc79` | perf(web): optimize project directory loading |
+
+### Status
+
+[OK] **Completed**
