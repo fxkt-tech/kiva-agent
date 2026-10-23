@@ -142,7 +142,11 @@ describe("routed workspace features", () => {
         return Response.json({ revision: "catalog_revision_1234", defaults, models: [{ ...snapshot().models[0], thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "alternate-model", thinkingLevels: ["off", "medium", "high"] }, { ...snapshot().models[0], id: "plain-model", reasoning: false, thinkingLevels: ["off"] }] });
       }
       if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: body.workspaceMode === "current-branch" ? currentBranchSession("created") : session("created") });
-      if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
+      if (/^\/api\/projects\/(alpha|beta)\/sessions\?collection=/.test(url)) {
+        const collection = new URL(url, "http://localhost").searchParams.get("collection");
+        const projectId = url.split("/")[3];
+        return Response.json({ collection, sessions: projectId === "alpha" ? sessions.filter((item) => item.collection === collection) : [] });
+      }
       if (url.endsWith("/workspace?view=changes")) {
         const { files: _files, ...project } = workspace.project;
         return Response.json({ renderedAt: workspace.renderedAt, project: { ...project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
@@ -153,7 +157,11 @@ describe("routed workspace features", () => {
       if (url.startsWith("/api/project/directories")) { const path = new URL(url, "http://localhost").searchParams.get("path") ?? "/repo"; return Response.json({ path, parent: "/", directories: path === "/repo" ? [{ name: "other", path: "/repo/other" }] : [] }); }
       if (url.endsWith("/deletion-preview")) return Response.json(preview);
       if (url.endsWith("/continue")) return Response.json({ projectId: "alpha", sessionId: "continued", session: body.workspaceMode === "current-branch" ? currentBranchSession("continued") : session("continued") });
-      if (url.endsWith("/actions")) return Response.json({ status: "complete", history: "trashed", workspace: body.removeWorktree ? "removed" : "retained" });
+      if (url.endsWith("/actions")) {
+        const id = url.split("/")[5];
+        sessions = sessions.map((item) => item.id !== id ? item : body.type === "rename" ? { ...item, name: body.name } : { ...item, collection: body.type === "archive" ? "archived" : body.type === "delete" ? "trash" : "active" });
+        return Response.json({ status: "complete", history: "trashed", workspace: body.removeWorktree ? "removed" : "retained" });
+      }
       if (url.endsWith("/commands")) return Response.json({ accepted: true });
       if (url.endsWith("/jsonl")) { const parts = url.split("/"); const content = `${JSON.stringify({ type: "session", id: parts[5], version: 3 })}\r\n${JSON.stringify({ type: "message", id: "entry", parentId: null, message: { role: "user", content: "JSONL 原文" } })}\n`; return Response.json({ projectId: parts[3], sessionId: parts[5], fileName: "original.jsonl", content, bytes: Buffer.byteLength(content), totalBytes: Buffer.byteLength(content), truncated: false }); }
       const id = url.split("/").at(-1)!; const found = sessions.find((item) => item.id === id) ?? session(id);
@@ -377,6 +385,61 @@ describe("routed workspace features", () => {
     assert.equal(commandRequests().length, 0);
   });
 
+  it("shares one collection request between sidebar and page and keeps it alive when the sidebar collapses", async () => {
+    const pending = deferred<Response>();
+    let signal: AbortSignal | null | undefined;
+    const archived = session("archived", { collection: "archived", executable: false });
+    extraFetch = async (url, init) => {
+      if (url !== "/api/projects/alpha/sessions?collection=archived") return undefined;
+      signal = init?.signal;
+      return pending.promise;
+    };
+    await open("/projects/alpha/archive");
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha/sessions?collection=archived").length, 1);
+    assert.equal(requests.some(({ url }) => url === "/api/projects/alpha/sessions"), false);
+    await click(trigger("折叠项目 Alpha"));
+    assert.equal(signal?.aborted, false, "collection content still owns demand after sidebar collapse");
+    pending.resolve(Response.json({ collection: "archived", sessions: [archived] }));
+    await act(async () => { await settle(); });
+    assert.match(text(renderer!.root.findByProps({ className: "collection-page" })), /Session archived/);
+    await click(trigger("展开项目 Alpha"));
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha/sessions?collection=archived").length, 1);
+  });
+
+  it("preserves complete sidebar search beyond one hundred rows and shareable query navigation", async () => {
+    sessions = Array.from({ length: 150 }, (_, index) => session(`item-${index}`, { name: `Session ${index}`, preview: index === 149 ? "Needle in full history" : "other preview" }));
+    await open("/projects/alpha/sessions");
+    assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 150);
+    await open("/projects/alpha/sessions?q=NEEDLE");
+    assert.deepEqual(renderer!.root.findAllByProps({ className: "session-item-title" }).map(text), ["Session 149"]);
+    await open("/projects/alpha/sessions");
+    assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 150);
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha/sessions?collection=active").length, 1);
+  });
+
+  it("refreshes only the mutated project's collections and preserves same-path diff refresh side effects", async () => {
+    visibleProjects = [{ ...p, id: "beta", name: "Beta", path: "/beta" }, p];
+    extraFetch = async (url) => url.startsWith("/api/projects/beta/sessions?collection=") ? Response.json({ collection: new URL(url, "http://localhost").searchParams.get("collection"), sessions: [] }) : undefined;
+    const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
+    await open("/projects/alpha/sessions/one/changes?path=README.md");
+    assert.equal(lists("alpha").length, 1); assert.equal(lists("beta").length, 1);
+    await click(trigger("会话操作 Session two")); await click(button("重命名"));
+    await act(() => renderer!.root.findByProps({ "aria-label": "新的会话名称" }).props.onChange({ target: { value: "Renamed two" } }));
+    await act(async () => { renderer!.root.findByProps({ className: "rename-session-form" }).props.onSubmit({ preventDefault() {} }); await settle(); });
+    assert.ok(trigger("会话操作 Renamed two"));
+    assert.equal(lists("alpha").length, 2); assert.equal(lists("beta").length, 1);
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha/sessions/one/changes?path=README.md").length, 2, "rename preserves the shell's selected diff refresh");
+    await click(trigger("会话操作 Renamed two")); await click(button("归档"));
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "会话操作 Renamed two" }).length, 0);
+    await open("/projects/alpha/archive");
+    assert.ok(trigger("会话操作 Renamed two"));
+    assert.equal(lists("alpha").filter(({ url }) => url.endsWith("collection=archived")).length, 1, "sidebar and archive page share the new collection");
+    await click(trigger("会话操作 Renamed two")); await click(button("恢复"));
+    await open("/projects/alpha/sessions");
+    assert.ok(trigger("会话操作 Renamed two"));
+    assert.equal(lists("beta").length, 1, "other project lists stay confirmed through rename/archive/restore");
+  });
+
   it("renames the chosen row through an explicit form without changing the active session", async () => {
     await open(); await publish();
     await click(trigger("会话操作 Session two")); await click(button("重命名"));
@@ -393,6 +456,53 @@ describe("routed workspace features", () => {
     assert.equal(currentHref, "/projects/alpha/sessions/one");
     assert.equal(renderer!.root.findAllByProps({ role: "dialog" }).length, 0);
     assert.equal(commandRequests().length, 0);
+  });
+
+  for (const type of ["rename", "archive"] as const) it(`refreshes only the affected list after ${type} fails following a persistent effect`, async () => {
+    visibleProjects = [{ ...p, id: "beta", name: "Beta", path: "/beta" }, p];
+    const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
+    await open("/projects/alpha/sessions");
+    assert.equal(lists("alpha").length, 1); assert.equal(lists("beta").length, 1);
+    extraFetch = async (url, init) => {
+      if (url !== "/api/projects/alpha/sessions/two/actions") return undefined;
+      const body = JSON.parse(String(init?.body)); assert.equal(body.type, type);
+      sessions = sessions.map((item) => item.id !== "two" ? item : type === "rename" ? { ...item, name: "Persisted rename" } : { ...item, collection: "archived" });
+      return Response.json({ error: "Failure after persistence" }, { status: 409 });
+    };
+    await click(trigger("会话操作 Session two")); await click(button(type === "rename" ? "重命名" : "归档"));
+    if (type === "rename") {
+      await act(() => renderer!.root.findByProps({ "aria-label": "新的会话名称" }).props.onChange({ target: { value: "Candidate" } }));
+      await act(async () => { renderer!.root.findByProps({ className: "rename-session-form" }).props.onSubmit({ preventDefault() {} }); await settle(); });
+      assert.ok(trigger("会话操作 Persisted rename"));
+      assert.equal(renderer!.root.findByProps({ "aria-label": "新的会话名称" }).props.value, "Candidate", "failed rename preserves its candidate and dialog");
+    } else {
+      assert.equal(renderer!.root.findAllByProps({ "aria-label": "会话操作 Session two" }).length, 0, "a moved transcript cannot remain in the confirmed active list");
+    }
+    assert.match(text(renderer!.root), /Failure after persistence/);
+    assert.equal(lists("alpha").length, 2, "one settled mutation triggers one affected-project refresh");
+    assert.equal(lists("beta").length, 1, "a failed source mutation does not invalidate another project");
+    if (type === "archive") {
+      await open("/projects/alpha/archive");
+      assert.ok(trigger("会话操作 Session two"));
+    }
+  });
+
+  for (const operation of ["create", "continue"] as const) it(`refreshes failed-${operation} metadata in the captured project after navigation without refetching the destination list`, async () => {
+    visibleProjects = [{ ...p, id: "beta", name: "Beta", path: "/beta" }, p];
+    if (operation === "continue") sessions[0] = session("one", { legacy: true, executable: false, workspace: undefined });
+    const pending = deferred<Response>();
+    const endpoint = operation === "create" ? "/api/projects/alpha/sessions" : "/api/projects/alpha/sessions/one/continue";
+    extraFetch = async (url, init) => url === endpoint && init?.method === "POST" ? pending.promise : undefined;
+    const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
+    await open(operation === "create" ? "/projects/alpha/sessions" : "/projects/alpha/sessions/one");
+    await click(operation === "create" ? trigger("在 Alpha 中新建会话") : button("在当前分支继续"));
+    await open("/projects/beta/sessions");
+    sessions = [...sessions, session("failed", { name: "Failed workspace setup", executable: false, workspace: { ...session("failed").workspace!, state: "failed", error: "Fixture setup failed" } })];
+    await act(async () => { pending.resolve(Response.json({ error: "Workspace setup failed after metadata save" }, { status: 409 })); await settle(); });
+    assert.equal(currentHref, "/projects/beta/sessions");
+    assert.ok(trigger("会话操作 Failed workspace setup"));
+    assert.equal(lists("alpha").length, 2, "failed persisted source sessions become visible");
+    assert.equal(lists("beta").length, 1, "the new route keeps its confirmed list");
   });
 
   it("retains a failed rename candidate and blocks dismissal and duplicate submission while saving", async () => {
@@ -536,6 +646,28 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findAllByProps({ "data-slot": "alert" }).length, 0);
     await click(renderer!.root.findByProps({ "aria-label": "关闭提示：模型设置已保存" }));
     assert.equal(renderer!.root.findAllByProps({ "data-slot": "toast" }).length, 0);
+  });
+
+  it("refreshes only the model mutation's project after persisted controls are followed by a failed save", async (context) => {
+    context.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-24T00:00:00Z") });
+    visibleProjects = [{ ...p, id: "beta", name: "Beta", path: "/beta" }, p];
+    const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
+    const sourceTime = () => text(renderer!.root.findAllByProps({ className: "session-item-wrap" }).find((row) => row.findAllByProps({ href: "/projects/alpha/sessions/one" }).length)!.findByProps({ className: "session-item-time" }));
+    await open(); await publish();
+    assert.notEqual(sourceTime(), "刚刚");
+    await click(renderer!.root.findByProps({ "aria-label": "模型与思考强度" }));
+    await act(() => field("选择模型").props.onValueChange(JSON.stringify(["test", "alternate-model"])));
+    extraFetch = async (url, init) => {
+      if (url !== "/api/projects/alpha/models" || init?.method !== "POST") return undefined;
+      sessions = sessions.map((item) => item.id === "one" ? { ...item, updatedAt: "2026-10-24T00:00:00Z" } : item);
+      return Response.json({ error: "Settings write failed after controls persisted" }, { status: 500 });
+    };
+    await click(button("保存并应用"));
+    assert.match(text(renderer!.root.findByProps({ role: "dialog" })), /Settings write failed after controls persisted/);
+    assert.equal(field("选择模型").props.value, JSON.stringify(["test", "alternate-model"]), "failed save retains the candidate");
+    assert.equal(sourceTime(), "刚刚", "persisted metadata is reread even when the mutation reports failure");
+    assert.equal(lists("alpha").length, 2);
+    assert.equal(lists("beta").length, 1);
   });
 
   it("presents model and file failures with the same titled, icon-led Alert", async () => {

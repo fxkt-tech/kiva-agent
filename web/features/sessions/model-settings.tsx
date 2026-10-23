@@ -10,9 +10,9 @@ import type { ModelCatalog, ModelConfiguration } from "@/shared/model-configurat
 import type { RuntimeModel } from "@/shared/runtime-types";
 import { mutate, projectUrl } from "@/features/workspace/resources";
 
-export function ModelSettings({ projectId, sessionId, models, selection, disabled, loading, onSaved, onPending }: {
+export function ModelSettings({ projectId, sessionId, models, selection, disabled, loading, onSaved, onPending, onSettled }: {
   projectId: string; sessionId?: string; models: RuntimeModel[]; selection?: ModelConfiguration;
-  disabled: boolean; loading: boolean; onSaved(catalog: ModelCatalog): void; onPending(pending: boolean): void;
+  disabled: boolean; loading: boolean; onSaved(catalog: ModelCatalog): void; onPending(pending: boolean): void; onSettled(): void;
 }) {
   const [open, setOpen] = useState(false);
   const [candidate, setCandidate] = useState<ModelConfiguration>();
@@ -40,7 +40,7 @@ export function ModelSettings({ projectId, sessionId, models, selection, disable
       const result = await mutate<ModelCatalog>(`/api${projectUrl(projectId)}/models`, { ...candidate, ...(sessionId ? { sessionId } : {}) });
       onSaved(result); close();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setSaving(false); onPending(false); }
+    finally { onSettled(); setSaving(false); onPending(false); }
   }
   return <div className="model-settings-control"><Popover open={open} onOpenChange={(next, details) => { if (saving) { details.cancel(); return; } changeOpen(next); }}>
     <PopoverTrigger render={<button type="button" className="model-settings-trigger" ref={trigger} aria-label="模型与思考强度" disabled={disabled || loading || !models.length} title={selection ? `${selection.provider} / ${selection.modelId} · ${selection.thinkingLevel}` : "同时选择模型和思考强度"} />}>

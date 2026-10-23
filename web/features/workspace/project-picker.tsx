@@ -12,7 +12,7 @@ import { useWorkspace } from "./shell";
 
 interface Directory { path: string; parent: string | null; directories: Array<{ name: string; path: string }> }
 export function ProjectPicker({ onClose }: { onClose(): void }) {
-  const { project, projects, refresh, navigate, navigationCurrent, locationKey } = useWorkspace();
+  const { project, projects, refreshProject, navigate, navigationCurrent, locationKey } = useWorkspace();
   const [path, setPath] = useState(project?.path ?? "");
   const [directory, setDirectory] = useState<Directory>();
   const [loading, setLoading] = useState(false);
@@ -39,7 +39,7 @@ export function ProjectPicker({ onClose }: { onClose(): void }) {
     try {
       const result = await mutate<{ project: ProjectResource }>("/api/projects", { path: directory.path });
       if (!result.project.id) throw new Error("项目注册未返回标识");
-      refresh(); onClose(); if (navigationCurrent(source)) navigate(`${projectUrl(result.project.id)}/sessions`);
+      refreshProject(result.project.id); onClose(); if (navigationCurrent(source)) navigate(`${projectUrl(result.project.id)}/sessions`);
     } catch (cause) { setError({ title: "无法添加项目", message: cause instanceof Error ? cause.message : String(cause) }); }
     finally { openingRef.current = false; setOpening(false); }
   }

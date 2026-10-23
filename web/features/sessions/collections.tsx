@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Archive, FileJson2, MoreHorizontal, Pencil, RotateCcw, Trash2, X } from "lucide-react";
-import type { SessionResource, DeletionPreview, DeletionOutcome, SessionCollection } from "@/shared/workspace-contract";
+import type { SessionListItem, DeletionPreview, DeletionOutcome, SessionCollection } from "@/shared/workspace-contract";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { mutate, resourceApi, sessionUrl, useResource, projectUrl } from "@/features/workspace/resources";
+import { mutate, resourceApi, sessionUrl } from "@/features/workspace/resources";
 import { ResourceState, useWorkspace } from "@/features/workspace/shell";
+import { useSessionList } from "./session-lists";
 import { useSessionViewer } from "./session-viewer-host";
 
 function relativeTime(value: string, renderedAt: string) {
@@ -22,27 +23,25 @@ function relativeTime(value: string, renderedAt: string) {
   return `${Math.floor(minutes / 1_440)} 天`;
 }
 
-export interface Collections { active: SessionResource[]; archived: SessionResource[]; trash: SessionResource[] }
-export function useCollections(projectId: string, version = 0) { return useResource<Collections>(`/api${projectUrl(projectId)}/sessions`, version); }
-
-export function SessionRows({ projectId, sessions, loading, error }: { projectId: string; sessions: SessionResource[]; loading?: boolean; error?: string }) {
-  const { route, navigate, refresh, renderedAt } = useWorkspace();
+export function SessionRows({ projectId, sessions, loading, refreshing, error }: { projectId: string; sessions: SessionListItem[]; loading?: boolean; refreshing?: boolean; error?: string }) {
+  const { route, navigate, refreshProject, renderedAt } = useWorkspace();
   const [menu, setMenu] = useState<string>();
-  const [deleting, setDeleting] = useState<SessionResource>();
-  const [renaming, setRenaming] = useState<SessionResource>();
+  const [deleting, setDeleting] = useState<SessionListItem>();
+  const [renaming, setRenaming] = useState<SessionListItem>();
   const { openSessionViewer, viewingSession } = useSessionViewer();
   const sessionButtons = useRef(new Map<string, HTMLButtonElement>());
   const [actionError, setActionError] = useState<string>();
   const actionScope = useRef(0);
   useEffect(() => { actionScope.current += 1; setMenu(undefined); setDeleting(undefined); setRenaming(undefined); setActionError(undefined); }, [projectId, route.projectId, route.sessionId, route.section]);
-  async function act(session: SessionResource, body: object) {
+  async function act(session: SessionListItem, body: object) {
     const source = actionScope.current;
     setActionError(undefined);
-    try { await mutate(`${resourceApi({ projectId: session.projectId, sessionId: session.id })}/actions`, body); if (source === actionScope.current) setMenu((current) => current === session.id ? undefined : current); refresh(); }
+    try { await mutate(`${resourceApi({ projectId: session.projectId, sessionId: session.id })}/actions`, body); if (source === actionScope.current) setMenu((current) => current === session.id ? undefined : current); }
     catch (cause) { if (source === actionScope.current) setActionError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { refreshProject(session.projectId); }
   }
   if (error) return <Alert variant="error" title="会话列表加载失败" className="sidebar-alert">{error}</Alert>;
-  return <div className="session-rows">
+  return <div className="session-rows" aria-busy={Boolean(loading || refreshing)}>
     {sessions.map((session) => {
       const recovering = session.deletion && session.deletion.status !== "complete";
       return <div className="session-item-wrap" key={session.id}>
@@ -60,20 +59,20 @@ export function SessionRows({ projectId, sessions, loading, error }: { projectId
       </div>;
     })}
     {!sessions.length && <p className="sidebar-summary">{loading ? "正在读取会话…" : "还没有会话。"}</p>}{actionError && <Alert variant="error" title="会话操作失败" className="session-action-alert" onDismiss={() => setActionError(undefined)}>{actionError}</Alert>}
-    {deleting && <DeleteSessionDialog key={`${deleting.projectId}:${deleting.id}`} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting((current) => current?.projectId === deleting.projectId && current.id === deleting.id ? undefined : current); refresh(); }} returnFocus={sessionButtons.current.get(deleting.id)} />}
-    {renaming && <RenameSessionDialog key={`${renaming.projectId}:${renaming.id}`} session={renaming} onClose={() => setRenaming(undefined)} onRenamed={refresh} returnFocus={sessionButtons.current.get(renaming.id)} />}
+    {deleting && <DeleteSessionDialog key={`${deleting.projectId}:${deleting.id}`} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting((current) => current?.projectId === deleting.projectId && current.id === deleting.id ? undefined : current); }} returnFocus={sessionButtons.current.get(deleting.id)} />}
+    {renaming && <RenameSessionDialog key={`${renaming.projectId}:${renaming.id}`} session={renaming} onClose={() => setRenaming(undefined)} onSettled={() => refreshProject(renaming.projectId)} returnFocus={sessionButtons.current.get(renaming.id)} />}
   </div>;
 }
 
 export function SessionCollectionFeature({ projectId, collection }: { projectId: string; collection: SessionCollection }) {
-  const { version, project, projectLoading, projectError } = useWorkspace();
-  const result = useCollections(projectId, version);
+  const { project, projectLoading, projectError } = useWorkspace();
+  const result = useSessionList(projectId, collection);
   if (projectError || result.error) return <ResourceState error={projectError ?? result.error} />;
   if (projectLoading || !result.data) return <ResourceState />;
-  return <div className="collection-page"><div className="workspace-browser-heading"><p>{collection === "archived" ? "已归档" : collection === "trash" ? "最近删除" : "会话"}</p><span>{project?.name}</span></div><SessionRows projectId={projectId} sessions={result.data[collection]} /><p className="workspace-location">恢复历史不会重建已删除的工作文件。保留的分支与工作区状态以会话详情为准。</p></div>;
+  return <div className="collection-page"><div className="workspace-browser-heading"><p>{collection === "archived" ? "已归档" : collection === "trash" ? "最近删除" : "会话"}</p><span>{project?.name}</span></div><SessionRows projectId={projectId} sessions={result.data} loading={result.loading} refreshing={result.refreshing} /><p className="workspace-location">恢复历史不会重建已删除的工作文件。保留的分支与工作区状态以会话详情为准。</p></div>;
 }
 
-function RenameSessionDialog({ session, onClose, onRenamed, returnFocus }: { session: SessionResource; onClose(): void; onRenamed(): void; returnFocus?: HTMLElement | null }) {
+function RenameSessionDialog({ session, onClose, onSettled, returnFocus }: { session: SessionListItem; onClose(): void; onSettled(): void; returnFocus?: HTMLElement | null }) {
   const [name, setName] = useState(session.name);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -87,10 +86,9 @@ function RenameSessionDialog({ session, onClose, onRenamed, returnFocus }: { ses
     pendingRef.current = true; setPending(true); setError(undefined);
     try {
       await mutate(`${resourceApi({ projectId: session.projectId, sessionId: session.id })}/actions`, { type: "rename", name: candidate });
-      onRenamed();
       if (mounted.current) onClose();
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { pendingRef.current = false; if (mounted.current) setPending(false); }
+    finally { onSettled(); pendingRef.current = false; if (mounted.current) setPending(false); }
   }
   return <Dialog open onOpenChange={(next) => { if (!next && !pendingRef.current) onClose(); }}>
     <DialogContent className="project-dialog rename-session-dialog" initialFocus={input} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
@@ -105,7 +103,8 @@ function RenameSessionDialog({ session, onClose, onRenamed, returnFocus }: { ses
   </Dialog>;
 }
 
-export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }: { session: SessionResource; onClose(): void; onDeleted(): void; returnFocus?: HTMLElement | null }) {
+export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }: { session: SessionListItem; onClose(): void; onDeleted(): void; returnFocus?: HTMLElement | null }) {
+  const { refreshProject } = useWorkspace();
   const currentBranch = session.workspace?.mode === "current-branch";
   const [preview, setPreview] = useState<DeletionPreview & { deletion?: DeletionOutcome }>();
   const [outcome, setOutcome] = useState<DeletionOutcome>();
@@ -138,6 +137,7 @@ export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }
     setPending(true); setError(undefined);
     try {
       const outcome = await mutate<DeletionOutcome>(`${endpoint}/actions`, { type: "delete", confirmation: preview.confirmation, removeWorktree: selectedRemoval });
+      refreshProject(session.projectId);
       if (outcome.status !== "complete") {
         setOutcome(outcome);
         setError(`删除尚未完成：历史 ${outcome.history}，工作区 ${outcome.workspace}。${outcome.error ?? "请重新检查状态后重试。"}`);
@@ -145,7 +145,7 @@ export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }
         return;
       }
       onDeleted();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { refreshProject(session.projectId); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { pendingRef.current = false; if (mounted.current) setPending(false); }
   }
   return <Dialog open onOpenChange={(next) => { if (!next && !pendingRef.current) onClose(); }}>

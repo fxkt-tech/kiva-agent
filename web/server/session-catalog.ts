@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SessionSummary } from "../shared/types";
+import { SessionSummaryAccumulator } from "./session-summary";
 import { decodeResourceId, WorkspaceError } from "../shared/workspace-contract";
 
 export type SessionCollection = "active" | "archived" | "trash";
@@ -97,34 +98,9 @@ function listSessionFiles(root: string, skipHidden: boolean): string[] {
 }
 
 function readSession(path: string, root: string): SessionSummary {
-  const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
-  let name = "未命名会话";
-  let preview = "尚无消息预览";
-  let id = basename(path, ".jsonl");
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      if (entry.type === "session" && typeof entry.id === "string") id = entry.id;
-      if (entry.type === "session_info" && typeof entry.name === "string") name = entry.name;
-      const message = entry.message as { role?: string; content?: unknown } | undefined;
-      if (message?.role === "user") {
-        const text = messageText(message.content);
-        if (text) {
-          preview = text.replace(/\s+/g, " ").slice(0, 90);
-          if (name === "未命名会话") name = preview.slice(0, 28);
-        }
-      }
-    } catch {
-      // Ignore a partially-written trailing line while Pi is persisting a session.
-    }
-  }
-  return { id, path: relative(root, path), name, preview, updatedAt: statSync(path).mtime.toISOString() };
-}
-
-function messageText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.flatMap((item) => typeof item === "object" && item !== null && "type" in item && item.type === "text" && "text" in item && typeof item.text === "string" ? [item.text] : []).join("");
+  const summary = new SessionSummaryAccumulator(path, root);
+  for (const line of readFileSync(path, "utf8").split("\n")) summary.consume(line);
+  return summary.finish(statSync(path).mtime.toISOString());
 }
 
 function managedPath(root: string, sessionPath: string) {

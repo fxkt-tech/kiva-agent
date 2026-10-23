@@ -48,6 +48,34 @@ async function fixture(capacity = 4) {
 }
 
 describe("scoped HTTP/WebSocket transport", () => {
+  it("serves collection-scoped list summaries while preserving legacy collection responses", async (t) => {
+    const f = await fixture();
+    try {
+      const current = await f.create("summary-current"), archived = await f.create("summary-archived");
+      f.repository.action(f.project.id, archived.id, { type: "archive" });
+      const legacyList = await f.request(`${f.api}/sessions`);
+      assert.deepEqual(Object.keys(legacyList.body).sort(), ["active", "archived", "trash"]);
+      t.mock.method(f.repository, "list", () => { throw new Error("Scoped summaries must not invoke legacy detail projection"); });
+      t.mock.method(SessionCatalog.prototype, "all", () => { throw new Error("Scoped summaries must not scan the synchronous catalog"); });
+      let projectResolves = 0;
+      const resolve = f.registry.resolve.bind(f.registry);
+      t.mock.method(f.registry, "resolve", (id: string) => { projectResolves++; return resolve(id); });
+      const active = await f.request(`${f.api}/sessions?collection=active`);
+      assert.equal(active.status, 200);
+      assert.equal(active.body.collection, "active");
+      assert.deepEqual(active.body.sessions.map((session: SessionResource) => session.id), [current.id]);
+      assert.equal("controls" in active.body.sessions[0], false);
+      assert.equal("executable" in active.body.sessions[0], false);
+      assert.equal(projectResolves, 1, "route scope validation must be reused by the snapshot reader");
+      const archive = await f.request(`${f.api}/sessions?collection=archived`);
+      assert.deepEqual(archive.body.sessions.map((session: SessionResource) => session.id), [archived.id]);
+      assert.deepEqual((await f.request(`${f.api}/sessions?collection=trash`)).body.sessions, []);
+      assert.equal((await f.request(`${f.api}/sessions?collection=unknown`)).status, 400);
+      assert.equal((await f.request(`${f.api}/sessions?collection=active&collection=active`)).status, 400);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
   it("returns a changes-only projection for exact workspace routes and rejects invalid views", async () => {
     const f = await fixture();
     try {

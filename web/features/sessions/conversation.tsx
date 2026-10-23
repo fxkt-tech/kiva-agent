@@ -25,7 +25,7 @@ export function SessionFeature({ projectId, sessionId }: { projectId: string; se
 
 function Conversation({ projectId, sessionId }: { projectId: string; sessionId?: string }) {
   const { preferences } = useWebPreferences();
-  const { project, projectError, projectLoading, version, refresh, openProjectPicker, navigate, locationKey, navigationCurrent } = useWorkspace();
+  const { project, projectError, projectLoading, version, refresh, refreshProject, openProjectPicker, navigate, locationKey, navigationCurrent } = useWorkspace();
   const target = sessionId ? { projectId, sessionId } : undefined;
   const detail = useResource<SessionRuntimeRead>(target ? resourceApi(target) : undefined, version);
   const runtime = useRuntime(target);
@@ -39,7 +39,7 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
   const empty = messages.length === 0;
   const MessageViewport = empty ? "div" : ScrollArea;
   const viewportProps = empty ? {} : { viewportRef: setViewport };
-  useEffect(() => { if (runtime.sessionsVersion > 1) refresh(); }, [runtime.sessionsVersion, refresh]);
+  useEffect(() => { if (runtime.sessionsVersion > 1) refreshProject(projectId); }, [runtime.sessionsVersion, refreshProject, projectId]);
   if (projectError || detail.error || identityError) return <ResourceState error={projectError ?? detail.error ?? identityError} />;
   if (projectLoading || !project || (sessionId && !session)) return <ResourceState />;
   const quarantined = runtime.snapshot?.lifecycle === "quarantined" || detail.data?.lifecycle === "quarantined";
@@ -57,10 +57,10 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
       const result = await mutate<{ projectId: string; sessionId: string; session: SessionResource; cancelled?: boolean }>(`${resourceApi(target)}/continue`, operation.current);
       if (result.cancelled) return;
       if (result.projectId !== projectId || result.session.projectId !== projectId || result.sessionId !== result.session.id || result.sessionId === sessionId) throw new Error("继续会话返回的标识不匹配");
-      operation.current = undefined; refresh();
+      operation.current = undefined;
       if (navigationCurrent(source)) navigate(sessionUrl(projectId, result.sessionId));
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setContinuing(false); }
+    finally { refreshProject(projectId); setContinuing(false); }
   }
   return <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session", preferences.appearance.wrapCode && "conversation-wrap-code")} style={{ "--conversation-font-size": `${preferences.appearance.conversationFontSize}px` } as React.CSSProperties}>
     <div className="message-timeline">

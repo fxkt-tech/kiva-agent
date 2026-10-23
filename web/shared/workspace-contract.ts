@@ -38,6 +38,14 @@ export interface SessionResource extends SessionSummary {
   createdAt: string; sourceSessionId?: string; workspace?: SessionWorkspace;
   controls?: SessionControls; deletion?: DeletionOutcome;
 }
+/** Presentation only: list metadata never grants execution or cleanup authority. */
+export interface SessionListItem extends SessionSummary {
+  projectId: string; collection: SessionCollection; legacy: boolean;
+  createdAt: string; sourceSessionId?: string;
+  workspace?: Pick<SessionWorkspace, "mode" | "state" | "executionRoot" | "treeRoot" | "branch">;
+  deletion?: DeletionOutcome;
+}
+export interface SessionListResponse { collection: SessionCollection; sessions: SessionListItem[] }
 export interface SessionRead { session: SessionResource; messages: RuntimeMessage[] }
 export interface ExecutionDescriptor {
   installationRoot: string; historyRoot: string; executionRoot: string;

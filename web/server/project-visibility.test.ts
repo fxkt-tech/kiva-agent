@@ -59,7 +59,7 @@ describe("project presentation removal", () => {
         return Response.json({ projectId, projects });
       }
       if (url.endsWith("/models")) return Response.json({ models: [] });
-      if (url.endsWith("/sessions") && !body) return Response.json({ active: [], archived: [], trash: [] });
+      if (url.includes("/sessions?collection=") && !body) return Response.json({ collection: new URL(url, "http://localhost").searchParams.get("collection"), sessions: [] });
       if (url.endsWith("/sessions") && body) {
         const projectId = url.split("/")[3];
         return Response.json({ projectId, sessionId: "created", session: { id: "created", projectId } });

@@ -2,31 +2,31 @@ import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { buildSessionProjection, migrateSessionEntries, parseSessionEntries, SessionManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { decodeResourceId, DEFAULT_SESSION_WORKSPACE_MODE, isSessionWorkspaceMode, WorkspaceError, type CreateSessionInput, type DeleteSessionInput, type DeletionOutcome, type DeletionPreview, type ExecutionDescriptor, type ProjectResource, type RepositoryAction, type SessionCollection, type SessionControls, type SessionRead, type SessionResource, type SessionWorkspace, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
+import { decodeResourceId, DEFAULT_SESSION_WORKSPACE_MODE, isSessionWorkspaceMode, WorkspaceError, type CreateSessionInput, type DeleteSessionInput, type DeletionOutcome, type DeletionPreview, type ExecutionDescriptor, type ProjectResource, type RepositoryAction, type SessionCollection, type SessionControls, type SessionRead, type SessionListItem, type SessionResource, type SessionWorkspace, type WorkspaceRemovalInspection } from "../shared/workspace-contract";
 import { digest, ExecutionWorkspace } from "./execution-workspace";
 import { normalizeMessages } from "./runtime-hub";
 import { SessionCatalog } from "./session-catalog";
 import type { SessionJsonlDocument } from "../shared/session-jsonl";
 import { readSessionJsonl } from "./session-jsonl";
 import { WorkspaceRegistry } from "./workspace-registry";
+import { parseSessionRecord, type SessionRecord } from "./session-record";
+import { SessionListReader } from "./session-list-reader";
 
-interface SessionRecord extends SessionResource {
-  version: 1; operationId?: string; nameOverride?: string; deletionConfirmation?: string; removalStarted?: boolean;
-  deletionOrigin?: "active" | "archived";
-}
-interface RepositoryOptions { installationRoot?: string; worktreeRoot?: string; workspaces?: ExecutionWorkspace; catalog?: (root: string) => SessionCatalog }
+interface RepositoryOptions { installationRoot?: string; worktreeRoot?: string; workspaces?: ExecutionWorkspace; catalog?: (root: string) => SessionCatalog; sessionLists?: SessionListReader }
 
 /** Passive reads never instantiate Pi, create metadata or prepare a worktree. */
 export class SessionRepository {
   private readonly workspaces: ExecutionWorkspace;
   private readonly installationRoot: string;
   private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly sessionLists: SessionListReader;
   private readonly catalogFactory: (root: string) => SessionCatalog;
 
   constructor(private readonly registry: WorkspaceRegistry, options: RepositoryOptions = {}) {
     this.installationRoot = realpathSync(options.installationRoot ?? registry.installationRoot);
     this.workspaces = options.workspaces ?? new ExecutionWorkspace(this.installationRoot, options.worktreeRoot);
     this.catalogFactory = options.catalog ?? ((root) => new SessionCatalog(root));
+    this.sessionLists = options.sessionLists ?? new SessionListReader();
   }
 
   list(projectId: string, collection: SessionCollection = "active"): SessionResource[] {
@@ -40,6 +40,17 @@ export class SessionRepository {
     return [...ids].map((id) => this.resource(projectId, id, records, transcripts, project))
       .filter((session) => session.collection === collection).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
+
+  async listSummaries(projectId: string, collection: SessionCollection, registeredProject?: ProjectResource): Promise<SessionListItem[]> {
+    decodeResourceId(projectId);
+    const project = registeredProject ?? this.registry.resolve(projectId);
+    if (project.id !== projectId) throw new WorkspaceError("project_mismatch", "Project list scope does not match its registered identity.");
+    const sessions = await this.sessionLists.read(project);
+    return sessions.filter((session) => session.collection === collection);
+  }
+
+  /** Accepted runtime persistence events invalidate the same project snapshot generation. */
+  invalidateSessionLists(projectId: string) { this.sessionLists.invalidate(projectId); }
 
   read(projectId: string, sessionId: string): SessionRead {
     const session = this.resource(projectId, decodeResourceId(sessionId));
@@ -113,25 +124,28 @@ export class SessionRepository {
 
   /** Caller holds lifecycle exclusion and has quiesced an idle writer. */
   action(projectId: string, sessionId: string, action: RepositoryAction): SessionResource {
-    const record = this.ensureRecord(projectId, sessionId);
-    if (record.deletion?.status === "pending" || record.deletion?.status === "partial") throw new WorkspaceError("deletion_pending", "Finish or retry the pending deletion before changing collections.");
-    const transcript = this.catalog(projectId).find(sessionId);
-    if (action.type === "archive" && record.collection === "active") {
-      if (transcript) this.catalog(projectId).archive(transcript.path);
-      record.collection = "archived";
-    } else if (action.type === "restore" && record.collection === "archived") {
-      if (transcript) this.catalog(projectId).restore(transcript.path);
-      record.collection = "active";
-    } else if (action.type === "restore_deleted" && record.collection === "trash") {
-      if (transcript) this.catalog(projectId).restoreDeleted(transcript.path);
-      record.collection = record.deletionOrigin ?? (transcript?.path.startsWith("archived/") ? "archived" : "active");
-      if (record.deletion) record.deletion = undefined;
-      record.deletionConfirmation = undefined;
-      record.removalStarted = undefined;
-      record.deletionOrigin = undefined;
-    } else throw new WorkspaceError("invalid_collection_action", "This collection action is not available for the session.");
-    this.save(record);
-    return this.resource(projectId, sessionId);
+    this.sessionLists.invalidate(projectId);
+    try {
+      const record = this.ensureRecord(projectId, sessionId);
+      if (record.deletion?.status === "pending" || record.deletion?.status === "partial") throw new WorkspaceError("deletion_pending", "Finish or retry the pending deletion before changing collections.");
+      const transcript = this.catalog(projectId).find(sessionId);
+      if (action.type === "archive" && record.collection === "active") {
+        if (transcript) this.catalog(projectId).archive(transcript.path);
+        record.collection = "archived";
+      } else if (action.type === "restore" && record.collection === "archived") {
+        if (transcript) this.catalog(projectId).restore(transcript.path);
+        record.collection = "active";
+      } else if (action.type === "restore_deleted" && record.collection === "trash") {
+        if (transcript) this.catalog(projectId).restoreDeleted(transcript.path);
+        record.collection = record.deletionOrigin ?? (transcript?.path.startsWith("archived/") ? "archived" : "active");
+        if (record.deletion) record.deletion = undefined;
+        record.deletionConfirmation = undefined;
+        record.removalStarted = undefined;
+        record.deletionOrigin = undefined;
+      } else throw new WorkspaceError("invalid_collection_action", "This collection action is not available for the session.");
+      this.save(record);
+      return this.resource(projectId, sessionId);
+    } finally { this.sessionLists.invalidate(projectId); }
   }
 
   deletionPreview(projectId: string, sessionId: string, lifecycleRevision = ""): DeletionPreview {
@@ -326,26 +340,26 @@ export class SessionRepository {
     return readdirSync(root).filter((name) => name.endsWith(".json")).map((name) => {
       const file = join(root, name);
       if (lstatSync(file).isSymbolicLink()) throw new WorkspaceError("metadata_ownership", "Session metadata must not be a symlink.");
-      let record: SessionRecord;
-      try { record = JSON.parse(readFileSync(file, "utf8")) as SessionRecord; }
+      let text: string;
+      try { text = readFileSync(file, "utf8"); }
       catch { throw new WorkspaceError("metadata_corrupt", `Cannot read session metadata: ${name}`); }
-      if (record.version !== 1 || record.projectId !== projectId || decodeResourceId(record.id) !== name.slice(0, -5) || !["active", "archived", "trash"].includes(record.collection)
-        || typeof record.name !== "string" || typeof record.preview !== "string" || typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt)) || typeof record.updatedAt !== "string" || !Number.isFinite(Date.parse(record.updatedAt))
-        || (record.workspace && (record.workspace.projectId !== projectId || record.workspace.sessionId !== record.id
-          || (record.workspace.mode !== undefined && !isSessionWorkspaceMode(record.workspace.mode))))) throw new WorkspaceError("metadata_corrupt", `Invalid session metadata: ${name}`);
-      return record;
+      return parseSessionRecord(text, projectId, name);
     });
   }
   private save(record: SessionRecord) {
-    const root = this.metadataRoot(record.projectId);
-    mkdirSync(root, { recursive: true });
-    assertCanonicalAncestors(root);
-    record.updatedAt = new Date().toISOString();
-    const destination = join(root, `${decodeResourceId(record.id)}.json`);
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    renameSync(temporary, destination);
+    this.sessionLists.invalidate(record.projectId);
+    try {
+      const root = this.metadataRoot(record.projectId);
+      mkdirSync(root, { recursive: true });
+      assertCanonicalAncestors(root);
+      record.updatedAt = new Date().toISOString();
+      const destination = join(root, `${decodeResourceId(record.id)}.json`);
+      const temporary = `${destination}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+      renameSync(temporary, destination);
+    } finally { this.sessionLists.invalidate(record.projectId); }
   }
+
   private async exclusive<T>(key: string, action: () => T | Promise<T>): Promise<T> {
     const previous = this.operations.get(key) ?? Promise.resolve();
     const current = previous.catch(() => {}).then(action);

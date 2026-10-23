@@ -10,6 +10,7 @@ export interface RuntimeRepository {
   resolveExecution(projectId: string, sessionId: string): ExecutionDescriptor | Promise<ExecutionDescriptor>;
   rename(projectId: string, sessionId: string, name: string): unknown;
   updateControls(projectId: string, sessionId: string, controls: SessionControls): unknown;
+  invalidateSessionLists?(projectId: string): void;
 }
 interface Owner { hub: RuntimeHub; descriptor: ExecutionDescriptor; lastUsed: number; unsubscribe: () => void; generation: number; transitioningProviders: Map<string, number>; controlPending: number }
 
@@ -210,6 +211,12 @@ export class RuntimeManager {
         return adapter;
       }, this.healthIntervalMs, { ...scope, executionRoot: canonical(descriptor.executionRoot), sessionFile: descriptor.sessionFile });
       const unsubscribe = hub.subscribe((event) => {
+        if (event.type === "pi_event" && event.event && typeof event.event === "object" && "type" in event.event && typeof event.event.type === "string"
+          && ["message_start", "message_end", "agent_settled", "session_info_changed", "auto_compaction_end"].includes(event.event.type)) {
+          // Invalidate before publishing: a client reacting to this persisted
+          // boundary must not join a snapshot captured before the append.
+          this.repository.invalidateSessionLists?.(scope.projectId);
+        }
         if (event.type === "runtime_reset") stream.rotate();
         stream.publish(event);
       });
@@ -233,6 +240,7 @@ export class RuntimeManager {
   }
   private bump(scope: RuntimeScope) { this.revisions.set(key(scope), (this.revisions.get(key(scope)) ?? 0) + 1); }
   private async notifyResource(scope: RuntimeScope) {
+    this.repository.invalidateSessionLists?.(scope.projectId);
     const read = await this.repository.read(scope.projectId, scope.sessionId);
     const stream = this.stream(scope);
     stream.publish({ type: "pi_event", event: { type: "session_info_changed" } });

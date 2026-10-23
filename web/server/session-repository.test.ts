@@ -8,6 +8,9 @@ import { SessionRepository } from "./session-repository";
 import { WorkspaceRegistry } from "./workspace-registry";
 import { ExecutionWorkspace } from "./execution-workspace";
 import { SessionCatalog } from "./session-catalog";
+import { SessionListReader } from "./session-list-reader";
+import { RuntimeManager } from "./runtime-manager";
+import { createDeterministicAdapter } from "./fixtures/deterministic-adapter";
 import type { CurrentBranchWorkspace, OwnedWorkspace, ProjectResource } from "../shared/workspace-contract";
 
 const roots: string[] = [];
@@ -43,7 +46,81 @@ function transcript(root: string, id: string, name = id) {
   return file;
 }
 
+async function within<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Fresh list joined a blocked stale snapshot")), 2_000); })]);
+  } finally { clearTimeout(timer); }
+}
+
 describe("SessionRepository", () => {
+  it("invalidates pre-append pending summaries before publishing accepted runtime session events", async () => {
+    const f = fixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+    let hold = false;
+    const summaries = new SessionListReader({ readChunk: async (handle, buffer, length, position) => {
+      const bytes = (await handle.read(buffer, 0, length, position)).bytesRead;
+      if (hold) { hold = false; entered(); await gate; }
+      return bytes;
+    } });
+    const repository = new SessionRepository(f.registry, { ...f.options, sessionLists: summaries });
+    const session = await repository.create(f.project.id, { operationId: "runtime-summary" });
+    const path = transcript(f.projectRoot, session.id, "Original");
+    let adapter: ReturnType<typeof createDeterministicAdapter> | undefined;
+    const manager = new RuntimeManager(repository, (descriptor) => { adapter = createDeterministicAdapter(descriptor); return adapter.adapter; }, 4, 60_000);
+    const scope = { projectId: f.project.id, sessionId: session.id };
+    let unsubscribe: (() => void) | undefined;
+    try {
+      await manager.command(scope, { type: "initialize" });
+      let eventAccepted!: () => void;
+      const accepted = new Promise<void>((resolve) => { eventAccepted = resolve; });
+      unsubscribe = await manager.subscribe(scope, (wire) => {
+        const event = wire.event;
+        if (event.type === "pi_event" && event.event && typeof event.event === "object" && "type" in event.event && event.event.type === "agent_settled") eventAccepted();
+      });
+      hold = true;
+      const old = repository.listSummaries(f.project.id, "active", f.project);
+      await started;
+      appendFileSync(path, `${JSON.stringify({ type: "message", message: { role: "user", content: "After runtime append" } })}\n`);
+      adapter!.emit({ type: "agent_settled" });
+      await accepted;
+      const fresh = await within(repository.listSummaries(f.project.id, "active", f.project));
+      assert.equal(fresh[0].preview, "After runtime append", "event-triggered refresh must not join the held pre-append snapshot");
+      release();
+      assert.equal((await old)[0].preview, "hello Original");
+    } finally { release(); unsubscribe?.(); await manager.stop(); }
+  });
+
+  it("invalidates pending summaries around saves and collection moves while retaining fresh completed reads", async (t) => {
+    const f = fixture();
+    transcript(f.projectRoot, "summary", "Original summary");
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), started = new Promise<void>((resolve) => { entered = resolve; });
+    let first = true;
+    const summaries = new SessionListReader({ readChunk: async (handle, buffer, length, position) => {
+      const bytes = (await handle.read(buffer, 0, length, position)).bytesRead;
+      if (first) { first = false; entered(); await gate; }
+      return bytes;
+    } });
+    const invalidations = t.mock.method(summaries, "invalidate", summaries.invalidate.bind(summaries));
+    const repository = new SessionRepository(f.registry, { ...f.options, sessionLists: summaries });
+    const old = repository.listSummaries(f.project.id, "active", f.project);
+    await started;
+    repository.rename(f.project.id, "summary", "Renamed summary");
+    const fresh = await within(repository.listSummaries(f.project.id, "active", f.project)).finally(release);
+    assert.equal(fresh[0].name, "Renamed summary", "post-save reads must not join the blocked older generation");
+    assert.equal((await old)[0].name, "Original summary");
+    const afterRename = invalidations.mock.callCount();
+    assert.ok(afterRename >= 2);
+    repository.action(f.project.id, "summary", { type: "archive" });
+    assert.ok(invalidations.mock.callCount() > afterRename);
+    assert.deepEqual(await repository.listSummaries(f.project.id, "active", f.project), []);
+    assert.equal((await repository.listSummaries(f.project.id, "archived", f.project))[0].name, "Renamed summary");
+    repository.action(f.project.id, "summary", { type: "restore" });
+    assert.equal((await repository.listSummaries(f.project.id, "active", f.project))[0].id, "summary");
+  });
+
   it("defaults to the dirty registered checkout, survives restart and follows user branch changes", async () => {
     const { projectRoot, project, registry, repository, options } = fixture();
     writeFileSync(join(projectRoot, "file.txt"), "staged source\n"); git(projectRoot, "add", "file.txt");

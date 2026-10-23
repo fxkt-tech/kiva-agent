@@ -138,7 +138,7 @@ describe("scoped file and change trees", () => {
       if (url === "/api/projects") return Response.json({ projects: [project] });
       if (url === "/api/projects/alpha") return Response.json({ project });
       if (url.endsWith("/models")) return Response.json({ models: [] });
-      if (url.endsWith("/sessions")) return Response.json({ active: [], archived: [], trash: [] });
+      if (url.includes("/sessions?collection=")) return Response.json({ collection: new URL(url, "http://localhost").searchParams.get("collection"), sessions: [] });
       if (url.endsWith("/workspace")) return Response.json(workspace);
       if (deferPreview) return new Promise<Response>((resolve) => { resolvePreview = resolve; });
       return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "preview" });
@@ -189,7 +189,7 @@ describe("scoped file and change trees", () => {
       if (url === "/api/projects") return Response.json({ projects: [project] });
       if (url === "/api/projects/alpha") return Response.json({ project });
       if (url.endsWith("/models")) return Response.json({ models: [] });
-      if (url.endsWith("/sessions")) return Response.json({ active: [], archived: [], trash: [] });
+      if (url.includes("/sessions?collection=")) return Response.json({ collection: new URL(url, "http://localhost").searchParams.get("collection"), sessions: [] });
       if (url === listUrl) return pending ? new Promise<Response>((resolve) => { resolveList = resolve; }) : listing();
       assert.equal(url, previewUrl);
       if (pending) return new Promise<Response>((resolve) => { resolvePreview = resolve; });
@@ -240,7 +240,7 @@ describe("scoped file and change trees", () => {
         const { files: _files, ...project } = workspace.project;
         return workspaceFailure ? Response.json({ error: "workspace unavailable" }, { status: 500 }) : Response.json(url.endsWith("?view=changes") ? { renderedAt: workspace.renderedAt, project } : workspace);
       }
-      if (url === "/api/projects/alpha/sessions") return Response.json({ active: [], archived: [], trash: [] });
+      if (url.includes("/sessions?collection=")) return Response.json({ collection: new URL(url, "http://localhost").searchParams.get("collection"), sessions: [] });
       if (/\/(files|changes)\?/.test(url)) return Response.json({ path: raw, content: "exact preview" });
       return Response.json({ session, projectId: "alpha", sessionId: "one", lifecycle: "dormant", executable: true });
     };

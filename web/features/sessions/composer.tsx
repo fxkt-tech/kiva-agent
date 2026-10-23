@@ -30,7 +30,7 @@ function resizeComposerInput(input: HTMLTextAreaElement) {
 }
 
 export function Composer({ projectId, session, runtime, emptyConversation }: { projectId: string; session?: SessionResource; runtime: ReturnType<typeof useRuntime>; emptyConversation: boolean }) {
-  const { drafts, createSession, project, refresh, modelCatalog, updateModelCatalog, modelsLoading, modelsError } = useWorkspace();
+  const { drafts, createSession, project, refresh, refreshProject, modelCatalog, updateModelCatalog, modelsLoading, modelsError } = useWorkspace();
   const { preferences } = useWebPreferences();
   const key = drafts.key(projectId, session?.id);
   const current = useSyncExternalStore(drafts.subscribe, () => drafts.read(key), () => drafts.read(key));
@@ -170,7 +170,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
                   </PopoverContent>
                 </Popover>
                 </div>}
-                <ModelSettings projectId={projectId} sessionId={session?.id} models={models} selection={selection} loading={modelsLoading} disabled={running || pending || modelSaving || (Boolean(session) && !runtime.connected)} onPending={setModelSaving} onSaved={(catalog) => { updateModelCatalog(catalog); if (session && catalog.defaults) setConfirmed({ configuration: catalog.defaults, snapshot: runtime.snapshot }); setSavedNotice((value) => (value ?? 0) + 1); refresh(); }} />
+                <ModelSettings projectId={projectId} sessionId={session?.id} models={models} selection={selection} loading={modelsLoading} disabled={running || pending || modelSaving || (Boolean(session) && !runtime.connected)} onPending={setModelSaving} onSettled={() => refreshProject(projectId)} onSaved={(catalog) => { updateModelCatalog(catalog); if (session && catalog.defaults) setConfirmed({ configuration: catalog.defaults, snapshot: runtime.snapshot }); setSavedNotice((value) => (value ?? 0) + 1); }} />
               </div>
               <div className="composer-send-actions"><Button type={showStop ? "button" : "submit"} size="icon" className="composer-send" aria-label={showStop ? "停止" : "发送消息"} onClick={showStop ? runtime.abort : undefined} disabled={!showStop && (!hasContent || pending || modelSaving || (!session && project?.capability.state !== "ready") || (Boolean(session) && !runtime.connected))}>{showStop ? <Square size={12} fill="currentColor" aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</Button></div>
             </div>

@@ -146,7 +146,8 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           if (request.method === "GET") {
             const collection = url.searchParams.get("collection");
             if (collection !== null && !["active", "archived", "trash"].includes(collection)) throw new WorkspaceError("invalid_collection", "Unknown session collection", 400);
-            sendJson(response, 200, { active: await repository.list(projectId, "active"), archived: await repository.list(projectId, "archived"), trash: await repository.list(projectId, "trash") });
+            if (collection === "active" || collection === "archived" || collection === "trash") sendJson(response, 200, { collection, sessions: await repository.listSummaries(projectId, collection, project) });
+            else sendJson(response, 200, { active: await repository.list(projectId, "active"), archived: await repository.list(projectId, "archived"), trash: await repository.list(projectId, "trash") });
           } else if (request.method === "POST") {
             const input = creationInput(await readObject(request));
             const defaults = readModelDefaults(registry.installationRoot);

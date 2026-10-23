@@ -16,7 +16,8 @@ import type { InstallationModelCatalog } from "@/shared/installation-settings";
 import type { ModelCatalog } from "@/shared/model-configuration";
 import type { ProjectResource, RemoveProjectResult, SessionResource, SessionWorkspaceMode } from "@/shared/workspace-contract";
 import { DraftStore } from "@/features/sessions/drafts";
-import { SessionRows, useCollections } from "@/features/sessions/collections";
+import { SessionRows } from "@/features/sessions/collections";
+import { SessionListStore, SessionListsProvider, useSessionList } from "@/features/sessions/session-lists";
 import { SessionViewerHost } from "@/features/sessions/session-viewer-host";
 import { ProjectPicker } from "./project-picker";
 import { RemoveProjectDialog } from "./remove-project-dialog";
@@ -25,7 +26,7 @@ import { parseWorkspaceRoute, type WorkspaceRoute } from "./route";
 
 interface WorkspaceContextValue {
   route: WorkspaceRoute; query: URLSearchParams; project?: ProjectResource; projects: ProjectResource[]; renderedAt: string;
-  navigate(href: string, replace?: boolean): void; drafts: DraftStore; version: number; refresh(): void;
+  navigate(href: string, replace?: boolean): void; drafts: DraftStore; version: number; refresh(): void; refreshProject(projectId: string): void;
   createSession(projectId: string): Promise<SessionResource | undefined>; openProjectPicker(): void;
   projectLoading: boolean; projectError?: string;
   modelCatalog?: InstallationModelCatalog; modelsLoading: boolean; modelsError?: string; updateModelCatalog(data: ModelCatalog): void;
@@ -57,6 +58,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const routeRef = useRef(route); routeRef.current = route;
   const navigationCurrent = useCallback((source: string) => locationRef.current === source, []);
   const [version, setVersion] = useState(0);
+  const [sessionLists] = useState(() => new SessionListStore());
   const renderedAt = useMemo(() => new Date().toISOString(), [route.projectId, version]);
   const [drafts] = useState(() => new DraftStore());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -77,7 +79,8 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const projectError = current.error ?? (current.data && current.data.project.id !== route.projectId ? "返回的项目标识与 URL 不匹配" : undefined);
   const projects = registry.data?.projects ?? [];
   useEffect(() => { for (const item of registry.data?.projects ?? []) hidden.current.delete(item.id); }, [registry.data]);
-  const refresh = useCallback(() => setVersion((value) => value + 1), []);
+  const refresh = useCallback(() => { sessionLists.invalidate(); setVersion((value) => value + 1); }, [sessionLists]);
+  const refreshProject = useCallback((projectId: string) => { sessionLists.invalidate(projectId); setVersion((value) => value + 1); }, [sessionLists]);
   const openProjectPicker = useCallback(() => { setMobileSidebarOpen(false); setPickerOpen(true); }, []);
   const openSettings = useCallback(() => { setMobileSidebarOpen(false); setSettingsOpen(true); }, []);
   const createSession = useCallback(async (projectId: string) => {
@@ -93,14 +96,13 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
       if (result.cancelled) return;
       if (result.projectId !== projectId || result.session.projectId !== projectId || result.sessionId !== result.session.id) throw new Error("创建返回的会话标识不匹配");
       operations.current.delete(projectId);
-      refresh();
       setMobileSidebarOpen(false);
       if (!hidden.current.has(projectId) && !removing.current.has(projectId) && navigationCurrent(source)) navigate(sessionUrl(projectId, result.sessionId));
       return result.session;
     } catch (cause) {
       setError({ projectId, message: cause instanceof Error ? cause.message : String(cause) });
-    } finally { creating.current.delete(projectId); setPending((items) => items.filter((id) => id !== projectId)); }
-  }, [navigate, refresh, navigationCurrent, preferences.conversation.workspaceMode]);
+    } finally { refreshProject(projectId); creating.current.delete(projectId); setPending((items) => items.filter((id) => id !== projectId)); }
+  }, [navigate, refreshProject, navigationCurrent, preferences.conversation.workspaceMode]);
   async function removeProject(projectId: string) {
     if (creating.current.has(projectId)) throw new Error("会话正在创建，请完成后重试移除。");
     if (removing.current.has(projectId)) return;
@@ -110,12 +112,12 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
       if (result.projectId !== projectId || !Array.isArray(result.projects) || result.projects.some((item) => item.id === projectId)) throw new Error("移除返回的项目标识不匹配");
       hidden.current.add(projectId);
       registry.replace({ projects: result.projects });
-      setRemovingProject(undefined); refresh();
+      setRemovingProject(undefined);
       if (routeRef.current.projectId === projectId) {
         setMobileSidebarOpen(false);
         navigate(result.projects.length ? `${projectUrl(result.projects[0].id)}/sessions` : "/projects");
       }
-    } finally { removing.current.delete(projectId); setPendingRemovals((items) => items.filter((id) => id !== projectId)); }
+    } finally { refreshProject(projectId); removing.current.delete(projectId); setPendingRemovals((items) => items.filter((id) => id !== projectId)); }
   }
   useEffect(() => {
     setMobileSidebarOpen(false);
@@ -133,8 +135,9 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   useEffect(() => shortcutRegistry.register("newSession", { run: () => { if (route.projectId) void createSession(route.projectId); }, available: () => Boolean(route.projectId && project?.capability.state === "ready" && !removingProject && !pickerOpen && !settingsOpen && !creating.current.has(route.projectId) && !removing.current.has(route.projectId)) }), [route.projectId, project?.capability.state, removingProject, pickerOpen, settingsOpen, createSession]);
   const base = route.projectId ? projectUrl(route.projectId) : "/projects";
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
-  const context: WorkspaceContextValue = { route, query, project, projects, renderedAt, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
+  const context: WorkspaceContextValue = { route, query, project, projects, renderedAt, navigate, drafts, version, refresh, refreshProject, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
   return <WorkspaceContext.Provider value={context}>
+    <SessionListsProvider store={sessionLists} currentProjectId={route.projectId}>
     <SessionViewerHost route={route} pathname={pathname} query={query} navigate={navigate}>
     <main className={cn("workbench", mobileSidebarOpen && "sidebar-mobile-open")}>
       {mobileSidebarOpen && <button className="sidebar-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileSidebarOpen(false)} />}
@@ -157,6 +160,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} catalog={modelCatalog.data} modelsLoading={modelCatalog.loading} modelsError={modelCatalog.error} onCatalog={modelCatalog.replace} onReloadCatalog={modelCatalog.reload} />}
     </main>
     </SessionViewerHost>
+    </SessionListsProvider>
   </WorkspaceContext.Provider>;
 }
 
@@ -166,22 +170,22 @@ export function Navigation({ href, active, children, className }: { href: string
 }
 
 function ProjectGroup({ project, pending, removing, onRemove }: { project: ProjectResource; pending: boolean; removing: boolean; onRemove(): void }) {
-  const { route, query: params, version, navigate, createSession } = useWorkspace();
+  const { route, query: params, navigate, createSession } = useWorkspace();
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const menuFocus = useRef<"trigger" | "search" | "dialog">("trigger");
   const input = useRef<HTMLInputElement>(null);
-  const collections = useCollections(project.id, version);
   const active = route.projectId === project.id;
   const collection = active && route.section === "archive" ? "archived" : active && route.section === "trash" ? "trash" : "active";
+  const collectionResult = useSessionList(project.id, collection, expanded);
   const query = active ? params.get("q") ?? "" : "";
   const [filter, setFilter] = useState(query);
   useEffect(() => { setFilter(query); if (query) setSearchOpen(true); }, [query]);
   useEffect(() => { if (expanded && searchOpen && active && route.section === "sessions") input.current?.focus(); }, [expanded, searchOpen, active, route.section]);
   useEffect(() => { setMenuOpen(false); }, [route.projectId, route.sessionId, route.section]);
-  const list = collections.data?.[collection] ?? [];
+  const list = collectionResult.data ?? [];
   const groupId = `project-sessions-${project.id}`;
   function search() {
     const open = !active || route.section !== "sessions" || !expanded || !searchOpen;
@@ -216,7 +220,7 @@ function ProjectGroup({ project, pending, removing, onRemove }: { project: Proje
     </div>
     <div id={groupId} className="project-sessions" hidden={!expanded}>
       {searchOpen && <div className="session-search"><Search size={13} /><Input ref={input} aria-label={`搜索 ${project.name} 会话`} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜索会话" /></div>}
-      <SessionRows projectId={project.id} sessions={list.filter((session) => `${session.name} ${session.preview}`.toLowerCase().includes(filter.toLowerCase()))} loading={collections.loading} error={collections.error} />
+      <SessionRows projectId={project.id} sessions={list.filter((session) => `${session.name} ${session.preview}`.toLowerCase().includes(filter.toLowerCase()))} loading={collectionResult.loading} refreshing={collectionResult.refreshing} error={collectionResult.error} />
     </div>
   </div>;
 }

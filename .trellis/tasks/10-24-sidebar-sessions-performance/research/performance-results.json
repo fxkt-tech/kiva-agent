@@ -1,0 +1,446 @@
+{
+  "baselineCommit": "86fc5ce0aeffa30376fde1122805422c37d0c0b7",
+  "fixtureRoot": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86",
+  "environment": {
+    "node": "v24.14.0",
+    "git": "git version 2.55.0",
+    "os": "darwin 27.0.0",
+    "cpu": "Apple M1 Pro",
+    "samples": 30,
+    "warmup": 5,
+    "filesystem": "local temporary filesystem; OS cache not cleared"
+  },
+  "scenarios": [
+    {
+      "name": "20-histories",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/20-histories",
+      "id": "p_584536f3459cbc4db9986814",
+      "histories": 20,
+      "historyBytes": 20919290,
+      "active": 20,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "many-small",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/many-small",
+      "id": "p_86a7abf0450335e7c97abd8e",
+      "histories": 200,
+      "historyBytes": 597090,
+      "active": 200,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "one-large",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/one-large",
+      "id": "p_de98c92e42a06ba33d832f54",
+      "histories": 1,
+      "historyBytes": 20927960,
+      "active": 1,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "giant-record",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/giant-record",
+      "id": "p_252693a3f4540e4c00fb1aba",
+      "histories": 1,
+      "historyBytes": 20000366,
+      "active": 1,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "collections",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/collections",
+      "id": "p_27c9de2ff368b961c9084589",
+      "histories": 20,
+      "historyBytes": 20919270,
+      "active": 5,
+      "archived": 10,
+      "trash": 5,
+      "metadata": 0
+    },
+    {
+      "name": "metadata-only",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/metadata-only",
+      "id": "p_180d7b72add16959d7c842c4",
+      "histories": 0,
+      "historyBytes": 0,
+      "active": 0,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 100
+    },
+    {
+      "name": "multi-a",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/multi-a",
+      "id": "p_a53aa5b467b67c4b20f8bcd5",
+      "histories": 5,
+      "historyBytes": 14905,
+      "active": 5,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "multi-b",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/multi-b",
+      "id": "p_ed30d49cc61db14b1bffd01a",
+      "histories": 5,
+      "historyBytes": 14905,
+      "active": 5,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    },
+    {
+      "name": "multi-c",
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-sidebar-benchmark-e9uY86/multi-c",
+      "id": "p_ca2cf6ac2f43062cd88f28ed",
+      "histories": 5,
+      "historyBytes": 14905,
+      "active": 5,
+      "archived": 0,
+      "trash": 0,
+      "metadata": 0
+    }
+  ],
+  "baseline": {
+    "measurements": [
+      {
+        "name": "20-histories/active",
+        "firstUncachedMs": 630.33,
+        "timings": {
+          "p50": 599.67,
+          "p95": 637.44
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 120,
+          "historyBytes": 125515740,
+          "metadataReads": 0,
+          "projectionCalls": 60
+        },
+        "payloadBytes": 7857,
+        "returnedRows": 20
+      },
+      {
+        "name": "20-histories/same-project-three-collections",
+        "firstUncachedMs": 1801.09,
+        "timings": {
+          "p50": 1775.09,
+          "p95": 2170.56
+        },
+        "counters": {
+          "gitSync": 195,
+          "gitAsync": 0,
+          "historyReads": 360,
+          "historyBytes": 376547220,
+          "metadataReads": 0,
+          "projectionCalls": 180
+        },
+        "payloadBytes": 23571,
+        "returnedRows": 60
+      },
+      {
+        "name": "many-small/active",
+        "firstUncachedMs": 467.54,
+        "timings": {
+          "p50": 447.86,
+          "p95": 500.84
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 1200,
+          "historyBytes": 3582540,
+          "metadataReads": 0,
+          "projectionCalls": 600
+        },
+        "payloadBytes": 78617,
+        "returnedRows": 200
+      },
+      {
+        "name": "one-large/active",
+        "firstUncachedMs": 573.61,
+        "timings": {
+          "p50": 603.57,
+          "p95": 710.92
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 6,
+          "historyBytes": 125567760,
+          "metadataReads": 0,
+          "projectionCalls": 3
+        },
+        "payloadBytes": 427,
+        "returnedRows": 1
+      },
+      {
+        "name": "giant-record/active",
+        "firstUncachedMs": 520.84,
+        "timings": {
+          "p50": 522.64,
+          "p95": 593.82
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 6,
+          "historyBytes": 120002196,
+          "metadataReads": 0,
+          "projectionCalls": 3
+        },
+        "payloadBytes": 427,
+        "returnedRows": 1
+      },
+      {
+        "name": "collections/active",
+        "firstUncachedMs": 564.33,
+        "timings": {
+          "p50": 569.63,
+          "p95": 698.57
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 120,
+          "historyBytes": 125515620,
+          "metadataReads": 0,
+          "projectionCalls": 60
+        },
+        "payloadBytes": 7870,
+        "returnedRows": 20
+      },
+      {
+        "name": "metadata-only/active",
+        "firstUncachedMs": 426.03,
+        "timings": {
+          "p50": 404.03,
+          "p95": 452.37
+        },
+        "counters": {
+          "gitSync": 65,
+          "gitAsync": 0,
+          "historyReads": 0,
+          "historyBytes": 0,
+          "metadataReads": 300,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 27517,
+        "returnedRows": 100
+      },
+      {
+        "name": "multi-project/three-active",
+        "firstUncachedMs": 1369.71,
+        "timings": {
+          "p50": 1370.89,
+          "p95": 1921.05
+        },
+        "currentProjectFirstReady": {
+          "p50": 1347.89,
+          "p95": 1920.79
+        },
+        "counters": {
+          "gitSync": 195,
+          "gitAsync": 0,
+          "historyReads": 90,
+          "historyBytes": 268290,
+          "metadataReads": 0,
+          "projectionCalls": 45
+        },
+        "payloadBytes": 5961,
+        "returnedRows": 15
+      }
+    ],
+    "responsiveness": {
+      "delayMs": 300,
+      "samples": 30,
+      "ping": {
+        "p50": 781.61,
+        "p95": 831.93
+      },
+      "list": {
+        "p50": 914.09,
+        "p95": 978.27
+      },
+      "pingBeforeListCompletion": 0
+    },
+    "completedReadFreshness": true
+  },
+  "after": {
+    "measurements": [
+      {
+        "name": "20-histories/active",
+        "firstUncachedMs": 147.63,
+        "timings": {
+          "p50": 105.81,
+          "p95": 122.42
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 20,
+          "historyBytes": 20919290,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 7196,
+        "returnedRows": 20
+      },
+      {
+        "name": "20-histories/same-project-three-collections",
+        "firstUncachedMs": 165.69,
+        "timings": {
+          "p50": 165.54,
+          "p95": 198.62
+        },
+        "counters": {
+          "gitSync": 15,
+          "gitAsync": 0,
+          "historyReads": 20,
+          "historyBytes": 20919290,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 7271,
+        "returnedRows": 20
+      },
+      {
+        "name": "many-small/active",
+        "firstUncachedMs": 79.1,
+        "timings": {
+          "p50": 80.17,
+          "p95": 84.61
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 200,
+          "historyBytes": 597090,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 72016,
+        "returnedRows": 200
+      },
+      {
+        "name": "one-large/active",
+        "firstUncachedMs": 108.55,
+        "timings": {
+          "p50": 110.33,
+          "p95": 155.72
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 1,
+          "historyBytes": 20927960,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 393,
+        "returnedRows": 1
+      },
+      {
+        "name": "giant-record/active",
+        "firstUncachedMs": 144.46,
+        "timings": {
+          "p50": 101.38,
+          "p95": 115.94
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 1,
+          "historyBytes": 20000366,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 393,
+        "returnedRows": 1
+      },
+      {
+        "name": "collections/active",
+        "firstUncachedMs": 116.49,
+        "timings": {
+          "p50": 108.71,
+          "p95": 112.48
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 20,
+          "historyBytes": 20919270,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 1821,
+        "returnedRows": 5
+      },
+      {
+        "name": "metadata-only/active",
+        "firstUncachedMs": 61.23,
+        "timings": {
+          "p50": 59.8,
+          "p95": 61.7
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 0,
+          "historyReads": 0,
+          "historyBytes": 0,
+          "metadataReads": 100,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 24216,
+        "returnedRows": 100
+      },
+      {
+        "name": "multi-project/three-active",
+        "firstUncachedMs": 108.62,
+        "timings": {
+          "p50": 102.91,
+          "p95": 106.31
+        },
+        "currentProjectFirstReady": {
+          "p50": 102.75,
+          "p95": 106.02
+        },
+        "counters": {
+          "gitSync": 15,
+          "gitAsync": 0,
+          "historyReads": 15,
+          "historyBytes": 44715,
+          "metadataReads": 0,
+          "projectionCalls": 0
+        },
+        "payloadBytes": 5463,
+        "returnedRows": 15
+      }
+    ],
+    "responsiveness": {
+      "delayMs": 300,
+      "samples": 30,
+      "ping": {
+        "p50": 1.16,
+        "p95": 1.52
+      },
+      "list": {
+        "p50": 395.38,
+        "p95": 414.4
+      },
+      "pingBeforeListCompletion": 30
+    },
+    "completedReadFreshness": true
+  }
+}

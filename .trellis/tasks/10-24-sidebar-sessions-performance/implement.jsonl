@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Passive identity, legacy sessions, metadata/deletion lifecycle and root safety."}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Row/menu/dialog subject boundaries and real browser verification."}
+{"file": ".trellis/spec/kiva-web/frontend/code-changes-performance.md", "reason": "Preserve shared resource confirmed-write/version and existing file/diff refresh behavior."}
+{"file": ".trellis/tasks/10-24-sidebar-sessions-performance/research/loading-chain.md", "reason": "Confirmed six-pass list chain, exact-ID scan requirement and frontend eager/duplicate requests."}
+{"file": ".trellis/spec/kiva-web/frontend/sidebar-session-lists.md", "reason": "Final summary DTO, exact identity/streaming, shared demand, partial/runtime invalidation and benchmark contracts."}
