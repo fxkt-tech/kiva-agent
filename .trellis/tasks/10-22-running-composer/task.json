@@ -3,7 +3,7 @@
   "name": "running-composer",
   "title": "Align running composer actions and queued message cards",
   "description": "Share one send/stop action position and present messages inserted during a running response as composer-attached cards matching the supplied reference.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "frontend",
   "scope": "kiva-web",
   "package": "kiva-web",
@@ -12,7 +12,7 @@
   "assignee": "Justyer",
   "createdAt": "2026-10-22",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat/owned-session-viewer",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Planning converged on 2026-10-22. User chose one send/stop slot and read-only attached queue cards with existing clear-all; no backend/per-item changes. User explicitly requested committing/pushing planning documents only to continue at home; implementation is not approved and task.py start has not run. Resume by reading PRD/design/implement and obtaining approval of the final planning summary before implementation. Preserve unrelated next-env edit and existing user server9495/development cache.",
+  "notes": "Implementation and AC1–AC6 verification complete; original composer browser/build evidence is recorded in verification.md. Final combined viewer/composer independent review on 2026-10-23 passed 339 tests (5 root + 334 web), typecheck and diff checks without findings. User authorized committing remaining work, pulling remote updates and merging into main on 2026-10-23. Changes are carried on feat/owned-session-viewer; original generated next-env bytes are excluded and preserved. Work commit, task archive and journal precede main integration.",
   "meta": {}
 }

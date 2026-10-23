@@ -25,12 +25,12 @@ Keep send and stop in one stable composer action position, and present messages 
 
 ## Acceptance criteria
 
-- [ ] AC1 / R1: Exactly one action occupies the same lower-right circular bounds: running+empty/whitespace → stop, running+nonblank-text-or-attachment → send, idle → send. Ordinary optimistic input clearing restores stop while the response remains running; failure restores captured content and the appropriate action. All send-disabled guards remain effective.
-- [ ] AC2 / R2: One/multiple queued messages form a visually attached stack with readable text, correct static mode labels/counts and one working “清空队列” control. Long text and duplicates remain accessible within bounded scrolling; there are no per-item mutation affordances.
-- [ ] AC3 / R1, R3: Actual click and both send shortcut modes dispatch the correct scoped prompt/queue command. Empty/whitespace Enter, IME confirmation and repeat events do not abort or submit. Stop dispatches only abort, while failure/pending/navigation retain the existing draft/attachment ownership behavior.
-- [ ] AC4 / R4: Keyboard, long-message/multiple-message layout, light/dark and desktop/mobile checks pass without clipped controls.
-- [ ] AC5 / R3, R5: Runtime events update/remove cards, clear-all targets the current session, and navigation/refresh/sibling-tab updates retain scope isolation. Merely observing cards issues no commands; stopping does not itself claim to clear queues.
-- [ ] AC6 / R1–R5: Relevant regressions, typecheck, full tests, build, independent review and actual browser evidence pass.
+- [x] AC1 / R1: Exactly one action occupies the same lower-right circular bounds: running+empty/whitespace → stop, running+nonblank-text-or-attachment → send, idle → send. Ordinary optimistic input clearing restores stop while the response remains running; failure restores captured content and the appropriate action. All send-disabled guards remain effective.
+- [x] AC2 / R2: One/multiple queued messages form a visually attached stack with readable text, correct static mode labels/counts and one working “清空队列” control. Long text and duplicates remain accessible within bounded scrolling; there are no per-item mutation affordances.
+- [x] AC3 / R1, R3: Actual click and both send shortcut modes dispatch the correct scoped prompt/queue command. Empty/whitespace Enter, IME confirmation and repeat events do not abort or submit. Stop dispatches only abort, while failure/pending/navigation retain the existing draft/attachment ownership behavior.
+- [x] AC4 / R4: Keyboard, long-message/multiple-message layout, light/dark and desktop/mobile checks pass without clipped controls.
+- [x] AC5 / R3, R5: Runtime events update/remove cards, clear-all targets the current session, and navigation/refresh/sibling-tab updates retain scope isolation. Merely observing cards issues no commands; stopping does not itself claim to clear queues.
+- [x] AC6 / R1–R5: Relevant regressions, typecheck, full tests, build, independent review and actual browser evidence pass.
 
 ## Technical notes and scope
 
@@ -40,4 +40,4 @@ Keep send and stop in one stable composer action position, and present messages 
 - No backend/API/dependency/preference-schema changes, individual queue deletion/editing/reordering/promotion, editable-queue ownership, or queue persistence are included. No general conversation-page/model/settings redesign or unrelated cleanup is included.
 - Existing Pi queue snapshots cannot recover image payload/metadata or a chronological order across both lanes. Preserve the current projection; do not fabricate these properties or use display text as a replay payload.
 
-All product decisions for this scope are resolved. Implementation must wait for approval of the final planning summary; `task.py start` has not been run.
+All product decisions for this scope are resolved. The user explicitly approved implementation on 2026-10-22. The implementation was retained on `feat/owned-session-viewer`; on 2026-10-23 the user authorized committing the remaining work, pulling remote updates and merging into `main`.

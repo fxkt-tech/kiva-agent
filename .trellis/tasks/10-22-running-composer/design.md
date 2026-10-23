@@ -1,6 +1,6 @@
 # Running composer design
 
-Status: planning converged; awaiting user approval of the final summary before implementation.
+Status: implementation and independent/browser verification complete on 2026-10-22. See `verification.md`.
 
 ## Behavior gap and ownership
 
