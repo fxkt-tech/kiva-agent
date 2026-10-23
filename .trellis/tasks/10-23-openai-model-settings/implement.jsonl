@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/kiva-web/frontend/index.md", "reason": "Read package guideline routing and the canonical settings contract."}
+{"file": ".trellis/spec/kiva-web/frontend/directory-structure.md", "reason": "Keep auth feature state, shared wire contracts, and server implementation in their established layers."}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Reuse controlled primitives, confirmation, pending-close and focus behavior; verify real DOM behavior."}
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Preserve passive offline reads, secret projections, safe credential writes and runtime admission; the approved feature narrowly extends explicit OpenAI OAuth actions."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "One shared decoder for the auth interaction protocol and a complete UI/service/storage data-flow review."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse Pi public login/storage and existing settings/runtime services; avoid duplicate validators or broad refactors."}
+{"file": ".trellis/tasks/10-23-openai-model-settings/research/openai-auth.md", "reason": "Installed Pi APIs, official documentation, concurrency constraints, prior offline probe and deferred live verification."}
+{"file": ".trellis/spec/kiva-web/frontend/openai-authorization.md", "reason": "Canonical explicit OpenAI authorization contract, safe wire states, short guarded persistence, cancellation, local sign-out and meaningful verification."}
+{"file": ".trellis/spec/kiva-web/frontend/web-process-lifecycle.md", "reason": "User-requested clear-web command: positive installation/script identity, graceful bounded shutdown, idempotence and unrelated-process preservation."}
