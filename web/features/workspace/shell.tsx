@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, SquareTerminal, Trash2, X } from "lucide-react";
+import { Archive, Bot, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -139,7 +139,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
     <main className={cn("workbench", mobileSidebarOpen && "sidebar-mobile-open")}>
       {mobileSidebarOpen && <button className="sidebar-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileSidebarOpen(false)} />}
       <aside className="sidebar">
-        <div className="brand-row"><div className="brand-mark"><SquareTerminal size={21} strokeWidth={1.65} /></div><p className="brand-name"><Navigation href="/projects" className="brand-home">KivA Agent</Navigation></p><button className="mobile-sidebar-close" aria-label="关闭导航" onClick={() => setMobileSidebarOpen(false)}><X size={17} /></button></div>
+        <div className="brand-row"><div className="brand-mark" aria-hidden="true" /><p className="brand-name"><Navigation href="/projects" className="brand-home">KivA Agent</Navigation></p><button className="mobile-sidebar-close" aria-label="关闭导航" onClick={() => setMobileSidebarOpen(false)}><X size={17} /></button></div>
         <nav className="nav-list" aria-label="工作区导航">
           {route.projectId && <><Navigation href={route.sessionId ? scoped : `${base}/sessions`} active={route.section === "sessions"}><Bot size={16} />会话</Navigation><Navigation href={`${scoped}/files`} active={route.section === "files"}><FileCode2 size={16} />文件</Navigation><Navigation href={`${scoped}/changes`} active={route.section === "changes"}><GitBranch size={16} />代码变更</Navigation><Navigation href={`${base}/archive`} active={route.section === "archive"}><Archive size={16} />归档</Navigation><Navigation href={`${base}/trash`} active={route.section === "trash"}><Trash2 size={16} />回收站</Navigation></>}
         </nav>
