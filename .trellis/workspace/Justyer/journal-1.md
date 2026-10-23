@@ -371,3 +371,25 @@ Removed duplicate bootstrap directory reads; added bounded async Git/filesystem 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: Optimize changes listing and diff previews
+<!-- trellis-session: v=2 fp=d29628cafc272ea0 -->
+
+**Date**: 2026-10-24
+**Task**: Optimize changes listing and diff previews
+**Branch**: `perf/code-changes-loading`
+
+### Summary
+
+Added changes-only workspace projection, bounded asynchronous diff/file reads, validated in-flight sharing, and same-path preview refresh feedback. Verified 376 Web tests, root checks, production build, static review and isolated desktop/mobile browser behavior across source and owned worktrees. Final benchmark: 10k/four-change list 287366 to 398 bytes; equivalent concurrent diffs 4 to 1; delayed-Git independent ping P50 346.71 to 0.68 ms. Isolated near-bound/untracked/clean-preview regressions disclosed. User approved commit, main merge, temporary branch deletion and push. Preserved unrelated web/next-env.d.ts edit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0bb1d59` | perf(web): optimize changes listing and diff previews |
+
+### Status
+
+[OK] **Completed**
