@@ -1,6 +1,6 @@
 # Commit Plan
 
-Status: user approved the complete work on 2026-10-23 with “提交，合并到main，删除临时分支，推送”. Execute the two work commits, task archive/journal bookkeeping, merge into main, delete the current temporary feature branch, and push main. Preserve the unrelated next-env change.
+Status: user approved the complete work on 2026-10-23 with “提交，合并到main，删除临时分支，推送”. Work commits4dd0279 and3aae5da are created and fast-forward merged into main. Finish task archive/journal bookkeeping, delete the current temporary feature branch, and push main. Preserve the unrelated next-env change.
 
 ## 1. OpenAI Settings Work
 
@@ -66,8 +66,8 @@ The second commit records the complete task artifacts, including both user follo
 
 OpenAI implementation passed355 full tests, typecheck, production build, independent review and isolated/live browser checks. The later exact `agent_name_hint=KivA` literal passed the focused9-test authorization suite and independent mapping/typecheck review. The clear-web follow-up passed11 root tests; independent final combined regression passed361 tests (root11 + Web350), root/Web typecheck and diff-check. The actual service was preserved. See verification.md.
 
-## After Approval
+## Authorized Finishing Sequence
 
-Create the two work commits without amend. The user explicitly authorizes merging into main, deleting the current temporary feature branch, and pushing main after verification. Then archive only this completed task and record the session through finish-work, producing bookkeeping commits after both work commits. Leave the unrelated bootstrap task and excluded next-env change alone.
+The two work commits were created without amend and fast-forward merged into main. The user explicitly authorizes deleting the current temporary feature branch and pushing main after bookkeeping. Then archive only this completed task and record the session through finish-work, producing bookkeeping commits after both work commits. Leave the unrelated bootstrap task and excluded next-env change alone.
 
 Workflow source: `.trellis/workflow.md:626`, “Present the plan once, ask for one-shot confirmation”.

@@ -63,8 +63,9 @@ Before commit, rollback is reverting only task-owned changes. After credentials 
 - Isolated final Chromium: 30 layout cases, 7 normal flow groups and 3 recovery groups; zero page errors or response credential leaks. Actual 9495 smoke: 1440/390/320, no API mutations and correct mobile focus restoration.
 - Actual Web server was gracefully reloaded with the same command/environment only after all four sessions were confirmed dormant/idle/unqueued. Four history-file hashes are unchanged.
 - [x] Obtain one-shot approval of commit-plan.md (“提交，合并到main，删除临时分支，推送”).
-- [ ] Create the two task work commits, merge to main, delete the feature branch and push.
-- [ ] Only after the work commit, run finish-work archive/journal bookkeeping.
+- [x] Create the two task work commits and fast-forward merge them to main (4dd0279,3aae5da).
+- Post-archive operations authorized by the user: delete the merged temporary feature branch and push main.
+- Finish-work archive/journal bookkeeping follows the two confirmed work commits.
 
 User follow-up: OAuth `agent_name_hint` is now exactly `KivA`; existing focused9-test authorization suite passes. The currently pending real OAuth flow was preserved, so runtime reload/new authorization is required for that new query value.
 

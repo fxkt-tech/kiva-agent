@@ -67,3 +67,12 @@ Real account consent, token acceptance, account-specific model entitlement and i
 - Implementer root suite:11/11 passed, including real copied-installation `pnpm clear-web`, no-op, other-installation/unrelated survival, paths with spaces/tsx flags/empty option value, and a SIGTERM-ignoring child that times out without force-kill. Root/Web typecheck and diff-check pass.
 - Main read-only discovery identified actual Web PID191386 with zero signals. The actual user Web process and pending OAuth flow were preserved; automated shutdown tests used disposable fixture installations only.
 - Independent final review found no concrete issue and made no edits. Final combined `pnpm test`: **361/361 passed** (root11 + Web350), zero failed/skipped; root/Web typecheck and diff-check pass. Logs: `/tmp/kiva-openai-clear-web-check-{test,typecheck}.log`. The original next-env bytes and exact `agentName: "KivA"` remain preserved. No new build/browser cycle was needed because the follow-up changes only root CLI code and documentation, and does not alter Web rendering/startup.
+
+## Authorized Git Integration
+
+User approved “提交，合并到main，删除临时分支，推送” on2026-10-23. Fetched origin; remote main remained at the task base753b3c3, so integration required no conflict resolution or product changes.
+
+- `4dd0279` — `feat(web): add ChatGPT authorization to model settings`. Shared README/index staged by exact hunks; temporary-index tree matched the real staged tree.
+- `3aae5da` — `feat(cli): add installation-scoped clear-web command`, plus the approved task artifacts and remaining README/index hunks.
+- Both work commits are fast-forward merged into local main. Original next-env bytes remain preserved and excluded from both commits.
+- Finish-work archives only this task and records the session after the work commits. The merged feature branch is then deleted and main pushed as explicitly authorized. Final remote synchronization is verified after bookkeeping, without amending work commits or force-pushing.

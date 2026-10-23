@@ -3,7 +3,7 @@
   "name": "openai-model-settings",
   "title": "Add OpenAI ChatGPT authorization to model settings",
   "description": "Connect OpenAI ChatGPT/Codex OAuth from Settings > Models with cancellation, safe credential persistence and model refresh.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "fullstack",
   "scope": "kiva-web",
   "package": "kiva-web",
@@ -11,11 +11,11 @@
   "creator": "Justyer",
   "assignee": "Justyer",
   "createdAt": "2026-10-23",
-  "completedAt": null,
+  "completedAt": "2026-10-23",
   "branch": "feat/openai-model-settings",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "3aae5daddba99ff66be7e3d7a643081375ab4af1",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -25,8 +25,12 @@
     "web/server/provider-configuration.ts",
     "web/server/installation-settings.ts",
     "web/server/scoped-transport.ts",
-    "web/shared/installation-settings.ts"
+    "web/shared/installation-settings.ts",
+    "package.json",
+    "bin/clear-web.mjs",
+    "src/web-process.mjs",
+    "test/web-process.test.mjs"
   ],
-  "notes": "Implementation, both user follow-ups and independent final361-test/typecheck/diff verification complete. User explicitly approved the two work commits, merge to main, current temporary feature-branch deletion and push on 2026-10-23. Preserve pre-existing web/next-env.d.ts. No changes to actual auth/session state are needed for Git integration.",
+  "notes": "All task requirements and both user follow-ups implemented and reviewed. Final361 tests, typecheck/diff pass; production/build and isolated/live browser acceptance recorded. Work commits4dd0279 and3aae5da fast-forward merged into main on2026-10-23. User authorized task bookkeeping, deletion of feat/openai-model-settings and push of main. Original web/next-env.d.ts preserved and excluded. Other tasks/branches stay untouched.",
   "meta": {}
 }
