@@ -78,7 +78,7 @@ Correct: `GET session -> repository.read(scope) + manager passive projection`; e
 
 ### 3. Contracts
 
-Version-2 registration adds optional `hidden?: boolean` without rewriting IDs or changing the schema version. Missing means visible; invalid flags are corruption. Removal writes only the installation registry, is idempotent, and preserves directories, session metadata/JSONL, configuration, workspaces and running owners. Reimport of a canonical alias clears the flag and returns the original ID. A fully hidden registry is valid and startup must not resurrect the installation project. Passive bootstrap may still use installationRoot without registering it. Workspace reservation/cleanup ownership guards must use `listAll()`, because hidden source roots remain protected. Mutation origin checks apply; no new environment keys.
+Version-2 registration adds optional `hidden?: boolean` without rewriting IDs or changing the schema version. Missing means visible; invalid flags are corruption. Removal writes only the installation registry, is idempotent, and preserves directories, session metadata/JSONL, configuration, workspaces and running owners. Reimport of a canonical alias clears the flag and returns the original ID. A fully hidden registry is valid and startup must not resurrect the installation project. Workspace reservation/cleanup ownership guards must use `listAll()`, because hidden source roots remain protected. Mutation origin checks apply; no new environment keys.
 
 ### 4. Validation & error matrix
 

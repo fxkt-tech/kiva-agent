@@ -16,7 +16,7 @@ const { default: ChangesPage } = await import("../app/(workspace)/projects/[proj
 const { default: ArchivePage } = await import("../app/(workspace)/projects/[projectId]/archive/page");
 const { default: TrashPage } = await import("../app/(workspace)/projects/[projectId]/trash/page");
 const { default: ProjectsPage } = await import("../app/(workspace)/projects/page");
-import type { BootstrapData } from "../shared/types";
+import type { WorkspaceData } from "../shared/types";
 import type { RuntimeSnapshot } from "../shared/runtime-types";
 import type { ModelConfiguration } from "../shared/model-configuration";
 import type { DeletionPreview, SessionResource, ProjectResource } from "../shared/workspace-contract";
@@ -35,7 +35,7 @@ function currentBranchSession(id: string, overrides: Partial<SessionResource> = 
 function snapshot(id = "one", changes: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
   return { status: "idle", session: { id, messageCount: 0 }, messages: [], thinkingLevel: "medium", thinkingLevels: ["off", "medium", "high"], model: { provider: "test", id: "test-model" }, models: [{ provider: "test", id: "test-model", contextWindow: 100_000, reasoning: true }], context: { tokens: 25_000, contextWindow: 100_000, percent: 25, input: 20_000, output: 5_000, cacheRead: 0, cacheWrite: 0, total: 30_000, cost: 0.1234 }, queue: { steering: [], followUp: [] }, commands: [], ...changes };
 }
-const bootstrap: BootstrapData = { renderedAt: "2026-10-20T16:00:30Z", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: ["README.md", "src/main.ts"], changes: [{ status: "M", path: "README.md" }] }, runtime: { piVersion: "1.3.0", modelConfigFound: true, status: "ready" }, sessions: [], recentProjects: ["/repo"] };
+const workspace: WorkspaceData = { renderedAt: "2026-10-20T16:00:30Z", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: ["README.md", "src/main.ts"], changes: [{ status: "M", path: "README.md" }] } };
 
 class FakeWebSocket {
   static sockets: FakeWebSocket[] = [];
@@ -132,8 +132,8 @@ describe("routed workspace features", () => {
       if (url === "/api/projects") return Response.json({ projects: visibleProjects });
       if (url === "/api/settings") return Response.json({ revision: "settings_revision_1234", canAddProvider: true, providers: [], versions: { app: "0.1.0", pi: "1.3.0" }, check: { status: "ok", checkedAt: "2026-10-21T12:00:00.000Z" } });
       if (/^\/api\/projects\/(alpha|beta)\/actions$/.test(url)) { const projectId = url.split("/")[3]; visibleProjects = visibleProjects.filter((item) => item.id !== projectId); return Response.json({ projectId, projects: visibleProjects }); }
-      if (url === "/api/projects/alpha") return Response.json({ project: p, bootstrap });
-      if (url === "/api/projects/beta") return Response.json({ project: { ...p, id: "beta" }, bootstrap });
+      if (url === "/api/projects/alpha") return Response.json({ project: p });
+      if (url === "/api/projects/beta") return Response.json({ project: { ...p, id: "beta" } });
       if (url === "/api/settings/models" || /^\/api\/projects\/(alpha|beta)\/models$/.test(url)) {
         if (body) {
           defaults = { provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel };
@@ -143,7 +143,7 @@ describe("routed workspace features", () => {
       }
       if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: body.workspaceMode === "current-branch" ? currentBranchSession("created") : session("created") });
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
-      if (url.endsWith("/workspace")) return Response.json({ ...bootstrap, project: { ...bootstrap.project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
+      if (url.endsWith("/workspace")) return Response.json({ ...workspace, project: { ...workspace.project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
       if (url.includes("/files?")) return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "# Real file" });
       if (url.includes("/changes?")) return Response.json({ path: "README.md", content: "diff --git a/README.md b/README.md" });
       if (url.startsWith("/api/project/directories")) { const path = new URL(url, "http://localhost").searchParams.get("path") ?? "/repo"; return Response.json({ path, parent: "/", directories: path === "/repo" ? [{ name: "other", path: "/repo/other" }] : [] }); }
@@ -689,7 +689,7 @@ describe("routed workspace features", () => {
     await act(() => FakeWebSocket.sockets.at(-1)!.onclose?.({ code: 1008 }));
     assert.equal(composerAction().props.disabled, true);
     assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
-    extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta", capability: { state: "non-git", message: "Git required" } }, bootstrap }) : undefined;
+    extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta", capability: { state: "non-git", message: "Git required" } } }) : undefined;
     await open("/projects/beta/sessions"); await changeDraft("unsupported entry draft");
     assert.equal(composerAction().props.type, "submit"); assert.equal(composerAction().props.disabled, true);
     assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
@@ -765,15 +765,16 @@ describe("routed workspace features", () => {
     assert.deepEqual(commandRequests().map((entry) => [entry.url, entry.body?.type]), [["/api/projects/alpha/sessions/one/commands", "steer"]]);
   });
 
-  it("ignores late previews and scoped events from the previous identity", async () => {
-    const stale = deferred<Response>();
-    extraFetch = async (url) => url.includes("/files?path=README") ? stale.promise : undefined;
+  it("ignores late directory reads, previews and scoped events from the previous identity", async () => {
+    const stale = deferred<Response>(), staleWorkspace = deferred<Response>();
+    extraFetch = async (url) => url === "/api/projects/alpha/sessions/one/workspace" ? staleWorkspace.promise : url.includes("/files?path=README") ? stale.promise : undefined;
     await open(); const old = FakeWebSocket.sockets[0];
     await open("/projects/alpha/sessions/one/files?path=README.md");
     await open("/projects/alpha/sessions/two/files?path=src%2Fmain.ts");
     stale.resolve(Response.json({ path: "README.md", content: "STALE PREVIEW" }));
+    staleWorkspace.resolve(Response.json({ ...workspace, project: { ...workspace.project, files: ["STALE TREE"], changes: [] } }));
     await act(async () => { old.publish({ type: "snapshot", snapshot: snapshot("one", { messages: [{ id: "stale", role: "user", text: "STALE MESSAGE", thinking: "", tools: [] }] }) }); await settle(); });
-    assert.doesNotMatch(text(renderer!.root), /STALE PREVIEW|STALE MESSAGE/);
+    assert.doesNotMatch(text(renderer!.root), /STALE TREE|STALE PREVIEW|STALE MESSAGE/);
   });
 
   it("preserves confirmed identity and ignores cancelled or late create navigation", async () => {
@@ -844,14 +845,26 @@ describe("routed workspace features", () => {
     assert.equal(submissions, 0); assert.equal(commandRequests().length, 0);
   });
 
-  it("keeps the sidebar footer limited to settings with and without Pi version metadata", async () => {
-    extraFetch = async (url) => url === "/api/projects/alpha" ? Response.json({ project: p, bootstrap: { ...bootstrap, runtime: { ...bootstrap.runtime, piVersion: "2.3.4" } } }) : undefined;
+  it("keeps the sidebar footer limited to settings with metadata-only project resources", async () => {
     await open();
     assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置");
     assert.equal(renderer!.root.findAllByProps({ className: "status-dot" }).length, 0);
     extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta" } }) : undefined;
     await open("/projects/beta/sessions");
     assert.equal(text(renderer!.root.findByProps({ className: "sidebar-footer" })), "设置");
+  });
+
+  it("renders real sidebar relative times without bootstrap and keeps the clock stable during file selection", async (context) => {
+    context.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-20T16:00:00Z") });
+    sessions = [session("one", { updatedAt: "2026-10-20T15:55:00Z" })];
+    await open("/projects/alpha/files");
+    const times = () => renderer!.root.findAllByProps({ className: "session-item-time" }).map(text);
+    assert.deepEqual(times(), ["5 分钟"]);
+    context.mock.timers.tick(60_000);
+    await open("/projects/alpha/files?path=README.md");
+    assert.deepEqual(times(), ["5 分钟"], "preview changes do not change the resource clock");
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha").length, 1);
+    assert.equal(requests.filter(({ url }) => url === "/api/projects/alpha/workspace").length, 1);
   });
 
   it("opens installation settings from no-project and conversation routes without losing a draft or running commands", async () => {

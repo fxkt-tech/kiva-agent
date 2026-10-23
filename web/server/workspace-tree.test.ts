@@ -6,7 +6,7 @@ import { buildWorkspaceTree, WorkspaceTree, type WorkspaceTreeNode } from "../fe
 import { WorkspaceBrowser } from "../features/files/workspace-browser";
 import { WorkspaceShell, useWorkspace } from "../features/workspace/shell";
 import type { DraftStore } from "../features/sessions/drafts";
-import type { BootstrapData } from "../shared/types";
+import type { WorkspaceData } from "../shared/types";
 import type { ProjectResource, SessionResource } from "../shared/workspace-contract";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -123,6 +123,50 @@ describe("scoped file and change trees", () => {
       if (value === undefined) Reflect.deleteProperty(globalThis, name); else Object.defineProperty(globalThis, name, { configurable: true, value });
     }
   });
+  it("keeps tree entries stable through selection and preview reads, and refreshes changed listing data", async () => {
+    const project: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capability: { state: "ready", branch: "main", head: "base", commonDirectory: "/repo/.git", repositoryRoot: "/repo", projectSubdirectory: "" } };
+    let workspace: WorkspaceData = { renderedAt: "2026-10-21", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: ["src/first.ts", "src/second.ts"], changes: [{ path: "src/first.ts", status: "M" }] } };
+    let refresh: (() => void) | undefined;
+    let resolvePreview: ((response: Response) => void) | undefined;
+    let deferPreview = false;
+    const requests: string[] = [];
+    function Probe() { refresh = useWorkspace().refresh; return null; }
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener() {}, removeEventListener() {} } });
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {} } });
+    globalThis.fetch = async (input) => {
+      const url = String(input); requests.push(url);
+      if (url === "/api/projects") return Response.json({ projects: [project] });
+      if (url === "/api/projects/alpha") return Response.json({ project });
+      if (url.endsWith("/models")) return Response.json({ models: [] });
+      if (url.endsWith("/sessions")) return Response.json({ active: [], archived: [], trash: [] });
+      if (url.endsWith("/workspace")) return Response.json(workspace);
+      if (deferPreview) return new Promise<Response>((resolve) => { resolvePreview = resolve; });
+      return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "preview" });
+    };
+    async function render(path: string) {
+      const element = createElement(WorkspaceShell, { pathname: "/projects/alpha/files", search: new URLSearchParams({ path }).toString(), navigate() {}, children: createElement(Fragment, null, createElement(WorkspaceBrowser, { target: { projectId: "alpha" }, kind: "files" }), createElement(Probe)) });
+      await act(async () => { if (renderer) renderer.update(element); else renderer = create(element); await settle(); });
+    }
+    const entries = () => renderer!.root.findByType(WorkspaceTree).props.entries;
+    await render("src/first.ts");
+    const originalEntries = entries();
+    deferPreview = true;
+    await render("src/second.ts");
+    assert.equal(entries(), originalEntries, "changing selected path must retain the tree memo input");
+    assert.match(text(renderer!.root), /正在读取/);
+    await act(async () => { resolvePreview!(Response.json({ path: "src/second.ts", content: "second preview" })); await settle(); });
+    assert.equal(entries(), originalEntries, "preview completion must not invalidate the tree memo");
+    assert.match(text(renderer!.root), /second preview/);
+    assert.equal(requests.filter((url) => url.endsWith("/workspace")).length, 1);
+    workspace = { ...workspace, project: { ...workspace.project, files: [...workspace.project.files, "src/third.ts"], changes: [{ path: "src/first.ts", status: "A" }] } };
+    await act(async () => { refresh!(); await settle(); });
+    assert.notEqual(entries(), originalEntries, "actual resource changes must update the tree");
+    assert.ok(entries().some((entry: { path: string }) => entry.path === "src/third.ts"));
+    assert.equal(entries().find((entry: { path: string }) => entry.path === "src/first.ts").status, "A");
+    assert.equal(renderer!.root.findAllByProps({ role: "treeitem" }).find((node) => node.props["data-path"] === "src/second.ts")!.props["aria-selected"], true);
+    assert.equal(requests.filter((url) => url.endsWith("/workspace")).length, 2);
+  });
+
   it("preserves raw paths, scoped reads and ask drafts, and retains empty/non-Git/error states", async () => {
     const raw = "src/deep/ 中文 \n → :(glob)*.ts ";
     const requests: string[] = []; const hrefs: string[] = [];
@@ -130,16 +174,16 @@ describe("scoped file and change trees", () => {
     function DraftProbe() { drafts = useWorkspace().drafts; return null; }
     const project: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capability: { state: "ready", branch: "main", head: "base", commonDirectory: "/repo/.git", repositoryRoot: "/repo", projectSubdirectory: "" } };
     const session: SessionResource = { id: "one", projectId: "alpha", name: "One", path: "/history/one.jsonl", createdAt: "2026-10-21", updatedAt: "2026-10-21", preview: "", collection: "active", legacy: false, executable: true };
-    const bootstrap: BootstrapData = { renderedAt: "2026-10-21", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: [raw], changes: [{ path: raw, status: "M" }] }, runtime: { piVersion: "1.3.0", modelConfigFound: true, status: "ready" }, sessions: [], recentProjects: [] };
+    const workspace: WorkspaceData = { renderedAt: "2026-10-21", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 1, files: [raw], changes: [{ path: raw, status: "M" }] } };
     Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener() {}, removeEventListener() {} } });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {} } });
     globalThis.fetch = async (input, init) => {
       assert.ok(!init?.method || init.method === "GET", "tree navigation never writes");
       const url = String(input); requests.push(url);
       if (url === "/api/projects") return Response.json({ projects: [project] });
-      if (url === "/api/projects/alpha") return Response.json({ project, bootstrap });
+      if (url === "/api/projects/alpha") return Response.json({ project });
       if (url.endsWith("/models")) return Response.json({ models: [] });
-      if (url.endsWith("/workspace")) return workspaceFailure ? Response.json({ error: "workspace unavailable" }, { status: 500 }) : Response.json(bootstrap);
+      if (url.endsWith("/workspace")) return workspaceFailure ? Response.json({ error: "workspace unavailable" }, { status: 500 }) : Response.json(workspace);
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: [], archived: [], trash: [] });
       if (/\/(files|changes)\?/.test(url)) return Response.json({ path: raw, content: "exact preview" });
       return Response.json({ session, projectId: "alpha", sessionId: "one", lifecycle: "dormant", executable: true });
@@ -173,7 +217,7 @@ describe("scoped file and change trees", () => {
       assert.equal(drafts!.read(drafts!.key("alpha", sessionId ? undefined : "one")).text, "", "ask does not overwrite another scope's draft");
       await act(() => renderer!.unmount()); renderer = undefined;
     }
-    bootstrap.project.files = []; bootstrap.project.changes = [];
+    workspace.project.files = []; workspace.project.changes = [];
     for (const kind of ["files", "changes"] as const) {
       await render(undefined, kind);
       assert.equal(renderer!.root.findAllByProps({ role: "tree" }).length, 0);

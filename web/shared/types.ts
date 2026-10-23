@@ -7,7 +7,7 @@ export interface SessionSummary {
   persisted?: boolean;
 }
 
-export interface BootstrapData {
+export interface WorkspaceData {
   renderedAt: string;
   project: {
     name: string;
@@ -17,9 +17,6 @@ export interface BootstrapData {
     files: string[];
     changes: Array<{ status: string; path: string }>;
   };
-  runtime: { piVersion: string; modelConfigFound: boolean; status: "ready" | "needs-model" };
-  sessions: SessionSummary[];
-  recentProjects: string[];
 }
 
 export interface SessionCollections {

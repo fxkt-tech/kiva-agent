@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Passive scoped reads, root identity, raw paths and workspace compatibility."}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Component boundaries and real browser verification."}
+{"file": ".trellis/tasks/10-23-project-files-performance/research/loading-chain.md", "reason": "Verified duplicate read chain and residual registry/sidebar costs."}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-files-performance.md", "reason": "Final metadata/workspace wire contract, read limits, concurrency and stable tree regressions."}

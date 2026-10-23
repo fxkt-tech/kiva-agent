@@ -12,6 +12,8 @@ import { SessionRepository } from "./session-repository";
 import { RuntimeManager } from "./runtime-manager";
 import { createScopedTransport } from "./scoped-transport";
 import { createDeterministicAdapter } from "./fixtures/deterministic-adapter";
+import { SessionCatalog } from "./session-catalog";
+import { WorkspaceReader } from "./workspace-reader";
 import type { SessionResource, SessionWorkspaceMode } from "../shared/workspace-contract";
 import type { RuntimeWireEvent, SessionRuntimeRead } from "../shared/runtime-types";
 
@@ -46,6 +48,27 @@ async function fixture(capacity = 4) {
 }
 
 describe("scoped HTTP/WebSocket transport", () => {
+  it("loads metadata and directory data without bootstrap history or unrelated registry enumeration", async (t) => {
+    const f = await fixture();
+    try {
+      t.mock.method(f.registry, "list", () => { throw new Error("A scoped read must not enumerate unrelated projects"); });
+      t.mock.method(SessionCatalog.prototype, "list", () => { throw new Error("Directory reads must not parse session histories"); });
+      let directoryReads = 0;
+      const read = WorkspaceReader.prototype.read;
+      t.mock.method(WorkspaceReader.prototype, "read", function (this: WorkspaceReader, ...args: Parameters<WorkspaceReader["read"]>) { directoryReads++; return read.apply(this, args); });
+      const metadata = await f.request(f.api);
+      assert.equal(metadata.status, 200);
+      assert.deepEqual(Object.keys(metadata.body), ["project"]);
+      assert.equal(directoryReads, 0, "metadata must not enumerate workspace files");
+      const directory = await f.request(`${f.api}/workspace`);
+      assert.equal(directory.status, 200);
+      assert.deepEqual(Object.keys(directory.body).sort(), ["project", "renderedAt"]);
+      assert.ok(directory.body.project.files.includes("tracked.txt"));
+      assert.equal(directoryReads, 1);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
   it("defaults to the current project files while retaining explicit isolated worktrees and captured retry modes", async () => {
     const f = await fixture();
     try {

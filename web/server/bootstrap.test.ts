@@ -4,10 +4,10 @@ import { mkdirSync, mkdtempSync, realpathSync, renameSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { getBootstrapData } from "./bootstrap";
+import { WorkspaceReader } from "./workspace-reader";
 import { readProjectDiff, readProjectFile } from "./workspace-files";
 
-it("keeps exact Unicode, newline, whitespace and renamed paths in workspace listings and URLs", () => {
+it("keeps exact Unicode, newline, whitespace and renamed paths in workspace listings and URLs", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "kiva-bootstrap-paths-")));
   const git = (args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   git(["init", "-q"]);
@@ -27,7 +27,7 @@ it("keeps exact Unicode, newline, whitespace and renamed paths in workspace list
   const nested = "new/nested/新 文件.ts";
   writeFileSync(join(root, nested), "nested untracked\n");
 
-  const data = getBootstrapData(root, { installationRoot: root, recentProjects: [], historyRoot: root });
+  const data = await new WorkspaceReader().read(root);
   for (const path of [destination, newline, whitespace, untracked, nested]) {
     assert.ok(data.project.files.includes(path), `File listing must preserve ${JSON.stringify(path)}`);
     assert.ok(data.project.changes.some((change) => change.path === path), `Change listing must preserve ${JSON.stringify(path)}`);
@@ -41,7 +41,7 @@ it("keeps exact Unicode, newline, whitespace and renamed paths in workspace list
   assert.equal(data.project.changes.some((change) => change.path.endsWith("/")), false, "change trees need individual files, not aggregated untracked directories");
 });
 
-it("lists only selected-subdirectory changes using paths relative to its execution context", () => {
+it("lists only selected-subdirectory changes using paths relative to its execution context", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "kiva-bootstrap-context-")));
   const context = join(root, "package");
   mkdirSync(context);
@@ -55,7 +55,7 @@ it("lists only selected-subdirectory changes using paths relative to its executi
   renameSync(join(context, "旧 文件.txt"), join(context, "新 文件.txt"));
   renameSync(join(context, "leaving.txt"), join(root, "moved-outside.txt"));
   git(["add", "--all"]);
-  const data = getBootstrapData(context, { installationRoot: root, recentProjects: [], historyRoot: context });
+  const data = await new WorkspaceReader().read(context);
   assert.deepEqual(data.project.changes.map((change) => change.path).sort(), ["file.ts", "leaving.txt", "新 文件.txt"].sort());
   assert.ok(data.project.changes.some((change) => change.path === "leaving.txt" && change.status === "D"));
   assert.ok(data.project.files.includes("file.ts"));

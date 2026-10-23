@@ -26,7 +26,7 @@ export interface Collections { active: SessionResource[]; archived: SessionResou
 export function useCollections(projectId: string, version = 0) { return useResource<Collections>(`/api${projectUrl(projectId)}/sessions`, version); }
 
 export function SessionRows({ projectId, sessions, loading, error }: { projectId: string; sessions: SessionResource[]; loading?: boolean; error?: string }) {
-  const { route, navigate, refresh, bootstrap } = useWorkspace();
+  const { route, navigate, refresh, renderedAt } = useWorkspace();
   const [menu, setMenu] = useState<string>();
   const [deleting, setDeleting] = useState<SessionResource>();
   const [renaming, setRenaming] = useState<SessionResource>();
@@ -46,7 +46,7 @@ export function SessionRows({ projectId, sessions, loading, error }: { projectId
     {sessions.map((session) => {
       const recovering = session.deletion && session.deletion.status !== "complete";
       return <div className="session-item-wrap" key={session.id}>
-        <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, bootstrap?.renderedAt ?? session.updatedAt)}</span></a>
+        <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, renderedAt)}</span></a>
         <DropdownMenu open={menu === session.id} onOpenChange={(open) => setMenu((current) => open ? session.id : current === session.id ? undefined : current)}>
           <DropdownMenuTrigger ref={(node: HTMLButtonElement | null) => { if (node) sessionButtons.current.set(session.id, node); else sessionButtons.current.delete(session.id); }} className="session-more" aria-label={`会话操作 ${session.name}`}><MoreHorizontal size={14} /></DropdownMenuTrigger>
           <DropdownMenuContent className="session-actions-menu" align="end" aria-label={`会话操作 ${session.name}`} finalFocus={() => deleting?.id === session.id || renaming?.id === session.id || (viewingSession?.projectId === projectId && viewingSession.id === session.id) ? false : sessionButtons.current.get(session.id)}>

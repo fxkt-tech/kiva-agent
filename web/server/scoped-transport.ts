@@ -5,7 +5,7 @@ import { decodeResourceId, isSessionWorkspaceMode, WorkspaceError, type CreateSe
 import type { WorkspaceRegistry } from "./workspace-registry";
 import type { SessionRepository } from "./session-repository";
 import type { RuntimeManager } from "./runtime-manager";
-import { getBootstrapData } from "./bootstrap";
+import { WorkspaceReader } from "./workspace-reader";
 import { readProjectDiff, readProjectFile } from "./workspace-files";
 import { listWorkspaceDirectories } from "./workspace-directories";
 import { readModelDefaults } from "./model-catalog";
@@ -29,6 +29,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
   const allowed = (request: IncomingMessage) => !request.headers.origin || allowedOrigins.includes(request.headers.origin);
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
   const settings = new InstallationSettingsService(registry.installationRoot, manager, authorization);
+  const workspace = new WorkspaceReader();
 
   return {
     close: () => settings.close(),
@@ -131,11 +132,10 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           } else methodNotAllowed();
           return true;
         }
-        const bootstrap = (root = project.path) => getBootstrapData(root, { installationRoot: registry.installationRoot, recentProjects: registry.list().map((entry) => entry.path), historyRoot: project.path });
-        if (parts.length === 3 && request.method === "GET") { sendJson(response, 200, { project, bootstrap: project.capability.state === "unavailable" ? undefined : bootstrap() }); return true; }
+        if (parts.length === 3 && request.method === "GET") { sendJson(response, 200, { project }); return true; }
         if (["workspace", "files", "changes"].includes(parts[3]) && parts.length === 4 && request.method === "GET") {
           if (project.capability.state === "unavailable") throw new WorkspaceError("project_unavailable", "Registered project directory is unavailable or has moved", 404, { projectId });
-          sendJson(response, 200, parts[3] === "workspace" ? bootstrap() : parts[3] === "files" ? readProjectFile(project.path, url.searchParams.get("path") ?? "") : readProjectDiff(project.path, url.searchParams.get("path") ?? "")); return true;
+          sendJson(response, 200, parts[3] === "workspace" ? await workspace.read(project.path, project.capability) : parts[3] === "files" ? readProjectFile(project.path, url.searchParams.get("path") ?? "") : readProjectDiff(project.path, url.searchParams.get("path") ?? "")); return true;
         }
         if (parts[3] !== "sessions") throw new WorkspaceError("endpoint_not_found", "API endpoint not found", 404);
         if (parts.length === 4) {
@@ -163,7 +163,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         }
         if (["workspace", "files", "changes"].includes(endpoint) && request.method === "GET") {
           const root = await repository.resolveWorkspace(projectId, scope.sessionId);
-          sendJson(response, 200, endpoint === "workspace" ? bootstrap(root) : endpoint === "files" ? readProjectFile(root, url.searchParams.get("path") ?? "") : readProjectDiff(root, url.searchParams.get("path") ?? "")); return true;
+          sendJson(response, 200, endpoint === "workspace" ? await workspace.read(root, root === project.path ? project.capability : undefined) : endpoint === "files" ? readProjectFile(root, url.searchParams.get("path") ?? "") : readProjectDiff(root, url.searchParams.get("path") ?? "")); return true;
         }
         if (request.method !== "POST") methodNotAllowed();
         const body = await readObject(request);

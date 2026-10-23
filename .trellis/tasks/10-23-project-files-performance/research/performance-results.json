@@ -1,0 +1,535 @@
+{
+  "baselineCommit": "12d678717905dd6f2e7dce83628b3f755cbf1b1e",
+  "fixtureRoot": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq",
+  "environment": {
+    "node": "v24.14.0",
+    "os": "darwin 27.0.0",
+    "cpu": "Apple M1 Pro",
+    "filesystem": "local temporary directory (OS cache not cleared)",
+    "samples": 30,
+    "warmup": 5
+  },
+  "scenarios": [
+    {
+      "name": "small",
+      "files": 100,
+      "histories": 0,
+      "registrations": 1,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq/small",
+      "historyBytes": 0,
+      "id": "p_967d2dbe3248b165258b3253"
+    },
+    {
+      "name": "over-1000",
+      "files": 1200,
+      "histories": 0,
+      "registrations": 1,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq/over-1000",
+      "historyBytes": 0,
+      "id": "p_edde2cd622bb64eb8c5b9757"
+    },
+    {
+      "name": "large",
+      "files": 10000,
+      "histories": 0,
+      "registrations": 1,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq/large",
+      "historyBytes": 0,
+      "id": "p_4b492c38896a862efd8a4190"
+    },
+    {
+      "name": "histories",
+      "files": 100,
+      "histories": 20,
+      "registrations": 1,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq/histories",
+      "historyBytes": 20293730,
+      "id": "p_a693dfef640b9754691cfa69"
+    },
+    {
+      "name": "registrations",
+      "files": 100,
+      "histories": 0,
+      "registrations": 8,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-files-benchmark-R5p1hq/registrations",
+      "historyBytes": 0,
+      "id": "p_e91f778ab1c20c666e28e436"
+    }
+  ],
+  "baseline": {
+    "mode": "baseline",
+    "elapsedMs": 230696.09775,
+    "measurements": [
+      {
+        "name": "small/directory",
+        "timings": {
+          "p50": 103.76,
+          "p95": 111.97
+        },
+        "gitSync": 14,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "small/page-pair",
+        "timings": {
+          "p50": 205.95,
+          "p95": 227.67
+        },
+        "gitSync": 28,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "small/concurrent-4",
+        "timings": {
+          "p50": 408.75,
+          "p95": 445.19
+        },
+        "gitSync": 56,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "over-1000/directory",
+        "timings": {
+          "p50": 116.27,
+          "p95": 126.97
+        },
+        "gitSync": 14,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "over-1000/page-pair",
+        "timings": {
+          "p50": 215.1,
+          "p95": 224.82
+        },
+        "gitSync": 28,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "over-1000/concurrent-4",
+        "timings": {
+          "p50": 425.95,
+          "p95": 521.03
+        },
+        "gitSync": 56,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "large/directory",
+        "timings": {
+          "p50": 126.32,
+          "p95": 129.05
+        },
+        "gitSync": 14,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "large/page-pair",
+        "timings": {
+          "p50": 250.41,
+          "p95": 292.94
+        },
+        "gitSync": 28,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "large/concurrent-4",
+        "timings": {
+          "p50": 496.68,
+          "p95": 640.96
+        },
+        "gitSync": 56,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1000
+      },
+      {
+        "name": "histories/directory",
+        "timings": {
+          "p50": 122.1,
+          "p95": 126.43
+        },
+        "gitSync": 14,
+        "gitAsync": 0,
+        "transcriptReads": 20,
+        "transcriptBytes": 20293730,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/page-pair",
+        "timings": {
+          "p50": 245.98,
+          "p95": 265.21
+        },
+        "gitSync": 28,
+        "gitAsync": 0,
+        "transcriptReads": 40,
+        "transcriptBytes": 40587460,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/concurrent-4",
+        "timings": {
+          "p50": 488.19,
+          "p95": 511.99
+        },
+        "gitSync": 56,
+        "gitAsync": 0,
+        "transcriptReads": 80,
+        "transcriptBytes": 81174920,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/sidebar-sessions",
+        "timings": {
+          "p50": 591.65,
+          "p95": 658.76
+        },
+        "gitSync": 65,
+        "gitAsync": 0,
+        "transcriptReads": 120,
+        "transcriptBytes": 121762380,
+        "returnedFiles": 0
+      },
+      {
+        "name": "registrations/directory",
+        "timings": {
+          "p50": 336.73,
+          "p95": 360.99
+        },
+        "gitSync": 49,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/page-pair",
+        "timings": {
+          "p50": 692.72,
+          "p95": 870.51
+        },
+        "gitSync": 98,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/concurrent-4",
+        "timings": {
+          "p50": 1382.81,
+          "p95": 1451.51
+        },
+        "gitSync": 196,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/registry-picker",
+        "timings": {
+          "p50": 278.68,
+          "p95": 297.2
+        },
+        "gitSync": 40,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 0
+      }
+    ]
+  },
+  "after": {
+    "mode": "after",
+    "elapsedMs": 83728.316334,
+    "measurements": [
+      {
+        "name": "small/directory",
+        "timings": {
+          "p50": 47.51,
+          "p95": 48.97
+        },
+        "gitSync": 5,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "small/page-pair",
+        "timings": {
+          "p50": 83.63,
+          "p95": 85.52
+        },
+        "gitSync": 10,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "small/concurrent-4",
+        "timings": {
+          "p50": 153.52,
+          "p95": 174.73
+        },
+        "gitSync": 20,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "over-1000/directory",
+        "timings": {
+          "p50": 49.95,
+          "p95": 56.97
+        },
+        "gitSync": 5,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1202
+      },
+      {
+        "name": "over-1000/page-pair",
+        "timings": {
+          "p50": 85.23,
+          "p95": 87.64
+        },
+        "gitSync": 10,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1202
+      },
+      {
+        "name": "over-1000/concurrent-4",
+        "timings": {
+          "p50": 156.42,
+          "p95": 175.27
+        },
+        "gitSync": 20,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 1202
+      },
+      {
+        "name": "large/directory",
+        "timings": {
+          "p50": 66.05,
+          "p95": 73.23
+        },
+        "gitSync": 5,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 10002
+      },
+      {
+        "name": "large/page-pair",
+        "timings": {
+          "p50": 102.57,
+          "p95": 106.41
+        },
+        "gitSync": 10,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 10002
+      },
+      {
+        "name": "large/concurrent-4",
+        "timings": {
+          "p50": 175.96,
+          "p95": 194.26
+        },
+        "gitSync": 20,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 10002
+      },
+      {
+        "name": "histories/directory",
+        "timings": {
+          "p50": 46.79,
+          "p95": 49.21
+        },
+        "gitSync": 5,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/page-pair",
+        "timings": {
+          "p50": 82.62,
+          "p95": 85.08
+        },
+        "gitSync": 10,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/concurrent-4",
+        "timings": {
+          "p50": 154.21,
+          "p95": 168.19
+        },
+        "gitSync": 20,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "histories/sidebar-sessions",
+        "timings": {
+          "p50": 596.65,
+          "p95": 635.03
+        },
+        "gitSync": 65,
+        "gitAsync": 0,
+        "transcriptReads": 120,
+        "transcriptBytes": 121762380,
+        "returnedFiles": 0
+      },
+      {
+        "name": "registrations/directory",
+        "timings": {
+          "p50": 47.11,
+          "p95": 48.67
+        },
+        "gitSync": 5,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/page-pair",
+        "timings": {
+          "p50": 82.11,
+          "p95": 85.23
+        },
+        "gitSync": 10,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/concurrent-4",
+        "timings": {
+          "p50": 152.76,
+          "p95": 165.54
+        },
+        "gitSync": 20,
+        "gitAsync": 4,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 102
+      },
+      {
+        "name": "registrations/registry-picker",
+        "timings": {
+          "p50": 280.21,
+          "p95": 296.49
+        },
+        "gitSync": 40,
+        "gitAsync": 0,
+        "transcriptReads": 0,
+        "transcriptBytes": 0,
+        "returnedFiles": 0
+      }
+    ],
+    "treeBuild": [
+      {
+        "name": "small",
+        "input": "baseline-cap",
+        "files": 102,
+        "timings": {
+          "p50": 0.07,
+          "p95": 0.09
+        }
+      },
+      {
+        "name": "small",
+        "input": "complete",
+        "files": 102,
+        "timings": {
+          "p50": 0.06,
+          "p95": 0.09
+        }
+      },
+      {
+        "name": "over-1000",
+        "input": "baseline-cap",
+        "files": 1000,
+        "timings": {
+          "p50": 0.53,
+          "p95": 0.6
+        }
+      },
+      {
+        "name": "over-1000",
+        "input": "complete",
+        "files": 1202,
+        "timings": {
+          "p50": 0.53,
+          "p95": 0.6
+        }
+      },
+      {
+        "name": "large",
+        "input": "baseline-cap",
+        "files": 1000,
+        "timings": {
+          "p50": 0.66,
+          "p95": 0.72
+        }
+      },
+      {
+        "name": "large",
+        "input": "complete",
+        "files": 10002,
+        "timings": {
+          "p50": 4.38,
+          "p95": 5.07
+        }
+      }
+    ]
+  }
+}

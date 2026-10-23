@@ -13,7 +13,6 @@ import { useWebPreferences } from "@/lib/web-preferences";
 import { SettingsDialog } from "@/features/settings/dialog";
 import { useInstallationModels } from "@/features/settings/use-installation-models";
 import type { InstallationModelCatalog } from "@/shared/installation-settings";
-import type { BootstrapData } from "@/shared/types";
 import type { ModelCatalog } from "@/shared/model-configuration";
 import type { ProjectResource, RemoveProjectResult, SessionResource, SessionWorkspaceMode } from "@/shared/workspace-contract";
 import { DraftStore } from "@/features/sessions/drafts";
@@ -25,7 +24,7 @@ import { mutate, projectUrl, sessionUrl, useResource } from "./resources";
 import { parseWorkspaceRoute, type WorkspaceRoute } from "./route";
 
 interface WorkspaceContextValue {
-  route: WorkspaceRoute; query: URLSearchParams; project?: ProjectResource; projects: ProjectResource[]; bootstrap?: BootstrapData;
+  route: WorkspaceRoute; query: URLSearchParams; project?: ProjectResource; projects: ProjectResource[]; renderedAt: string;
   navigate(href: string, replace?: boolean): void; drafts: DraftStore; version: number; refresh(): void;
   createSession(projectId: string): Promise<SessionResource | undefined>; openProjectPicker(): void;
   projectLoading: boolean; projectError?: string;
@@ -58,6 +57,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const routeRef = useRef(route); routeRef.current = route;
   const navigationCurrent = useCallback((source: string) => locationRef.current === source, []);
   const [version, setVersion] = useState(0);
+  const renderedAt = useMemo(() => new Date().toISOString(), [route.projectId, version]);
   const [drafts] = useState(() => new DraftStore());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -71,7 +71,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   const [error, setError] = useState<{ projectId: string; message: string }>();
   const operations = useRef(new Map<string, { operationId: string; workspaceMode: SessionWorkspaceMode }>());
   const registry = useResource<{ projects: ProjectResource[] }>("/api/projects", version);
-  const current = useResource<{ project: ProjectResource; bootstrap?: BootstrapData }>(route.projectId ? `/api${projectUrl(route.projectId)}` : undefined, version);
+  const current = useResource<{ project: ProjectResource }>(route.projectId ? `/api${projectUrl(route.projectId)}` : undefined, version);
   const modelCatalog = useInstallationModels(version);
   const project = current.data && current.data.project.id === route.projectId ? current.data.project : undefined;
   const projectError = current.error ?? (current.data && current.data.project.id !== route.projectId ? "返回的项目标识与 URL 不匹配" : undefined);
@@ -133,7 +133,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   useEffect(() => shortcutRegistry.register("newSession", { run: () => { if (route.projectId) void createSession(route.projectId); }, available: () => Boolean(route.projectId && project?.capability.state === "ready" && !removingProject && !pickerOpen && !settingsOpen && !creating.current.has(route.projectId) && !removing.current.has(route.projectId)) }), [route.projectId, project?.capability.state, removingProject, pickerOpen, settingsOpen, createSession]);
   const base = route.projectId ? projectUrl(route.projectId) : "/projects";
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
-  const context: WorkspaceContextValue = { route, query, project, projects, bootstrap: current.data?.bootstrap, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
+  const context: WorkspaceContextValue = { route, query, project, projects, renderedAt, navigate, drafts, version, refresh, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
   return <WorkspaceContext.Provider value={context}>
     <SessionViewerHost route={route} pathname={pathname} query={query} navigate={navigate}>
     <main className={cn("workbench", mobileSidebarOpen && "sidebar-mobile-open")}>
