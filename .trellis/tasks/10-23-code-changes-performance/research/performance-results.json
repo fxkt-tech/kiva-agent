@@ -1,0 +1,394 @@
+{
+  "baselineCommit": "c0ad5c7",
+  "fixtureRoot": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-changes-benchmark-Zqdsmc",
+  "environment": {
+    "node": "v24.14.0",
+    "git": "git version 2.55.0",
+    "os": "darwin 27.0.0",
+    "cpu": "Apple M1 Pro",
+    "samples": 30,
+    "warmup": 5,
+    "filesystem": "local temporary filesystem; OS cache not cleared"
+  },
+  "scenarios": [
+    {
+      "name": "large-few",
+      "sourceFiles": 10000,
+      "changedLeaves": 4,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-changes-benchmark-Zqdsmc/large-few",
+      "id": "p_a06a74631c25d654ff87b385"
+    },
+    {
+      "name": "many-changes",
+      "sourceFiles": 2000,
+      "changedLeaves": 2000,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-changes-benchmark-Zqdsmc/many-changes",
+      "id": "p_0519010fca05fe0ecc88bab8"
+    },
+    {
+      "name": "clean",
+      "sourceFiles": 10000,
+      "changedLeaves": 0,
+      "root": "/private/var/folders/pk/ts3f4ygd0dbdsl6nt4d31hpm0000gn/T/kiva-changes-benchmark-Zqdsmc/clean",
+      "id": "p_2534d61bc67e538a4ab245d4"
+    }
+  ],
+  "baseline": {
+    "measurements": [
+      {
+        "name": "large-few/list",
+        "timings": {
+          "p50": 76.96,
+          "p95": 97.09
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 4,
+          "lsFiles": 1,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 287366,
+        "contentBytes": 0,
+        "fullFilePaths": 10004,
+        "changedLeaves": 4
+      },
+      {
+        "name": "large-few/tracked-small",
+        "timings": {
+          "p50": 47.22,
+          "p95": 65.4
+        },
+        "counters": {
+          "gitSync": 6,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 0
+        },
+        "payloadBytes": 241,
+        "contentBytes": 188,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/tracked-near-bound",
+        "timings": {
+          "p50": 49.56,
+          "p95": 60
+        },
+        "counters": {
+          "gitSync": 6,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 0
+        },
+        "payloadBytes": 1626182,
+        "contentBytes": 1624139,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/untracked-multiline",
+        "timings": {
+          "p50": 55.8,
+          "p95": 62.96
+        },
+        "counters": {
+          "gitSync": 7,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 1
+        },
+        "payloadBytes": 510180,
+        "contentBytes": 480129,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/concurrent-same-4",
+        "timings": {
+          "p50": 161.48,
+          "p95": 208.69
+        },
+        "counters": {
+          "gitSync": 24,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 4,
+          "status": 0
+        },
+        "payloadBytes": 964,
+        "contentBytes": 752,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/concurrent-different-2",
+        "timings": {
+          "p50": 94.57,
+          "p95": 122.16
+        },
+        "counters": {
+          "gitSync": 12,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 2,
+          "status": 0
+        },
+        "payloadBytes": 416,
+        "contentBytes": 323,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "many-changes/list",
+        "timings": {
+          "p50": 52.23,
+          "p95": 53.98
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 4,
+          "lsFiles": 1,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 157241,
+        "contentBytes": 0,
+        "fullFilePaths": 2001,
+        "changedLeaves": 2000
+      },
+      {
+        "name": "clean/list",
+        "timings": {
+          "p50": 65.25,
+          "p95": 72.54
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 4,
+          "lsFiles": 1,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 287135,
+        "contentBytes": 0,
+        "fullFilePaths": 10001,
+        "changedLeaves": 0
+      },
+      {
+        "name": "clean/clean-path",
+        "timings": {
+          "p50": 48.87,
+          "p95": 52.82
+        },
+        "counters": {
+          "gitSync": 7,
+          "gitAsync": 0,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 1
+        },
+        "payloadBytes": 88,
+        "contentBytes": 42,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      }
+    ],
+    "responsiveness": {
+      "delayMs": 300,
+      "samples": 30,
+      "ping": {
+        "p50": 346.71,
+        "p95": 360.84
+      },
+      "diff": {
+        "p50": 420.54,
+        "p95": 440.72
+      },
+      "pingBeforeDiffCompletion": 0
+    }
+  },
+  "after": {
+    "measurements": [
+      {
+        "name": "large-few/list",
+        "timings": {
+          "p50": 64.41,
+          "p95": 67.25
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 3,
+          "lsFiles": 0,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 398,
+        "contentBytes": 0,
+        "fullFilePaths": 0,
+        "changedLeaves": 4
+      },
+      {
+        "name": "large-few/tracked-small",
+        "timings": {
+          "p50": 46.58,
+          "p95": 51.04
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 1,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 0
+        },
+        "payloadBytes": 241,
+        "contentBytes": 188,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/tracked-near-bound",
+        "timings": {
+          "p50": 58.68,
+          "p95": 61.3
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 1,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 0
+        },
+        "payloadBytes": 1626182,
+        "contentBytes": 1624139,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/untracked-multiline",
+        "timings": {
+          "p50": 62.21,
+          "p95": 68.19
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 2,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 1
+        },
+        "payloadBytes": 510180,
+        "contentBytes": 480129,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/concurrent-same-4",
+        "timings": {
+          "p50": 147,
+          "p95": 166.08
+        },
+        "counters": {
+          "gitSync": 20,
+          "gitAsync": 1,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 0
+        },
+        "payloadBytes": 964,
+        "contentBytes": 752,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "large-few/concurrent-different-2",
+        "timings": {
+          "p50": 80.57,
+          "p95": 87.01
+        },
+        "counters": {
+          "gitSync": 10,
+          "gitAsync": 2,
+          "lsFiles": 0,
+          "diff": 2,
+          "status": 0
+        },
+        "payloadBytes": 416,
+        "contentBytes": 323,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "many-changes/list",
+        "timings": {
+          "p50": 53.75,
+          "p95": 59.12
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 3,
+          "lsFiles": 0,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 100728,
+        "contentBytes": 0,
+        "fullFilePaths": 0,
+        "changedLeaves": 2000
+      },
+      {
+        "name": "clean/list",
+        "timings": {
+          "p50": 59.24,
+          "p95": 62.15
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 3,
+          "lsFiles": 0,
+          "diff": 0,
+          "status": 1
+        },
+        "payloadBytes": 222,
+        "contentBytes": 0,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      },
+      {
+        "name": "clean/clean-path",
+        "timings": {
+          "p50": 53.76,
+          "p95": 56.95
+        },
+        "counters": {
+          "gitSync": 5,
+          "gitAsync": 2,
+          "lsFiles": 0,
+          "diff": 1,
+          "status": 1
+        },
+        "payloadBytes": 88,
+        "contentBytes": 42,
+        "fullFilePaths": 0,
+        "changedLeaves": 0
+      }
+    ],
+    "responsiveness": {
+      "delayMs": 300,
+      "samples": 30,
+      "ping": {
+        "p50": 0.68,
+        "p95": 1.09
+      },
+      "diff": {
+        "p50": 418.47,
+        "p95": 434.55
+      },
+      "pingBeforeDiffCompletion": 30
+    }
+  }
+}

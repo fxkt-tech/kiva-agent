@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Scoped ownership, passive reads, raw filename and safe diff contracts."}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-files-performance.md", "reason": "Current async directory reader, full file-view contract and in-flight sharing."}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Shared browser/tree boundaries and routed/browser verification."}
+{"file": ".trellis/tasks/10-23-code-changes-performance/research/loading-chain.md", "reason": "Confirmed changes-only opportunity, synchronous diff chain, refresh bug and prior residual bottlenecks."}
+{"file": ".trellis/spec/kiva-web/frontend/code-changes-performance.md", "reason": "Final changes-only projection, bounded async preview and refresh/write precedence contracts."}

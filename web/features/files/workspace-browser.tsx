@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { FileCode2 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
-import type { WorkspaceData } from "@/shared/types";
+import type { WorkspaceChangesData, WorkspaceData } from "@/shared/types";
 import type { SessionRuntimeRead } from "@/shared/runtime-types";
 import type { ResourceTarget } from "@/shared/workspace-contract";
 import { ResourceState, useWorkspace } from "@/features/workspace/shell";
@@ -16,12 +16,12 @@ export function WorkspaceBrowser({ target, kind }: { target: ResourceTarget; kin
   let path: string | undefined, queryError: string | undefined;
   try { path = selectedQuery(query, "path"); } catch (cause) { queryError = cause instanceof Error ? cause.message : String(cause); }
   const api = resourceApi(target);
-  const workspace = useResource<WorkspaceData>(`${api}/workspace`, version);
+  const workspace = useResource<WorkspaceData | WorkspaceChangesData>(`${api}/workspace${kind === "changes" ? "?view=changes" : ""}`, version);
   const detail = useResource<SessionRuntimeRead>(target.sessionId ? api : undefined, version);
-  const preview = useResource<{ path: string; content: string; truncated?: boolean }>(path !== undefined && !queryError ? `${api}/${kind}?path=${encodeURIComponent(path)}` : undefined);
+  const preview = useResource<{ path: string; content: string; truncated?: boolean }>(path !== undefined && !queryError ? `${api}/${kind}?path=${encodeURIComponent(path)}` : undefined, version);
   const url = target.sessionId ? sessionUrl(target.projectId, target.sessionId) : projectUrl(target.projectId);
   const session = detail.data?.session;
-  const files = workspace.data?.project.files;
+  const files = workspace.data && "files" in workspace.data.project ? workspace.data.project.files : undefined;
   const changes = workspace.data?.project.changes;
   const statuses = useMemo(() => new Map(changes?.map((change) => [change.path, change.status])), [changes]);
   const entries = useMemo(() => kind === "files" ? files?.map((file) => ({ path: file, status: statuses.get(file) })) ?? [] : changes ?? [], [kind, files, changes, statuses]);
@@ -40,7 +40,7 @@ export function WorkspaceBrowser({ target, kind }: { target: ResourceTarget; kin
       <WorkspaceTree key={`${api}/${kind}`} entries={entries} selectedPath={path} onSelect={select} rootName={project.name} scope={target.sessionId ? session?.workspace?.mode === "current-branch" ? "当前分支 · 共享项目目录" : "会话工作区" : "原项目目录"} rootTitle={`${session?.workspace?.executionRoot ?? project.path} · ${branch}`} label={kind === "files" ? "文件" : "代码变更"} emptyMessage={kind === "files" ? "此工作区没有可显示的文件" : "工作区没有未提交变更"} unavailable={unavailableDiff ? <Alert variant="warning" title="暂时无法查看变更" className="workspace-tree-alert">{project.capability.state !== "ready" && project.capability.message}。准备 Git 和首次提交后刷新以查看变更。</Alert> : undefined} />
       <div className="workspace-preview">{path !== undefined ? <>
         <div className="workspace-preview-header"><span>{path}</span>{(!session || session.executable) && <button onClick={ask}>交给 KivA</button>}</div>
-        {preview.loading ? <p className="workspace-preview-state">正在读取…</p> : preview.error ? <Alert variant="error" title={kind === "files" ? "文件读取失败" : "差异读取失败"} className="preview-alert">{preview.error}</Alert> : <>{preview.data?.truncated && <Alert variant="warning" title="预览内容已截断" className="preview-alert">文件较大，这里仅显示部分内容。</Alert>}<pre>{preview.data?.content}</pre></>}
+        {preview.loading || preview.refreshing ? <p className="workspace-preview-state" role="status">{preview.refreshing ? "正在刷新…" : "正在读取…"}</p> : preview.error ? <Alert variant="error" title={kind === "files" ? "文件读取失败" : "差异读取失败"} className="preview-alert">{preview.error}</Alert> : <>{preview.data?.truncated && <Alert variant="warning" title="预览内容已截断" className="preview-alert">文件较大，这里仅显示部分内容。</Alert>}<pre>{preview.data?.content}</pre></>}
       </> : <div className="workspace-preview-placeholder"><FileCode2 size={25} /><p>选择一个{kind === "files" ? "文件进行预览" : "变更查看差异"}</p><code>{session?.workspace?.executionRoot ?? project.path}</code></div>}</div>
     </div>
   </div>;

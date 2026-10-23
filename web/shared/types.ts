@@ -19,6 +19,11 @@ export interface WorkspaceData {
   };
 }
 
+export interface WorkspaceChangesData {
+  renderedAt: string;
+  project: Omit<WorkspaceData["project"], "files">;
+}
+
 export interface SessionCollections {
   active: SessionSummary[];
   archived: SessionSummary[];

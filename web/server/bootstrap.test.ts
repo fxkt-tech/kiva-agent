@@ -33,8 +33,8 @@ it("keeps exact Unicode, newline, whitespace and renamed paths in workspace list
     assert.ok(data.project.changes.some((change) => change.path === path), `Change listing must preserve ${JSON.stringify(path)}`);
     const query = new URLSearchParams({ path });
     const decoded = new URL(`http://fixture.local/files?${query}`).searchParams.get("path")!;
-    assert.equal(readProjectFile(root, decoded).path, path);
-    assert.ok(readProjectDiff(root, decoded).content.length > 0);
+    assert.equal((await readProjectFile(root, decoded)).path, path);
+    assert.ok((await readProjectDiff(root, decoded)).content.length > 0);
   }
   assert.equal(data.project.changes.filter((change) => change.path === destination).length, 1);
   assert.equal(data.project.changes.some((change) => change.path === source), false);
@@ -60,6 +60,6 @@ it("lists only selected-subdirectory changes using paths relative to its executi
   assert.ok(data.project.changes.some((change) => change.path === "leaving.txt" && change.status === "D"));
   assert.ok(data.project.files.includes("file.ts"));
   assert.equal(data.project.files.some((path) => path.startsWith("package/") || path.includes("outside")), false);
-  assert.match(readProjectDiff(context, "file.ts").content, /inside changes/);
-  assert.match(readProjectDiff(context, "leaving.txt").content, /deleted file mode/);
+  assert.match((await readProjectDiff(context, "file.ts")).content, /inside changes/);
+  assert.match((await readProjectDiff(context, "leaving.txt")).content, /deleted file mode/);
 });

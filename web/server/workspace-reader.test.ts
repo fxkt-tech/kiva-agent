@@ -129,3 +129,39 @@ it("rejects replaced/missing roots and cannot reuse an old directory's in-flight
   assert.equal(calls, 8);
   await assert.rejects(reader.read(join(parent, "missing")), hasCode("workspace_read_failed"));
 });
+
+it("projects changes without ls-files or filesystem fallback and isolates full-list in-flight work", async (t) => {
+  const root = fixture(t);
+  mkdirSync(join(root, "nested"));
+  writeFileSync(join(root, "nested", "new.txt"), "new\n");
+  const calls: string[] = [];
+  const gate = deferred(), entered = deferred();
+  const reader = new WorkspaceReader({ runGit: async (...args) => { calls.push(args[1][0]); if (calls.length === 7) entered.release(); await gate.promise; return runWorkspaceGit(...args); } });
+  const capability = inspectGitCapability(root);
+  const changes = reader.readChanges(root, capability), duplicate = reader.readChanges(root, capability), full = reader.read(root, capability);
+  await entered.promise;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls.length, 7, "three changes commands and four full-list commands");
+  assert.equal(calls.filter((command) => command === "ls-files").length, 1);
+  gate.release();
+  const [a, b, c] = await Promise.all([changes, duplicate, full]);
+  assert.equal(a, b);
+  assert.equal("files" in a.project, false);
+  assert.deepEqual(a.project.changes, [{ status: "??", path: "nested/new.txt" }]);
+  assert.deepEqual(c.project.files, ["nested/new.txt"]);
+  const plain = fixture(t, false);
+  symlinkSync("/does/not/exist", join(plain, "broken-link"));
+  writeFileSync(join(plain, "walking-would-exceed-the-one-byte-bound.txt"), "fixture\n");
+  const noWalk = new WorkspaceReader({ maxBuffer: 1, runGit: async () => { throw new Error("Must not run Git"); } });
+  for (const state of ["non-git", "missing-git"] as const) {
+    const unavailable = await noWalk.readChanges(plain, { state, message: "Prepare Git" });
+    assert.deepEqual(unavailable.project.changes, []);
+    assert.equal("files" in unavailable.project, false);
+  }
+});
+
+it("does not hide a changes-only status failure as a clean workspace", async (t) => {
+  const root = fixture(t);
+  const reader = new WorkspaceReader({ runGit: async (_root, args) => { if (args[0] === "status") throw Object.assign(new Error("status failed"), { code: 128 }); return ""; } });
+  await assert.rejects(reader.readChanges(root, inspectGitCapability(root)), hasCode("workspace_read_failed"));
+});

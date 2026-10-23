@@ -143,6 +143,10 @@ describe("routed workspace features", () => {
       }
       if (url === "/api/projects/alpha/sessions" && init?.method === "POST") return Response.json({ projectId: "alpha", sessionId: "created", session: body.workspaceMode === "current-branch" ? currentBranchSession("created") : session("created") });
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: sessions.filter((item) => item.collection === "active"), archived: sessions.filter((item) => item.collection === "archived"), trash: sessions.filter((item) => item.collection === "trash") });
+      if (url.endsWith("/workspace?view=changes")) {
+        const { files: _files, ...project } = workspace.project;
+        return Response.json({ renderedAt: workspace.renderedAt, project: { ...project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
+      }
       if (url.endsWith("/workspace")) return Response.json({ ...workspace, project: { ...workspace.project, path: url.includes("/sessions/") ? "/worktrees/one" : "/repo" } });
       if (url.includes("/files?")) return Response.json({ path: new URL(url, "http://localhost").searchParams.get("path"), content: "# Real file" });
       if (url.includes("/changes?")) return Response.json({ path: "README.md", content: "diff --git a/README.md b/README.md" });
@@ -765,14 +769,14 @@ describe("routed workspace features", () => {
     assert.deepEqual(commandRequests().map((entry) => [entry.url, entry.body?.type]), [["/api/projects/alpha/sessions/one/commands", "steer"]]);
   });
 
-  it("ignores late directory reads, previews and scoped events from the previous identity", async () => {
+  for (const kind of ["files", "changes"] as const) it(`ignores late ${kind} directory reads, previews and scoped events from the previous identity`, async () => {
     const stale = deferred<Response>(), staleWorkspace = deferred<Response>();
-    extraFetch = async (url) => url === "/api/projects/alpha/sessions/one/workspace" ? staleWorkspace.promise : url.includes("/files?path=README") ? stale.promise : undefined;
+    extraFetch = async (url) => url === `/api/projects/alpha/sessions/one/workspace${kind === "changes" ? "?view=changes" : ""}` ? staleWorkspace.promise : url.includes(`/${kind}?path=README`) ? stale.promise : undefined;
     await open(); const old = FakeWebSocket.sockets[0];
-    await open("/projects/alpha/sessions/one/files?path=README.md");
-    await open("/projects/alpha/sessions/two/files?path=src%2Fmain.ts");
+    await open(`/projects/alpha/sessions/one/${kind}?path=README.md`);
+    await open(`/projects/alpha/sessions/two/${kind}?path=src%2Fmain.ts`);
     stale.resolve(Response.json({ path: "README.md", content: "STALE PREVIEW" }));
-    staleWorkspace.resolve(Response.json({ ...workspace, project: { ...workspace.project, files: ["STALE TREE"], changes: [] } }));
+    staleWorkspace.resolve(Response.json({ ...workspace, project: { ...workspace.project, files: ["STALE TREE"], changes: [{ path: "STALE TREE", status: "M" }] } }));
     await act(async () => { old.publish({ type: "snapshot", snapshot: snapshot("one", { messages: [{ id: "stale", role: "user", text: "STALE MESSAGE", thinking: "", tools: [] }] }) }); await settle(); });
     assert.doesNotMatch(text(renderer!.root), /STALE TREE|STALE PREVIEW|STALE MESSAGE/);
   });

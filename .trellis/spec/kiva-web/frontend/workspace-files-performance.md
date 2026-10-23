@@ -11,6 +11,8 @@ Apply when changing project metadata, workspace listings or file-tree inputs. Pr
 - `WorkspaceReader.read(root, capability?)` returns `Promise<WorkspaceData>`. One reader belongs to each scoped transport. `runWorkspaceGit(root, args, { timeoutMs, maxBuffer })` uses async argument-array child processes.
 - File and diff previews remain the separate `.../files?path=...` and `.../changes?path=...` resources.
 
+For the changes-only workspace projection and async preview signatures, see [Code Changes Resources](./code-changes-performance.md).
+
 ## 3. Contracts
 
 Project/session ownership resolution precedes every directory read and in-flight lookup. Session views use their recorded execution root, including current-branch/worktree identity checks; failure never substitutes the project root. Workspace reads are passive and do not acquire runtimes.

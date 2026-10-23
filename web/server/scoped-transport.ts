@@ -6,7 +6,7 @@ import type { WorkspaceRegistry } from "./workspace-registry";
 import type { SessionRepository } from "./session-repository";
 import type { RuntimeManager } from "./runtime-manager";
 import { WorkspaceReader } from "./workspace-reader";
-import { readProjectDiff, readProjectFile } from "./workspace-files";
+import { ProjectDiffReader, readProjectFile } from "./workspace-files";
 import { listWorkspaceDirectories } from "./workspace-directories";
 import { readModelDefaults } from "./model-catalog";
 import { isModelConfiguration } from "../shared/model-configuration";
@@ -30,6 +30,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
   const settings = new InstallationSettingsService(registry.installationRoot, manager, authorization);
   const workspace = new WorkspaceReader();
+  const diffs = new ProjectDiffReader();
 
   return {
     close: () => settings.close(),
@@ -40,7 +41,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
       if (!url.pathname.startsWith("/api/")) return false;
       try {
         if (request.method !== "GET" && !allowed(request)) throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
-        for (const name of ["path", "collection", "projectId", "sessionId"]) if (url.searchParams.getAll(name).length > 1) throw new WorkspaceError("duplicate_parameter", `Duplicate ${name} parameter`, 400);
+        for (const name of ["path", "collection", "projectId", "sessionId", "view"]) if (url.searchParams.getAll(name).length > 1) throw new WorkspaceError("duplicate_parameter", `Duplicate ${name} parameter`, 400);
         if (url.searchParams.has("projectId") || url.searchParams.has("sessionId")) throw new WorkspaceError("invalid_identity", "Resource identity belongs in the route", 400);
         if (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/")) {
           if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "安装设置不接受查询参数。", 400);
@@ -94,6 +95,10 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           }
           return true;
         }
+        const parts = url.pathname.split("/").slice(1).map((part) => decodeURIComponent(part));
+        const view = url.searchParams.get("view");
+        const workspaceRoute = parts[0] === "api" && parts[1] === "projects" && (parts.length === 4 && parts[3] === "workspace" || parts.length === 6 && parts[3] === "sessions" && parts[5] === "workspace");
+        if (view !== null && (view !== "changes" || !workspaceRoute)) throw new WorkspaceError("invalid_view", "Unsupported workspace view", 400);
         if (url.pathname === "/api/project/directories" && request.method === "GET") {
           sendJson(response, 200, listWorkspaceDirectories(url.searchParams.get("path") ?? registry.installationRoot)); return true;
         }
@@ -106,7 +111,6 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           } else methodNotAllowed();
           return true;
         }
-        const parts = url.pathname.split("/").slice(1).map((part) => decodeURIComponent(part));
         if (parts[0] !== "api" || parts[1] !== "projects" || !parts[2]) {
           if (/^\/api\/(runtime|sessions|project)(\/|$)/.test(url.pathname)) throw new WorkspaceError("refresh_required", "This tab uses retired unscoped endpoints; refresh KivA", 409);
           throw new WorkspaceError("endpoint_not_found", "API endpoint not found", 404);
@@ -135,7 +139,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         if (parts.length === 3 && request.method === "GET") { sendJson(response, 200, { project }); return true; }
         if (["workspace", "files", "changes"].includes(parts[3]) && parts.length === 4 && request.method === "GET") {
           if (project.capability.state === "unavailable") throw new WorkspaceError("project_unavailable", "Registered project directory is unavailable or has moved", 404, { projectId });
-          sendJson(response, 200, parts[3] === "workspace" ? await workspace.read(project.path, project.capability) : parts[3] === "files" ? readProjectFile(project.path, url.searchParams.get("path") ?? "") : readProjectDiff(project.path, url.searchParams.get("path") ?? "")); return true;
+          sendJson(response, 200, parts[3] === "workspace" ? await (view === "changes" ? workspace.readChanges(project.path, project.capability) : workspace.read(project.path, project.capability)) : parts[3] === "files" ? await readProjectFile(project.path, url.searchParams.get("path") ?? "") : await diffs.read(project.path, url.searchParams.get("path") ?? "")); return true;
         }
         if (parts[3] !== "sessions") throw new WorkspaceError("endpoint_not_found", "API endpoint not found", 404);
         if (parts.length === 4) {
@@ -163,7 +167,7 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
         }
         if (["workspace", "files", "changes"].includes(endpoint) && request.method === "GET") {
           const root = await repository.resolveWorkspace(projectId, scope.sessionId);
-          sendJson(response, 200, endpoint === "workspace" ? await workspace.read(root, root === project.path ? project.capability : undefined) : endpoint === "files" ? readProjectFile(root, url.searchParams.get("path") ?? "") : readProjectDiff(root, url.searchParams.get("path") ?? "")); return true;
+          sendJson(response, 200, endpoint === "workspace" ? await (view === "changes" ? workspace.readChanges(root, root === project.path ? project.capability : undefined) : workspace.read(root, root === project.path ? project.capability : undefined)) : endpoint === "files" ? await readProjectFile(root, url.searchParams.get("path") ?? "") : await diffs.read(root, url.searchParams.get("path") ?? "")); return true;
         }
         if (request.method !== "POST") methodNotAllowed();
         const body = await readObject(request);

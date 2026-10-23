@@ -48,6 +48,28 @@ async function fixture(capacity = 4) {
 }
 
 describe("scoped HTTP/WebSocket transport", () => {
+  it("returns a changes-only projection for exact workspace routes and rejects invalid views", async () => {
+    const f = await fixture();
+    try {
+      writeFileSync(join(f.installation, "tracked.txt"), "changed fixture\n");
+      const changes = await f.request(`${f.api}/workspace?view=changes`);
+      assert.equal(changes.status, 200);
+      assert.equal("files" in changes.body.project, false);
+      assert.deepEqual(changes.body.project.changes, [{ status: "M", path: "tracked.txt" }]);
+      assert.ok((await f.request(`${f.api}/workspace`)).body.project.files.includes("tracked.txt"));
+      const session = await f.create("changes-current");
+      const sessionChanges = await f.request(`${f.api}/sessions/${session.id}/workspace?view=changes`);
+      assert.equal(sessionChanges.status, 200);
+      assert.equal("files" in sessionChanges.body.project, false);
+      assert.equal(sessionChanges.body.project.path, f.installation);
+      for (const path of [
+        `${f.api}/workspace?view=files`, `${f.api}/workspace?view=other`, `${f.api}/workspace?view=changes&view=changes`,
+        `${f.api}?view=changes`, "/api/projects?view=changes", "/api/project/directories?view=unsupported", `${f.api}/sessions/workspace?view=changes`, `${f.api}/files?path=tracked.txt&view=changes`,
+      ]) assert.equal((await f.request(path)).status, 400, path);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
   it("loads metadata and directory data without bootstrap history or unrelated registry enumeration", async (t) => {
     const f = await fixture();
     try {

@@ -159,12 +159,65 @@ describe("scoped file and change trees", () => {
     assert.match(text(renderer!.root), /second preview/);
     assert.equal(requests.filter((url) => url.endsWith("/workspace")).length, 1);
     workspace = { ...workspace, project: { ...workspace.project, files: [...workspace.project.files, "src/third.ts"], changes: [{ path: "src/first.ts", status: "A" }] } };
+    deferPreview = false;
     await act(async () => { refresh!(); await settle(); });
     assert.notEqual(entries(), originalEntries, "actual resource changes must update the tree");
     assert.ok(entries().some((entry: { path: string }) => entry.path === "src/third.ts"));
     assert.equal(entries().find((entry: { path: string }) => entry.path === "src/first.ts").status, "A");
     assert.equal(renderer!.root.findAllByProps({ role: "treeitem" }).find((node) => node.props["data-path"] === "src/second.ts")!.props["aria-selected"], true);
     assert.equal(requests.filter((url) => url.endsWith("/workspace")).length, 2);
+  });
+
+  for (const kind of ["files", "changes"] as const) it(`refreshes the same selected ${kind} preview with pending feedback while retaining its tree`, async () => {
+    const project: ProjectResource = { id: "alpha", name: "Alpha", path: "/repo", capability: { state: "ready", branch: "main", head: "base", commonDirectory: "/repo/.git", repositoryRoot: "/repo", projectSubdirectory: "" } };
+    const workspace: WorkspaceData = { renderedAt: "2026-10-21", project: { name: "Alpha", path: "/repo", branch: "main", dirtyFiles: 2, files: ["src/first.ts", "src/second.ts"], changes: [{ path: "src/first.ts", status: "M" }, { path: "src/second.ts", status: "??" }] } };
+    const listUrl = `/api/projects/alpha/workspace${kind === "changes" ? "?view=changes" : ""}`;
+    const previewUrl = `/api/projects/alpha/${kind}?path=src%2Ffirst.ts`;
+    const requests: string[] = [];
+    let refresh: (() => void) | undefined;
+    let pending = false, previewFailure = false;
+    let resolveList: ((response: Response) => void) | undefined, resolvePreview: ((response: Response) => void) | undefined;
+    function Probe() { refresh = useWorkspace().refresh; return null; }
+    const listing = () => {
+      const { files: _files, ...changesProject } = workspace.project;
+      return Response.json(kind === "changes" ? { renderedAt: workspace.renderedAt, project: changesProject } : workspace);
+    };
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener() {}, removeEventListener() {} } });
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {} } });
+    globalThis.fetch = async (input) => {
+      const url = String(input); requests.push(url);
+      if (url === "/api/projects") return Response.json({ projects: [project] });
+      if (url === "/api/projects/alpha") return Response.json({ project });
+      if (url.endsWith("/models")) return Response.json({ models: [] });
+      if (url.endsWith("/sessions")) return Response.json({ active: [], archived: [], trash: [] });
+      if (url === listUrl) return pending ? new Promise<Response>((resolve) => { resolveList = resolve; }) : listing();
+      assert.equal(url, previewUrl);
+      if (pending) return new Promise<Response>((resolve) => { resolvePreview = resolve; });
+      return previewFailure ? Response.json({ error: "preview failed" }, { status: 500 }) : Response.json({ path: "src/first.ts", content: "original preview" });
+    };
+    await act(async () => {
+      renderer = create(createElement(WorkspaceShell, { pathname: `/projects/alpha/${kind}`, search: "path=src%2Ffirst.ts", navigate() {}, children: createElement(Fragment, null, createElement(WorkspaceBrowser, { target: { projectId: "alpha" }, kind }), createElement(Probe)) }));
+      await settle();
+    });
+    assert.match(text(renderer!.root), /original preview/);
+    const originalEntries = renderer!.root.findByType(WorkspaceTree).props.entries;
+    pending = true;
+    await act(async () => { refresh!(); await settle(); });
+    assert.equal(renderer!.root.findByType(WorkspaceTree).props.entries, originalEntries, "refresh keeps the existing list usable while pending");
+    assert.match(text(renderer!.root.findByProps({ className: "workspace-preview-state" })), /正在刷新/);
+    assert.doesNotMatch(text(renderer!.root), /original preview/, "old content is not presented as the refreshed result");
+    assert.equal(requests.filter((url) => url === previewUrl).length, 2, "refresh must reread an unchanged selected path");
+    await act(async () => { resolveList!(listing()); await settle(); });
+    const refreshedEntries = renderer!.root.findByType(WorkspaceTree).props.entries;
+    await act(async () => { resolvePreview!(Response.json({ path: "src/first.ts", content: "edited preview" })); await settle(); });
+    assert.match(text(renderer!.root), /edited preview/);
+    assert.equal(renderer!.root.findByType(WorkspaceTree).props.entries, refreshedEntries, "a refreshed preview does not rebuild the list");
+    assert.equal(requests.filter((url) => url === listUrl).length, 2);
+    if (kind === "changes") assert.equal(requests.includes("/api/projects/alpha/workspace"), false, "changes must not request full files");
+    pending = false; previewFailure = true;
+    await act(async () => { refresh!(); await settle(); });
+    assert.match(text(renderer!.root), /preview failed/);
+    assert.ok(renderer!.root.findByType(WorkspaceTree), "preview failures leave the list available");
   });
 
   it("preserves raw paths, scoped reads and ask drafts, and retains empty/non-Git/error states", async () => {
@@ -183,7 +236,10 @@ describe("scoped file and change trees", () => {
       if (url === "/api/projects") return Response.json({ projects: [project] });
       if (url === "/api/projects/alpha") return Response.json({ project });
       if (url.endsWith("/models")) return Response.json({ models: [] });
-      if (url.endsWith("/workspace")) return workspaceFailure ? Response.json({ error: "workspace unavailable" }, { status: 500 }) : Response.json(workspace);
+      if (url.endsWith("/workspace") || url.endsWith("/workspace?view=changes")) {
+        const { files: _files, ...project } = workspace.project;
+        return workspaceFailure ? Response.json({ error: "workspace unavailable" }, { status: 500 }) : Response.json(url.endsWith("?view=changes") ? { renderedAt: workspace.renderedAt, project } : workspace);
+      }
       if (url === "/api/projects/alpha/sessions") return Response.json({ active: [], archived: [], trash: [] });
       if (/\/(files|changes)\?/.test(url)) return Response.json({ path: raw, content: "exact preview" });
       return Response.json({ session, projectId: "alpha", sessionId: "one", lifecycle: "dormant", executable: true });
@@ -194,7 +250,13 @@ describe("scoped file and change trees", () => {
       await act(async () => { if (renderer) renderer.update(element); else renderer = create(element); await settle(); });
     };
     for (const sessionId of [undefined, "one"]) for (const kind of ["files", "changes"] as const) {
+      const scopeApi = `/api/projects/alpha${sessionId ? `/sessions/${sessionId}` : ""}`;
+      const listUrl = `${scopeApi}/workspace${kind === "changes" ? "?view=changes" : ""}`;
+      const scopeRequests = requests.length;
       await render(sessionId, kind);
+      assert.ok(requests.slice(scopeRequests).includes(listUrl));
+      if (kind === "changes") assert.equal(requests.slice(scopeRequests).includes(`${scopeApi}/workspace`), false);
+      const originalEntries = renderer!.root.findByType(WorkspaceTree).props.entries;
       assert.equal(renderer!.root.findAllByProps({ className: "workspace-browser-heading" }).length, 0);
       const previewsBefore = requests.filter((url) => /\/(files|changes)\?/.test(url)).length;
       for (const path of ["src", "src/deep"]) {
@@ -207,6 +269,8 @@ describe("scoped file and change trees", () => {
       assert.equal(selected.pathname, `/projects/alpha${sessionId ? `/sessions/${sessionId}` : ""}/${kind}`);
       assert.equal(selected.searchParams.get("path"), raw);
       await render(sessionId, kind, raw);
+      assert.equal(renderer!.root.findByType(WorkspaceTree).props.entries, originalEntries, "selecting and previewing does not rebuild entries");
+      assert.equal(requests.slice(scopeRequests).filter((url) => url === listUrl).length, 1, "selection does not reload the list");
       assert.ok(requests.includes(`/api/projects/alpha${sessionId ? `/sessions/${sessionId}` : ""}/${kind}?path=${encodeURIComponent(raw)}`));
       assert.equal(renderer!.root.findAllByProps({ role: "treeitem" }).find((node) => node.props["data-path"] === raw)!.props["aria-selected"], true);
       assert.ok(renderer!.root.findAllByType("pre").some((node) => text(node) === "exact preview"));
