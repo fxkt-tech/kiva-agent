@@ -393,3 +393,25 @@ Added changes-only workspace projection, bounded asynchronous diff/file reads, v
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: Optimize sidebar session list loading
+<!-- trellis-session: v=2 fp=4c39f4557df7979a -->
+
+**Date**: 2026-10-24
+**Task**: Optimize sidebar session list loading
+**Branch**: `perf/sidebar-session-lists`
+
+### Summary
+
+Added scoped lightweight list DTO/API, exact single-pass streaming history summaries, shared client demand and project-scoped invalidation. Preserved full identity checks and authoritative lifecycle paths; added runtime and partial-failure generation coverage. Verified 402 Web tests, root checks, production build, static review and isolated browser menu/search/workspace flows. Fixture HTTP P50 599.67 to 105.81 ms; paired production sidebar DOM-ready P50 940.6 to 482.7 ms. User approved commit, main merge, temporary branch deletion and push. Preserved unrelated web/next-env.d.ts edit.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `662a300` | perf(web): optimize sidebar session list loading |
+
+### Status
+
+[OK] **Completed**
