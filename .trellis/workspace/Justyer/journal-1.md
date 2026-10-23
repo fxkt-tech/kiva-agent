@@ -315,3 +315,37 @@ Committed the approved shared send/stop action and authoritative queue cards, re
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: OpenAI model authorization and Web shutdown command
+<!-- trellis-session: v=2 fp=5111ebc896243388 -->
+
+**Date**: 2026-10-23
+**Task**: OpenAI model authorization and Web shutdown command
+**Package**: kiva-web
+**Branch**: `feat/openai-model-settings`
+
+### Summary
+
+Added Settings > Models ChatGPT authorization with KivA agent hint and guarded login/logout lifecycle, plus Linux installation-scoped pnpm clear-web. User approved commit, merge into main, temporary-branch deletion and push.
+
+### Main Changes
+
+- Integrated safe OAuth attempts, explicit authorization UI, model refresh and persisted-state warning recovery.
+- Added exact-process-identity Web shutdown with graceful SIGTERM, bounded waits and unrelated-installation preservation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4dd02793c433658dd2884edc944c30d7862e1157` | feat(web): add ChatGPT authorization to model settings |
+| `3aae5daddba99ff66be7e3d7a643081375ab4af1` | feat(cli): add installation-scoped clear-web command |
+
+### Testing
+
+- [OK] 361 tests passed (11 root + 350 Web), root/Web typecheck and diff checks passed.
+- [OK] Production build and 30 isolated browser layout cases plus normal/recovery flows and actual-origin smoke passed; original next-env retained.
+
+### Status
+
+[OK] **Completed**

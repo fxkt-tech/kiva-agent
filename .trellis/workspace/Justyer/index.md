@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-10-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~317 | Active |
+| `journal-1.md` | ~351 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-10-23 | OpenAI model authorization and Web shutdown command | `4dd02793c433658dd2884edc944c30d7862e1157`, `3aae5daddba99ff66be7e3d7a643081375ab4af1` | `feat/openai-model-settings` |
 | 11 | 2026-10-23 | Complete running composer and prepare main integration | `7c35157` | `feat/owned-session-viewer` |
 | 10 | 2026-10-22 | Session tree pagination follow-up | `e324aa4` | `feat/owned-session-viewer` |
 | 9 | 2026-10-22 | Owned Pi-style session reader | `1fadac6c7625c15881d191e93481d271e6c54602`, `033b76d32090f84c8f38fd163a2b3291750954bc` | `feat/owned-session-viewer` |
