@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from "react";
-import { ArrowUp, Clock3, Command, FileCode2, GitBranch, Paperclip, SquareTerminal, StopCircle, Wrench, X } from "lucide-react";
+import { ArrowUp, Clock3, Command, FileCode2, GitBranch, Paperclip, Square, SquareTerminal, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Toast } from "@/components/ui/toast";
@@ -52,6 +52,9 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   const textInput = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const running = runtime.status === "running";
+  const hasContent = Boolean(draft.trim() || attachments.length);
+  const showStop = running && !hasContent;
+  const queue = runtime.snapshot?.queue;
   const models = modelCatalog?.models ?? [];
   const sessionModel = runtime.snapshot?.model ?? session?.controls?.model;
   const sessionSelection = sessionModel ? { provider: sessionModel.provider, modelId: sessionModel.id, thinkingLevel: runtime.snapshot?.thinkingLevel || session?.controls?.thinkingLevel || "" } : undefined;
@@ -83,7 +86,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
   useEffect(() => shortcutRegistry.register("focusComposer", { run: () => textInput.current?.focus(), available: () => Boolean(textInput.current) }), []);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if ((!draft.trim() && !attachments.length) || pending || modelSaving) return;
+    if (!hasContent || pending || modelSaving) return;
     const captured = current;
     const configuration = selection;
     const sourceKey = key;
@@ -137,14 +140,13 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
             <div className="command-search"><Command size={14} /><Input autoFocus value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} aria-label="搜索命令、技能和模板" placeholder="搜索命令、技能和模板" /></div>
             <div className="command-list">{visibleCommands.length ? visibleCommands.map((command) => <button type="button" key={`${command.source}:${command.name}`} onClick={() => chooseCommand(command.name)}><span>/{command.name}</span><small>{command.description ?? "无说明"}</small><em>{command.source === "skill" ? "技能" : command.source === "prompt" ? "模板" : "扩展"}</em></button>) : <p>没有匹配的命令</p>}</div>
           </div>}
-          {(runtime.snapshot?.queue.steering.length || runtime.snapshot?.queue.followUp.length) ? <div className="queue-panel">
-            <div className="queue-heading"><Clock3 size={13} /><span>{runtime.snapshot.queue.steering.length} 条纠正 · {runtime.snapshot.queue.followUp.length} 条后续</span></div>
-            <div className="queue-items">
-              {runtime.snapshot.queue.steering.map((message, index) => <div key={`steer-${index}`}><span>纠正</span><p>{message}</p></div>)}
-              {runtime.snapshot.queue.followUp.map((message, index) => <div key={`follow-up-${index}`}><span>后续</span><p>{message}</p></div>)}
-            </div>
-            <button onClick={() => void runtime.clearQueue()} aria-label="清空队列"><X size={13} /></button>
-          </div> : null}
+          {queue && (queue.steering.length || queue.followUp.length) ? <section className="composer-queue" aria-label="待发送消息队列">
+            <div className="queue-heading"><span><Clock3 size={13} aria-hidden="true" />{queue.steering.length} 条纠正 · {queue.followUp.length} 条后续</span><button type="button" aria-label="清空队列" onClick={() => void runtime.clearQueue()}>清空队列</button></div>
+            <ol className="queue-items" tabIndex={0} aria-label="队列消息">
+              {queue.steering.map((message, index) => <li className="queue-card" key={`steer-${index}`}><p>{message}</p><span>立即纠正</span></li>)}
+              {queue.followUp.map((message, index) => <li className="queue-card" key={`follow-up-${index}`}><p>{message}</p><span>完成后追加</span></li>)}
+            </ol>
+          </section> : null}
           <form className="composer" onSubmit={submit}>
             {attachments.length > 0 && <div className="attachment-list">{attachments.map((attachment, index) => <div key={`${attachment.name}-${index}`}>{attachment.kind === "image" ? <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="" /> : <span className="attachment-file"><FileCode2 size={14} /></span>}<span>{attachment.name}</span><button type="button" aria-label={`移除 ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button></div>)}</div>}
             <Textarea ref={textInput} value={draft} onChange={(event) => changeDraft(event.target.value)} onPaste={pasteImages} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} placeholder={running ? (queueMode === "steer" ? "立即纠正当前任务…" : "添加任务完成后的后续消息…") : "告诉 KivA 你想完成什么…"} rows={1} />
@@ -170,7 +172,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
                 </div>}
                 <ModelSettings projectId={projectId} sessionId={session?.id} models={models} selection={selection} loading={modelsLoading} disabled={running || pending || modelSaving || (Boolean(session) && !runtime.connected)} onPending={setModelSaving} onSaved={(catalog) => { updateModelCatalog(catalog); if (session && catalog.defaults) setConfirmed({ configuration: catalog.defaults, snapshot: runtime.snapshot }); setSavedNotice((value) => (value ?? 0) + 1); refresh(); }} />
               </div>
-              <div className="composer-send-actions">{running && <Button type="button" variant="ghost" size="icon" onClick={runtime.abort} aria-label="停止"><StopCircle size={17} /></Button>}<Button type="submit" size="icon" className="composer-send" aria-label="发送消息" disabled={(!draft.trim() && !attachments.length) || pending || modelSaving || (!session && project?.capability.state !== "ready") || (Boolean(session) && !runtime.connected)}><ArrowUp size={17} /></Button></div>
+              <div className="composer-send-actions"><Button type={showStop ? "button" : "submit"} size="icon" className="composer-send" aria-label={showStop ? "停止" : "发送消息"} onClick={showStop ? runtime.abort : undefined} disabled={!showStop && (!hasContent || pending || modelSaving || (!session && project?.capability.state !== "ready") || (Boolean(session) && !runtime.connected))}>{showStop ? <Square size={12} fill="currentColor" aria-hidden="true" /> : <ArrowUp size={17} aria-hidden="true" />}</Button></div>
             </div>
           </form>
           <div className="composer-note">{session && <span className="composer-connection-status" data-state={runtime.connectionStatus} role="status" aria-label="当前会话后端连接" aria-live="polite" aria-atomic="true" title={`当前会话后端连接：${CONNECTION_LABELS[runtime.connectionStatus]}`}><span className="composer-connection-dot" aria-hidden="true" />{CONNECTION_LABELS[runtime.connectionStatus]}</span>}<span className="composer-project-context" title={session?.workspace?.executionRoot ?? project?.path}><SquareTerminal size={11} />本地<span>·</span><GitBranch size={11} /><span>{session?.workspace?.branch ?? (project?.capability.state === "ready" ? project.capability.branch : "—")}</span></span><span className="composer-keyboard-hint">{getSendShortcutHint(preferences.shortcuts.sendMode)}</span></div>

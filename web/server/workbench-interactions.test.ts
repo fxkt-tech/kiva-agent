@@ -93,6 +93,28 @@ describe("routed workspace features", () => {
   const field = (label: string) => renderer!.root.findAll((node) => (node.props["aria-label"] ?? node.props.label) === label && typeof node.props.onValueChange === "function")[0];
   const treeRow = (path: string) => renderer!.root.findAllByProps({ className: "workspace-tree-row" }).find((node) => node.props["data-path"] === path)!;
   const commandRequests = () => requests.filter((entry) => entry.url.endsWith("/commands"));
+  const composerAction = () => renderer!.root.findByProps({ className: "composer-send-actions" }).findByType("button");
+  async function changeDraft(value: string) { await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value } })); }
+  async function attachNote(name = "note.md") { await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [{ name, type: "text/plain", size: 3, text: async () => "abc" }], value: "file" } })); }
+  async function activateComposerAction() {
+    const action = composerAction();
+    assert.equal(action.props.disabled, false);
+    await act(async () => {
+      if (action.props.onClick) await action.props.onClick();
+      if (action.props.type === "submit") await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} });
+      await settle();
+    });
+  }
+  async function composerEnter(options: { mod?: boolean; shiftKey?: boolean; repeat?: boolean; isComposing?: boolean; keyCode?: number } = {}) {
+    let prevented = false; let submissions = 0; let submission = Promise.resolve();
+    const form = renderer!.root.findByType("form");
+    const submitter = form.findAllByType("button").find((node) => node.props.type === "submit");
+    await act(async () => {
+      renderer!.root.findByType("textarea").props.onKeyDown({ key: "Enter", metaKey: isMacPlatform() && Boolean(options.mod), ctrlKey: !isMacPlatform() && Boolean(options.mod), shiftKey: false, repeat: false, ...options, nativeEvent: { isComposing: options.isComposing ?? false, keyCode: options.keyCode ?? 13 }, preventDefault() { prevented = true; }, currentTarget: { form: { querySelector(selector: string) { assert.equal(selector, 'button[type="submit"]'); return submitter?.props; }, requestSubmit(button: unknown) { assert.equal(button, submitter?.props); submissions++; submission = form.props.onSubmit({ preventDefault() {} }); } } } });
+      await submission; await settle();
+    });
+    return { prevented, submissions };
+  }
   async function publish(value = currentSnapshot, socket = FakeWebSocket.sockets.at(-1)!) { await act(async () => { socket.onopen?.(); socket.publish({ type: "snapshot", snapshot: value }, { projectId: "alpha", sessionId: value.session.id }); }); }
 
   beforeEach(() => {
@@ -592,6 +614,157 @@ describe("routed workspace features", () => {
     await open(); assert.equal(renderer!.root.findByType("textarea").props.value, "restore one");
   });
 
+  it("keeps one action mounted while switching idle, running, whitespace and attachment-only input", async () => {
+    await open(); await publish();
+    const action = composerAction();
+    const input = renderer!.root.findByType("textarea");
+    assert.equal(action.props.type, "submit"); assert.equal(action.props["aria-label"], "发送消息"); assert.equal(action.props.disabled, true);
+    await changeDraft("  \n ");
+    assert.equal(composerAction(), action); assert.equal(action.props.disabled, true);
+    await changeDraft("ordinary prompt"); await activateComposerAction();
+    assert.equal(commandRequests().at(-1)?.body?.type, "prompt");
+    await publish(snapshot("one", { status: "running" }));
+    assert.equal(composerAction(), action); assert.equal(action.props.type, "button"); assert.equal(action.props["aria-label"], "停止"); assert.equal(action.props.disabled, false);
+    assert.equal(action.findByType("svg").props.fill, "currentColor");
+    await changeDraft(" \n ");
+    assert.equal(action.props["aria-label"], "停止");
+    await attachNote();
+    assert.equal(composerAction(), action); assert.equal(action.props.type, "submit"); assert.equal(action.props["aria-label"], "发送消息"); assert.equal(action.props.disabled, false);
+    await act(() => field("消息队列模式").props.onValueChange("follow_up"));
+    await activateComposerAction();
+    assert.deepEqual(commandRequests().at(-1)?.body, { type: "follow_up", message: " \n ", images: [], files: [{ kind: "text", name: "note.md", mimeType: "text/plain", data: "abc" }] });
+    assert.equal(renderer!.root.findAllByProps({ className: "composer-queue" }).length, 0, "enqueue acceptance does not create a local queue projection");
+    assert.equal(action.props["aria-label"], "停止");
+    await activateComposerAction();
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["prompt", "follow_up", "abort"]);
+    assert.ok(commandRequests().every((entry) => entry.url === "/api/projects/alpha/sessions/one/commands"));
+    await publish();
+    assert.equal(composerAction(), action); assert.equal(renderer!.root.findByType("textarea"), input);
+    assert.equal(action.props.type, "submit"); assert.equal(action.props.disabled, true);
+  });
+
+  for (const sendMode of ["enter", "mod-enter"] as const) it(`never turns empty ${sendMode} shortcuts or IME confirmation into abort`, async () => {
+    webPreferences.update("shortcuts", { sendMode });
+    await open(); await publish(snapshot("one", { status: "running" }));
+    const mod = sendMode === "mod-enter";
+    for (const value of ["", " \n "]) {
+      await changeDraft(value);
+      assert.equal(composerAction().props.type, "button");
+      assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+      assert.deepEqual(await composerEnter({ mod, repeat: true }), { prevented: true, submissions: 0 });
+    }
+    await changeDraft("keep IME draft");
+    await act(() => renderer!.root.findByType("textarea").props.onCompositionStart());
+    assert.deepEqual(await composerEnter({ mod }), { prevented: false, submissions: 0 });
+    await act(() => renderer!.root.findByType("textarea").props.onCompositionEnd());
+    assert.deepEqual(await composerEnter({ mod, isComposing: true }), { prevented: false, submissions: 0 });
+    assert.deepEqual(await composerEnter({ mod, keyCode: 229 }), { prevented: false, submissions: 0 });
+    assert.deepEqual(await composerEnter({ mod, repeat: true }), { prevented: true, submissions: 0 });
+    assert.equal(commandRequests().length, 0);
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 1 });
+    assert.equal(commandRequests().at(-1)?.body?.type, "steer");
+    assert.equal(commandRequests().at(-1)?.body?.message, "keep IME draft");
+    assert.equal(composerAction().props["aria-label"], "停止");
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+    assert.equal(commandRequests().length, 1);
+  });
+
+  for (const sendMode of ["enter", "mod-enter"] as const) it(`preserves model-save, connection and entry capability guards for ${sendMode}`, async () => {
+    webPreferences.update("shortcuts", { sendMode });
+    const mod = sendMode === "mod-enter";
+    const response = deferred<Response>();
+    extraFetch = async (url, init) => url.endsWith("/models") && init?.method === "POST" ? response.promise : undefined;
+    await open("/projects/alpha/sessions"); await changeDraft("draft during model save");
+    await click(trigger("模型与思考强度")); await click(button("保存并应用"));
+    assert.equal(composerAction().props.disabled, true);
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+    response.resolve(Response.json({ defaults: { provider: "test", modelId: "test-model", thinkingLevel: "medium" }, models: [{ ...snapshot().models[0], thinkingLevels: ["off", "medium", "high"] }] }));
+    await act(async () => { await settle(); });
+    assert.equal(composerAction().props.disabled, false);
+    await open(); await changeDraft("disconnected draft");
+    assert.equal(composerAction().props.disabled, true);
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+    await publish(snapshot("one", { status: "running" }));
+    assert.equal(composerAction().props.disabled, false);
+    await act(() => FakeWebSocket.sockets.at(-1)!.onclose?.({ code: 1008 }));
+    assert.equal(composerAction().props.disabled, true);
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+    extraFetch = async (url) => url === "/api/projects/beta" ? Response.json({ project: { ...p, id: "beta", capability: { state: "non-git", message: "Git required" } }, bootstrap }) : undefined;
+    await open("/projects/beta/sessions"); await changeDraft("unsupported entry draft");
+    assert.equal(composerAction().props.type, "submit"); assert.equal(composerAction().props.disabled, true);
+    assert.deepEqual(await composerEnter({ mod }), { prevented: true, submissions: 0 });
+    assert.equal(commandRequests().length, 0);
+    assert.equal(requests.filter((entry) => entry.url.endsWith("/sessions") && entry.body).length, 0);
+  });
+
+  it("allows stop during a pending enqueue while protecting the next draft from duplicate sends", async () => {
+    const response = deferred<Response>();
+    extraFetch = async (url, init) => url.endsWith("/commands") && JSON.parse(String(init?.body)).type === "steer" ? response.promise : undefined;
+    await open(); await publish(snapshot("one", { status: "running" }));
+    await changeDraft("pending correction");
+    let submission!: Promise<void>;
+    await act(() => { submission = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    assert.equal(composerAction().props["aria-label"], "停止"); assert.equal(composerAction().props.disabled, false);
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 });
+    await activateComposerAction();
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["steer", "abort"]);
+    await changeDraft("next draft"); await attachNote("next.md");
+    assert.equal(composerAction().props["aria-label"], "发送消息"); assert.equal(composerAction().props.disabled, true);
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 });
+    await act(() => FakeWebSocket.sockets.at(-1)!.publish({ type: "pi_event", event: { type: "agent_settled" } }));
+    assert.equal(composerAction().props.type, "submit"); assert.equal(composerAction().props.disabled, true);
+    response.resolve(Response.json({ accepted: true }));
+    await act(async () => { await submission; });
+    assert.equal(composerAction().props.disabled, false);
+    assert.equal(renderer!.root.findByType("textarea").props.value, "next draft");
+    assert.ok(trigger("移除 next.md"));
+    assert.equal(commandRequests().length, 2);
+  });
+
+  it("restores a rejected pending queue submission together with attachments and a newer draft", async () => {
+    const response = deferred<Response>();
+    extraFetch = async (url) => url.endsWith("/commands") ? response.promise : undefined;
+    await open(); await publish(snapshot("one", { status: "running" }));
+    await changeDraft("captured correction"); await attachNote("captured.md");
+    let submission!: Promise<void>;
+    await act(() => { submission = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    assert.equal(composerAction().props["aria-label"], "停止");
+    await changeDraft("newer draft");
+    assert.equal(composerAction().props.disabled, true);
+    await act(() => FakeWebSocket.sockets.at(-1)!.publish({ type: "pi_event", event: { type: "agent_settled" } }));
+    response.resolve(Response.json({ error: "session changed before enqueue" }, { status: 409 }));
+    await act(async () => { await submission; });
+    assert.equal(renderer!.root.findByType("textarea").props.value, "captured correction\nnewer draft");
+    assert.ok(trigger("移除 captured.md"));
+    assert.equal(composerAction().props.type, "submit"); assert.equal(composerAction().props.disabled, false);
+    assert.equal(renderer!.root.findAllByProps({ className: "composer-queue" }).length, 0);
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["steer"]);
+    assert.equal(renderer!.root.findAllByProps({ "data-slot": "alert", "data-variant": "error" }).length, 1);
+  });
+
+  it("keeps failed pending queue input and late events scoped to the original session", async () => {
+    const response = deferred<Response>();
+    extraFetch = async (url) => url.endsWith("/one/commands") ? response.promise : undefined;
+    await open(); await publish(snapshot("one", { status: "running" }));
+    const old = FakeWebSocket.sockets.at(-1)!;
+    await changeDraft("source correction"); await attachNote("source.md");
+    let submission!: Promise<void>;
+    await act(() => { submission = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    await open("/projects/alpha/sessions/two"); await publish(snapshot("two", { status: "running" }));
+    await changeDraft("second session draft");
+    await act(() => old.publish({ type: "pi_event", event: { type: "queue_update", steering: ["stale source card"], followUp: [] } }));
+    response.resolve(Response.json({ error: "failed source queue" }, { status: 409 }));
+    await act(async () => { await submission; });
+    assert.equal(renderer!.root.findByType("textarea").props.value, "second session draft");
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "移除 source.md" }).length, 0);
+    assert.equal(renderer!.root.findAllByProps({ className: "composer-queue" }).length, 0);
+    await open(); await publish(snapshot("one", { status: "running" }));
+    assert.equal(renderer!.root.findByType("textarea").props.value, "source correction");
+    assert.ok(trigger("移除 source.md"));
+    assert.equal(composerAction().props["aria-label"], "发送消息");
+    assert.deepEqual(commandRequests().map((entry) => [entry.url, entry.body?.type]), [["/api/projects/alpha/sessions/one/commands", "steer"]]);
+  });
+
   it("ignores late previews and scoped events from the previous identity", async () => {
     const stale = deferred<Response>();
     extraFetch = async (url) => url.includes("/files?path=README") ? stale.promise : undefined;
@@ -945,6 +1118,61 @@ describe("routed workspace features", () => {
     await click(renderer!.root.findByProps({ "aria-label": "清空队列" })); await click(renderer!.root.findByProps({ "aria-label": "停止" }));
     assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["compact", "clear_queue", "abort"]);
     assert.ok(commandRequests().every((entry) => entry.url === "/api/projects/alpha/sessions/one/commands"));
+  });
+
+  it("projects read-only mixed queue cards and duplicates from authoritative updates through stop, reconnect and navigation", async (context) => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const raw = '<attached_file name="note.md">\n<script>text only</script>\n</attached_file>';
+    const initialQueue = { steering: ["duplicate", "duplicate", raw], followUp: ["duplicate", "later"] };
+    currentSnapshot = snapshot("one", { status: "running", queue: initialQueue });
+    await open(); await publish();
+    const input = renderer!.root.findByType("textarea");
+    const form = renderer!.root.findByType("form");
+    const cards = () => renderer!.root.findAllByProps({ className: "queue-card" });
+    const messages = () => cards().map((card) => text(card.findByType("p")));
+    const labels = () => cards().map((card) => text(card.findByType("span")));
+    assert.deepEqual(messages(), [...initialQueue.steering, ...initialQueue.followUp]);
+    assert.deepEqual(labels(), ["立即纠正", "立即纠正", "立即纠正", "完成后追加", "完成后追加"]);
+    assert.equal(text(renderer!.root.findByProps({ className: "queue-heading" })), "3 条纠正 · 2 条后续清空队列");
+    const region = renderer!.root.findByProps({ "aria-label": "待发送消息队列" });
+    assert.equal(region.type, "section");
+    assert.equal(region.findByType("ol").props.tabIndex, 0);
+    assert.equal(region.findAllByType("button").length, 1);
+    assert.equal(region.findAllByType("script").length, 0, "raw queue content remains escaped text");
+    assert.ok(cards().every((card) => card.type === "li" && !card.props.onClick && !card.findAllByType("button").length));
+    assert.equal(commandRequests().length, 0, "observing projected queues is passive");
+    await activateComposerAction();
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["abort"]);
+    assert.deepEqual(messages(), [...initialQueue.steering, ...initialQueue.followUp], "abort does not infer queue clearance");
+    const first = FakeWebSocket.sockets.at(-1)!;
+    await act(() => first.publish({ type: "pi_event", event: { type: "agent_settled" } }));
+    assert.equal(composerAction().props["aria-label"], "发送消息");
+    assert.equal(cards().length, 5, "queued cards remain visible when execution is idle");
+    await changeDraft("draft survives queue consumption"); await attachNote("retained.md");
+    await act(() => first.publish({ type: "pi_event", event: { type: "queue_update", steering: ["duplicate"], followUp: ["later"] } }));
+    assert.deepEqual(messages(), ["duplicate", "later"]);
+    assert.equal(renderer!.root.findByType("form"), form); assert.equal(renderer!.root.findByType("textarea"), input);
+    assert.equal(input.props.value, "draft survives queue consumption"); assert.ok(trigger("移除 retained.md"));
+    await act(() => { first.onclose?.({ code: 1006 }); context.mock.timers.tick(1_500); });
+    const retry = FakeWebSocket.sockets.at(-1)!;
+    retry.seq = first.seq;
+    await publish(snapshot("one", { queue: { steering: [], followUp: ["sibling tab message"] } }), retry);
+    assert.deepEqual(messages(), ["sibling tab message"]);
+    await act(() => first.publish({ type: "pi_event", event: { type: "queue_update", steering: ["stale attempt"], followUp: [] } }));
+    assert.deepEqual(messages(), ["sibling tab message"]);
+    await click(trigger("清空队列"));
+    assert.deepEqual(messages(), ["sibling tab message"], "clear acceptance still waits for the authoritative projection");
+    await act(() => retry.publish({ type: "pi_event", event: { type: "queue_update", steering: [], followUp: [] } }));
+    assert.equal(renderer!.root.findAllByProps({ className: "composer-queue" }).length, 0);
+    assert.equal(renderer!.root.findByType("textarea"), input); assert.equal(input.props.value, "draft survives queue consumption");
+    await open("/projects/alpha/sessions/two"); await publish(snapshot("two", { status: "running", queue: { steering: ["second session"], followUp: [] } }));
+    await act(() => retry.publish({ type: "pi_event", event: { type: "queue_update", steering: ["stale scope"], followUp: [] } }));
+    assert.deepEqual(messages(), ["second session"]);
+    await click(trigger("清空队列"));
+    assert.deepEqual(commandRequests().map((entry) => [entry.url, entry.body?.type]), [["/api/projects/alpha/sessions/one/commands", "abort"], ["/api/projects/alpha/sessions/one/commands", "clear_queue"], ["/api/projects/alpha/sessions/two/commands", "clear_queue"]]);
+    await open(); await publish(snapshot("one", { queue: { steering: [], followUp: ["restored snapshot"] } }));
+    assert.deepEqual(messages(), ["restored snapshot"]);
+    assert.equal(renderer!.root.findByType("textarea").props.value, "draft survives queue consumption"); assert.ok(trigger("移除 retained.md"));
   });
 
   it("renders original timestamps and keeps live tool ownership through event updates", async () => {
