@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Installation settings UI, revisions, persistence, cross-tab/late read and pending ownership."}
+{"file": ".trellis/spec/kiva-web/frontend/openai-authorization.md", "reason": "Provider-owned OAuth staging/cancel/commit and callback cleanup without live runtime mutations."}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Passive GET and safe runtime ownership/idle generation boundaries."}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Settings primitives/pending state and real browser acceptance."}
+{"file": ".trellis/tasks/10-24-system-proxy-preference/research/network-boundaries.md", "reason": "Local SDK scoped transport limits, native read-only resolution proof and current product decisions."}

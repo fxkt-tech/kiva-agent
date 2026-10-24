@@ -1,0 +1,50 @@
+# System proxy technical design
+
+## 1. Settings ownership and UI
+Add a Network tab following existing settings primitives/focus/pending behavior. One switch: Use system proxy. Show separate discovery states: direct (disabled), system route available, system direct/no proxy, unsupported type/platform, discovery unavailable. Discovery is not a connectivity check; never display network healthy merely because a host/port was read. A read-only Re-read system settings action may refresh status without external traffic.
+
+Toggle saves immediately through a dedicated settings API; disable while pending, keep the previously confirmed effective state until success and show failure without pretending the new choice applied. Handle stale revision by reloading confirmed state and offering retry. Keep the settings dialog pending-close guard and cross-tab consistency. No separate manual URL/password fields or external connection test.
+
+Proposed storage: installation `.kiva/web/network-settings.json`, `{version:1,useSystemProxy:boolean}` with missing-file default true on macOS. Reuse safe canonical ownership, bounded reads, atomic replace and revision/CAS conventions from settings-files. Network revision is independent of provider/auth revisions. GET never creates/repairs a file. Corrupt settings produce local network-state errors and remain intact.
+
+`GET /api/settings/network` returns supported/platform, preference+revision where supported and sanitized discovery/status metadata. `POST` accepts exactly `{revision,useSystemProxy}` and returns confirmed state. Reject query parameters/invalid fields/origin/revision as existing installation settings do. On unsupported platforms expose unsupported control and retain legacy networking; do not apply the macOS default as a new global behavior there.
+
+## 2. Native resolution, not environment guessing
+Introduce a read-only macOS resolver interface accepting a destination origin and returning DIRECT, HTTP forwarding/CONNECT proxy or explicit unsupported/unavailable. Use CFNetworkCopySystemProxySettings + CFNetworkCopyProxiesForURL so native per-target exceptions/bypass apply. Prototype confirmed that bundled `/usr/bin/osascript` JXA with Foundation/CFNetwork and id-return bindings can bridge these APIs; no Xcode/Swift compiler or System Events permission is required for that read-only approach. Implementation must verify supported macOS versions and fail explicitly if the helper is unavailable.
+
+Bundle fixed helper code; send structured input via stdin, never interpolate destination data into scripts/shell. Pass origin only (scheme/host/port), stripping userinfo/path/query/fragment so provider API keys in URLs cannot appear in helper arguments. WSS route discovery maps to HTTPS only if a future supported WS transport needs it. Bound helper duration (proposed2seconds), output and concurrency; reap subprocesses on cancellation/error. Do not contact the destination/PAC URL during discovery.
+
+The native probe needed explicit toll-free id return bindings before ObjC.deepUnwrap produced an array. CFProxySupport.h states kCFProxyTypeHTTPS is an HTTPS tunneling proxy: do NOT infer that the proxy connection itself must use TLS or construct an https://proxy URL blindly. Cover HTTP CONNECT through a normal local HTTP proxy. Follow native route order; do not skip unsupported selected PAC/SOCKS directives and quietly choose direct. HTTP/HTTPS plus configured SOCKS is usable when the selected primary route is a supported HTTP tunnel; only-SOCKS/PAC and proxy authentication are explicit unsupported cases in this release.
+
+Do not cache completed routing decisions initially; resolve new connections against current system state. Disabled mode bypasses the native resolver. Loopback control/local-model/OAuth callback destinations stay direct. Existing open streams keep their established connection; OS routing changes affect future connections, not bytes already streaming.
+
+## 3. Scope-preserving model transport
+Do not implement this by exporting proxy environment variables on the entire Pi process: bash/tool children inherit them. Keep original subprocess environment and standalone runtime.mjs behavior. Pass only internal policy revision/mode metadata to Web-created Pi owners, loading a bundled network extension only for that composition (not CLI autoload). Missing required policy adapter must be an explicit startup error, not silent bypass.
+
+Prefer public provider composition/registration surfaces already present in Pi1.3.0. Wrap provider model operations with explicit scoped fetch and env policy. Use a directly pinned HTTP transport dependency compatible with Node22.19; explicit direct dispatcher/agent versus HTTP CONNECT dispatcher must outrank inherited environment defaults. Never rely on deleting an env map key: SDK lookup falls back to process.env. Ensure scoped env cannot activate a second SDK proxy layer; it does not modify process.env inherited by tools.
+
+Provider HTTP calls use that explicit transport and preserve URL/body/headers/signal/stream/backpressure. Each connection resolves the actual destination origin, including redirects without forwarding credentials incorrectly. OAuth refresh and model dispatch are separate paths and both must be covered. Built-in/configured definitions, credentials, model IDs/thinking and public event semantics stay unchanged.
+
+Custom fetch does not govern the installed ChatGPT WebSocket implementation. For this release select the public SSE transport on controlled ChatGPT requests instead of leaving a hidden WS escape path. Do not patch SDK private fields or pretend the WS route is controlled. Verify the four configurable HTTP API families plus ChatGPT subscription SSE; provider-specific operations that cannot honor scoped transport require an explicit capability error before dispatch and a return to planning if that breaks an approved required path. Arbitrary third-party extension networking is not tool-policy coverage.
+
+## 4. OAuth transport isolation
+Current backend oauth.login/refresh has no observed generic fetch parameter, and provider-owned refresh can happen inside model auth resolution. Use an isolated network worker for provider-owned login/refresh operations when a verified public per-operation transport hook is unavailable. The worker may configure its own explicit fetch/dispatcher; it must not temporarily replace the Web server's global fetch/agents during asynchronous login.
+
+Keep the provider-owned auth protocol, cancellation, device ID/agent name, prompt/notify forwarding and credential-staging behavior. Credentials/results travel over private typed IPC, not argv/env/logs; parent retains existing revision validation and guarded credential commit. Capture network policy revision for each attempt/refresh. Bound protocol messages and worker ownership, preserve retry/callback-port cleanup and await real settlement rather than racing cancellation and leaving a listener alive. No keychain extraction/new credential persistence policy.
+
+Network mode can be saved during an active login: that attempt keeps its captured mode; subsequent attempts use the new one. Token refresh uses the same policy as the requesting model owner. External browser pages opened from the login URL continue to use browser/OS networking, outside this app-level toggle.
+
+## 5. Safe runtime application
+Snapshot the preference revision at Web adapter/authorization-worker creation. After an atomic save, publish a configuration generation change under short runtime admission; do not use a provider-credential mutation path that aborts/blocks all busy runs, and do not hold a lock for a model stream. Idle stale owners are released/reacquired on their next explicit safe action, following existing RuntimeManager generation behavior.
+
+Running/queued/tool/extension-interaction work continues with its existing owner policy until it becomes idle. Bypass commands (abort/queue/UI responses) remain available and never trigger policy reconfiguration mid-run. A newly acquired owner reads confirmed settings. Native system route discovery stays per future connection within that captured enabled/disabled mode. Settings UI save feedback says new attempts/idle next tasks adopt the choice; it must not claim every running connection switched instantly.
+
+## 6. Defaults, migration and failures
+Missing preference defaults enabled on macOS without GET writes. The selected OS-based policy supersedes inherited proxy env for scoped model/OAuth paths; this is intentional and confirmed as the product default. Tools/CLI keep their inherited environment. Existing model/auth/history files and OS settings are not rewritten.
+
+No configured proxy/native NONE is direct. Unsupported selected proxy type, unreadable system settings, helper failure and a configured proxy that cannot connect are errors, not permission to leak onto an unexpected direct route. Saving disabled remains possible even when discovery is broken. Sanitized errors distinguish discovery/type/connect failures without endpoints containing credentials or tokenized URLs. App-level direct does not disable VPN/TUN or arbitrary OS routing.
+
+## 7. Feasibility gate, rollout and rollback
+Before product changes, prove public provider wrapping + scoped HTTP/SSE and provider-owned login/refresh worker paths with local fake providers/proxies and no paid prompts. Verify environment isolation and Node22.19 transport support. If a required path cannot be controlled, revise the design before building a cosmetic toggle or widening process scope.
+
+Ship API/store, resolver, model adapter/extension, auth worker and UI together. Use isolated fixtures for browser/runtime acceptance; do not change the user's OS proxy or restart live owners for testing. Rollback restores old networking by reverting the coordinated code path and retaining/removing only the explicit new settings file on a deliberate action; it does not modify credentials or worktrees. Preserve pre-existing web/next-env.d.ts edits.
