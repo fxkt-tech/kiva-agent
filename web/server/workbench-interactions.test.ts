@@ -224,7 +224,7 @@ describe("routed workspace features", () => {
     assert.equal(commandRequests().length, 0);
   });
 
-  it("shows reconnecting throughout retry waits and attempts, then stops on terminal policy closure", async (context) => {
+  it("shows connection failures only in the composer footer throughout retries and terminal closure", async (context) => {
     context.mock.timers.enable({ apis: ["setTimeout"] });
     await open();
     const connection = () => renderer!.root.findByProps({ "aria-label": "当前会话后端连接" });
@@ -235,20 +235,25 @@ describe("routed workspace features", () => {
     assert.equal(text(connection()), "重连中");
     assert.equal(connection().props["data-state"], "reconnecting");
     assert.equal(send().props.disabled, true);
+    assert.equal(renderer!.root.findAllByProps({ className: "conversation-alert" }).length, 0);
     await act(() => context.mock.timers.tick(1_499));
     assert.equal(FakeWebSocket.sockets.length, 1);
     await act(() => context.mock.timers.tick(1));
     assert.equal(FakeWebSocket.sockets.length, 2); assert.equal(text(connection()), "重连中");
     const retry = FakeWebSocket.sockets[1];
+    await act(() => retry.onerror?.());
+    assert.equal(text(connection()), "重连中");
+    assert.equal(renderer!.root.findAllByProps({ className: "conversation-alert" }).length, 0);
     await act(() => { first.onopen?.(); first.onerror?.(); first.onclose?.({ code: 1008 }); });
     assert.equal(text(connection()), "重连中", "a closed attempt cannot update its replacement");
     await act(() => retry.onopen?.());
     assert.equal(text(connection()), "已连接");
     assert.equal(send().props.disabled, false);
     assert.equal(renderer!.root.findAllByProps({ role: "alert" }).some((node) => text(node).includes("无法连接到 KivA 运行时")), false);
-    await act(() => retry.onclose?.({ code: 1008 }));
+    await act(() => { retry.onerror?.(); retry.onclose?.({ code: 1008 }); });
     assert.equal(text(connection()), "已断开"); assert.equal(connection().props["data-state"], "disconnected");
     assert.equal(send().props.disabled, true);
+    assert.equal(renderer!.root.findAllByProps({ className: "conversation-alert" }).length, 0);
     assert.equal(renderer!.root.findByType("textarea").props.value, "keep through reconnect");
     await act(() => context.mock.timers.tick(10_000));
     assert.equal(FakeWebSocket.sockets.length, 2, "terminal policy failures never retry");

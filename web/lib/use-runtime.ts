@@ -88,7 +88,6 @@ export function useRuntime(target?: ResourceTarget) {
         }
         catch { dispatch({ type: "error", message: "收到无法解析的运行时事件" }); }
       };
-      currentSocket.onerror = () => { if (isCurrent()) dispatch({ type: "error", message: "无法连接到 KivA 运行时" }); };
       currentSocket.onclose = (event) => {
         if (!isCurrent()) return;
         socket = undefined;
