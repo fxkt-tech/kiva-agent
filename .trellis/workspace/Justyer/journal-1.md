@@ -468,3 +468,25 @@ Implemented session-associated images/HTML, persistent output Popover and compac
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: Collapsible sidebar and shared project browser
+<!-- trellis-session: v=2 fp=fd078e8a3312633a -->
+
+**Date**: 2026-10-24
+**Task**: Collapsible sidebar and shared project browser
+**Branch**: `feat/sidebar-icon-collapse`
+
+### Summary
+
+Implemented persistent desktop icon navigation, a centered logo with separate edge handle, chevron controls and a shared hover project/session browser. Compact project area has add and More only; outside clicks dismiss without stealing composer focus, while nested menu/dialog operations remain usable. Preserved mobile drawers, drafts, runtime ownership and demand-driven lists. Updated specs and README. Production build, root/web types, full web468/468 plus latest focused100/100 and real desktop/mobile/cross-tab browser checks passed. Unrelated user files preserved.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4515793` | feat(web): add collapsible sidebar and project browser |
+
+### Status
+
+[OK] **Completed**

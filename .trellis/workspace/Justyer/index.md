@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~470 | Active |
+| `journal-1.md` | ~492 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-10-24 | Collapsible sidebar and shared project browser | `4515793` | `feat/sidebar-icon-collapse` |
 | 17 | 2026-10-24 | Session artifact previews and output bubbles | `99623f0` | `feat/session-artifacts-preview` |
 | 16 | 2026-10-24 | Plan macOS system proxy preference | `19976c6` | `docs/system-proxy-plan` |
 | 15 | 2026-10-24 | Optimize sidebar session list loading | `662a300` | `perf/sidebar-session-lists` |
