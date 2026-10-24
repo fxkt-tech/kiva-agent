@@ -415,3 +415,34 @@ Added scoped lightweight list DTO/API, exact single-pass streaming history summa
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Plan macOS system proxy preference
+<!-- trellis-session: v=2 fp=93309d16dc6c9370 -->
+
+**Date**: 2026-10-24
+**Task**: Plan macOS system proxy preference
+**Package**: kiva-web
+**Branch**: `docs/system-proxy-plan`
+
+### Summary
+
+Published planning artifacts only. Proxy functionality is not implemented; task remains planning and is not archived. User authorized commit, merge to main, temporary branch deletion, and push. Unrelated next-env and HTML changes excluded.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19976c6` | docs: plan macOS system proxy preference |
+
+### Testing
+
+- [OK] Task context validation and git diff --check passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Implement the approved proxy plan after implementation is requested

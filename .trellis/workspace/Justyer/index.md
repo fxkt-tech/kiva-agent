@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~417 | Active |
+| `journal-1.md` | ~448 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-10-24 | Plan macOS system proxy preference | `19976c6` | `docs/system-proxy-plan` |
 | 15 | 2026-10-24 | Optimize sidebar session list loading | `662a300` | `perf/sidebar-session-lists` |
 | 14 | 2026-10-24 | Optimize changes listing and diff previews | `0bb1d59` | `perf/code-changes-loading` |
 | 13 | 2026-10-23 | Optimize project directory loading | `38ccc79` | `perf/project-files-loading` |
