@@ -446,3 +446,25 @@ Published planning artifacts only. Proxy functionality is not implemented; task 
 ### Next Steps
 
 - Implement the approved proxy plan after implementation is requested
+
+
+## Session 17: Session artifact previews and output bubbles
+<!-- trellis-session: v=2 fp=2e66bf59983fd095 -->
+
+**Date**: 2026-10-24
+**Task**: Session artifact previews and output bubbles
+**Branch**: `feat/session-artifacts-preview`
+
+### Summary
+
+Implemented session-associated images/HTML, persistent output Popover and compact rows, single-header default modal and draggable/resizable preview, raw independent new tabs, external file/dependency support and isolated HTML execution. Final full web461/root6pass5existing skips, root/web typecheck, production build, independent review and real browser desktop/mobile/fullscreen/source-focus validation passed. User authorized merge to main, temporary branch deletion and push. Preserved unrelated next-env and playground HTML files; proxy task remains planning.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `99623f0` | feat(web): add session artifact previews |
+
+### Status
+
+[OK] **Completed**
