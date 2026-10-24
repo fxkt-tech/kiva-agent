@@ -45,6 +45,26 @@ describe("pre-paint theme bootstrap", () => {
     assert.equal(element.attributes.size, 0);
   });
 
+  it("matches persisted sidebar mode before paint and removes stale values on invalid or denied storage", () => {
+    for (const sidebarCollapsed of [true, false, "true", 1, null, {}, [], undefined]) {
+      const value = JSON.stringify({ version: 1, appearance: { theme: "dark", sidebarCollapsed } });
+      const element = root(), runtime = root();
+      element.setAttribute("data-sidebar-collapsed", "true"); runtime.setAttribute("data-sidebar-collapsed", "true");
+      runInNewContext(themeBootstrapScript, { localStorage: { getItem: () => value }, document: { documentElement: element } });
+      applyAppearancePreference(runtime, parseWebPreferences(value).appearance);
+      assert.deepEqual(element.attributes, runtime.attributes);
+      assert.equal(element.attributes.get("data-sidebar-collapsed"), sidebarCollapsed === true ? "true" : undefined);
+    }
+    for (const value of [null, "{", JSON.stringify({ version: 2, appearance: { sidebarCollapsed: true } }), " ".repeat(WEB_PREFERENCES_MAX_LENGTH + 1)]) {
+      const element = root(); element.setAttribute("data-sidebar-collapsed", "true");
+      runInNewContext(themeBootstrapScript, { localStorage: { getItem: () => value }, document: { documentElement: element } });
+      assert.equal(element.attributes.get("data-sidebar-collapsed"), undefined);
+    }
+    const element = root(); element.setAttribute("data-sidebar-collapsed", "true");
+    runInNewContext(themeBootstrapScript, { get localStorage() { throw new Error("denied"); }, document: { documentElement: element } });
+    assert.equal(element.attributes.get("data-sidebar-collapsed"), undefined);
+  });
+
   it("changes both dimensions immediately without leaving a stale override", () => {
     const element = root();
     for (const previous of VISUAL_STYLES) {

@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/kiva-web/frontend/index.md", "reason": "Frontend spec entrypoint; read full visual-system before UI edits"}
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Browser preference persistence and settings contracts"}
+{"file": ".trellis/spec/kiva-web/frontend/theme-system.md", "reason": "Prepaint bootstrap and runtime appearance synchronization"}
+{"file": ".trellis/spec/kiva-web/frontend/sidebar-session-lists.md", "reason": "Demand-driven shared summaries; avoid hidden list requests"}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Persistent shell and exact resource identity"}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "UI primitives, dialog and focus lifecycle"}
+{"file": ".trellis/tasks/10-24-sidebar-icon-collapse/research/current-sidebar.md", "reason": "Current sidebar evidence and lifecycle hazards"}
+{"file": ".trellis/spec/kiva-web/frontend/session-artifacts.md", "reason": "User follow-up changes conversation output toggle presentation; preserve existing popover and preview behaviors"}

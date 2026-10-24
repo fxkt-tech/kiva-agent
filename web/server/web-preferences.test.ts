@@ -26,7 +26,7 @@ describe("browser preference allowlist", () => {
       conversation: { thinkingExpanded: true, toolsExpanded: "true", queueMode: "follow_up" },
       shortcuts: { sendMode: "invalid" },
     });
-    assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 14, wrapCode: true });
+    assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 14, wrapCode: true, sidebarCollapsed: false });
     assert.deepEqual(decoded.conversation, { thinkingExpanded: true, toolsExpanded: false, queueMode: "follow_up", workspaceMode: "current-branch" });
     assert.deepEqual(decoded.shortcuts, DEFAULT_WEB_PREFERENCES.shortcuts);
   });
@@ -41,7 +41,7 @@ describe("browser preference allowlist", () => {
   it("decodes visual style independently while keeping legacy documents flat", () => {
     for (const visualStyle of [undefined, null, "", "flat", "skeuomorphic", "SWISS", "<script>", true, {}, []]) {
       const decoded = decodeWebPreferences({ version: 1, appearance: { theme: "dark", visualStyle, conversationFontSize: 18, wrapCode: true }, conversation: { toolsExpanded: true } });
-      assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 18, wrapCode: true });
+      assert.deepEqual(decoded.appearance, { theme: "dark", visualStyle: "flat", conversationFontSize: 18, wrapCode: true, sidebarCollapsed: false });
       assert.equal(decoded.conversation.toolsExpanded, true);
     }
     assert.deepEqual(VISUAL_STYLES, ["flat", "neumorphic", "swiss"]);
@@ -58,6 +58,15 @@ describe("browser preference allowlist", () => {
       assert.equal(normalizeVisualStylePreference(invalid), "flat");
     }
     assert.equal(DEFAULT_WEB_PREFERENCES.appearance.visualStyle, "flat");
+  });
+
+  it("defaults legacy or invalid sidebar choices to expanded without losing neighbouring fields", () => {
+    for (const sidebarCollapsed of [undefined, null, "true", 1, {}, [], false]) {
+      const appearance = decodeWebPreferences({ version: 1, appearance: { sidebarCollapsed, theme: "dark", visualStyle: "swiss" } }).appearance;
+      assert.equal(appearance.sidebarCollapsed, false);
+      assert.equal(appearance.theme, "dark"); assert.equal(appearance.visualStyle, "swiss");
+    }
+    assert.equal(decodeWebPreferences({ version: 1, appearance: { sidebarCollapsed: true } }).appearance.sidebarCollapsed, true);
   });
 
   it("drops all unknown fields and never persists secret/draft/server configuration fields", () => {
@@ -105,7 +114,7 @@ describe("browser preference store", () => {
     assert.equal(current.store.getSnapshot().preferences.appearance.theme, "light");
     const saved = current.writes.at(-1)!;
     const reloaded = fixture(saved);
-    assert.deepEqual(reloaded.store.getSnapshot().preferences.appearance, { theme: "light", visualStyle: "swiss", conversationFontSize: 14, wrapCode: true });
+    assert.deepEqual(reloaded.store.getSnapshot().preferences.appearance, { theme: "light", visualStyle: "swiss", conversationFontSize: 14, wrapCode: true, sidebarCollapsed: false });
     assert.deepEqual(reloaded.appearances, [current.appearances.at(-1)]);
     current.store.update("conversation", { toolsExpanded: true });
     current.store.resetGroup("appearance");
@@ -118,6 +127,33 @@ describe("browser preference store", () => {
     current.external(null);
     assert.deepEqual(current.appearances.at(-1), DEFAULT_WEB_PREFERENCES.appearance);
     assert.equal(current.writes.length, writesBeforeSync, "storage events never echo writes");
+    current.store.destroy(); reloaded.store.destroy();
+  });
+
+  it("persists sidebar mode, restores it on reload, synchronizes tabs and resets only appearance", () => {
+    const current = fixture();
+    assert.equal(current.store.getSnapshot().preferences.appearance.sidebarCollapsed, false);
+    assert.deepEqual(current.writes, []);
+    current.store.update("appearance", { sidebarCollapsed: true, theme: "dark" });
+    const saved = current.writes.at(-1)!;
+    const reloaded = fixture(saved);
+    assert.equal(reloaded.store.getSnapshot().preferences.appearance.sidebarCollapsed, true);
+    assert.equal(reloaded.appearances.at(-1)?.sidebarCollapsed, true);
+    assert.deepEqual(reloaded.writes, []);
+    current.store.update("conversation", { toolsExpanded: true });
+    current.store.resetGroup("appearance");
+    assert.equal(current.store.getSnapshot().preferences.appearance.sidebarCollapsed, false);
+    assert.equal(current.store.getSnapshot().preferences.conversation.toolsExpanded, true);
+    const writes = current.writes.length;
+    current.external(saved);
+    assert.equal(current.store.getSnapshot().preferences.appearance.sidebarCollapsed, true);
+    assert.equal(current.appearances.at(-1)?.sidebarCollapsed, true);
+    current.external(null);
+    assert.equal(current.store.getSnapshot().preferences.appearance.sidebarCollapsed, false);
+    assert.equal(current.writes.length, writes);
+    current.deny(); current.store.update("appearance", { sidebarCollapsed: true });
+    assert.equal(current.appearances.at(-1)?.sidebarCollapsed, true);
+    assert.match(current.store.getSnapshot().persistenceError ?? "", /未能保存/);
     current.store.destroy(); reloaded.store.destroy();
   });
 

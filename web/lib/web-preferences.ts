@@ -18,12 +18,14 @@ export interface WebPreferencesEnvironment {
 const STORAGE_WARNING = "浏览器未能保存设置；当前选择仅在此页面生效。";
 const serverSnapshot: WebPreferencesSnapshot = Object.freeze({ preferences: DEFAULT_WEB_PREFERENCES, persistenceError: null });
 
-export function applyAppearancePreference(root: Pick<HTMLElement, "setAttribute" | "removeAttribute">, { theme, visualStyle }: Pick<WebPreferences["appearance"], "theme" | "visualStyle">) {
+export function applyAppearancePreference(root: Pick<HTMLElement, "setAttribute" | "removeAttribute">, { theme, visualStyle, sidebarCollapsed }: Pick<WebPreferences["appearance"], "theme" | "visualStyle"> & Partial<Pick<WebPreferences["appearance"], "sidebarCollapsed">>) {
   if (theme === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", theme);
   const style = normalizeVisualStylePreference(visualStyle);
   if (style === "flat") root.removeAttribute("data-visual-style");
   else root.setAttribute("data-visual-style", style);
+  if (sidebarCollapsed === true) root.setAttribute("data-sidebar-collapsed", "true");
+  else root.removeAttribute("data-sidebar-collapsed");
 }
 
 /** One store owns both persisted and session-local choices, never drafts or server settings. */

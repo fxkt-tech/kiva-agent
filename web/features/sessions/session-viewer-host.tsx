@@ -7,8 +7,8 @@ import { SessionJsonlDialog } from "./session-jsonl-dialog";
 import { parseSessionViewerLink, withoutSessionViewerQuery } from "./session-viewer-link";
 
 type ViewerSession = Pick<SessionResource, "id" | "projectId" | "name">;
-interface Opening { session: ViewerSession; returnFocus?: HTMLElement | null; location: string }
-interface SessionViewerContextValue { openSessionViewer(session: ViewerSession, returnFocus?: HTMLElement | null): void; viewingSession?: ViewerSession }
+interface Opening { session: ViewerSession; returnFocus?: HTMLElement | null | (() => HTMLElement | null | false); location: string }
+interface SessionViewerContextValue { openSessionViewer(session: ViewerSession, returnFocus?: HTMLElement | null | (() => HTMLElement | null | false)): void; viewingSession?: ViewerSession }
 const SessionViewerContext = createContext<SessionViewerContextValue | undefined>(undefined);
 export function useSessionViewer() {
   const context = useContext(SessionViewerContext);

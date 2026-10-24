@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ExternalLink, FileCode2, Image as ImageIcon, PanelTopClose, PanelTopOpen, PictureInPicture2, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, FileCode2, Files, Image as ImageIcon, PictureInPicture2, RefreshCw, X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -74,9 +74,9 @@ export function SessionArtifacts({ scope, refreshKey, onSource, children }: { sc
         if (open) { suppressListFocus.current = false; setRevision((value) => value + 1); }
         setListOpen(open);
       }}>
-        <header className="conversation-header"><PopoverTrigger render={<Button ref={toggleButton} type="button" variant="ghost" size="icon" aria-label={toggleLabel} title={toggleLabel} aria-controls={panelId} aria-expanded={listOpen}/>}>{listOpen ? <PanelTopClose size={17} aria-hidden="true"/> : <PanelTopOpen size={17} aria-hidden="true"/>}</PopoverTrigger></header>
+        <header className="conversation-header"><PopoverTrigger render={<Button ref={toggleButton} type="button" variant="ghost" size="icon" className="conversation-output-toggle" aria-label={toggleLabel} title={toggleLabel} aria-controls={panelId} aria-expanded={listOpen}/>}>{listOpen ? <ChevronUp size={16} strokeWidth={1.75} aria-hidden="true"/> : <ChevronDown size={16} strokeWidth={1.75} aria-hidden="true"/>}</PopoverTrigger></header>
         <PopoverContent id={panelId} className="artifact-list-popover" align="end" sideOffset={6} finalFocus={() => suppressListFocus.current ? false : toggleButton.current}>
-          <div className="artifact-list-heading"><PanelTopOpen size={15} aria-hidden="true"/><PopoverTitle>输出</PopoverTitle>{data && <span>{data.artifacts.length}</span>}<span className="artifact-list-heading-spacer"/><Button variant="ghost" size="icon-sm" aria-label="刷新会话输出" title="刷新输出列表" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={14}/></Button></div>
+          <div className="artifact-list-heading"><Files size={15} aria-hidden="true"/><PopoverTitle>输出</PopoverTitle>{data && <span>{data.artifacts.length}</span>}<span className="artifact-list-heading-spacer"/><Button variant="ghost" size="icon-sm" aria-label="刷新会话输出" title="刷新输出列表" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={14}/></Button></div>
           <PopoverDescription className="sr-only">本会话生成或引用的图片与 HTML；点击文件弹窗预览，也可新标签页打开或使用气泡预览。</PopoverDescription>
           <div className="artifact-list-controls">
             <div className="artifact-filters" role="group" aria-label="输出类型">{([["all", "全部"], ["image", "图片"], ["html", "HTML"]] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>

@@ -7,8 +7,8 @@ Use this contract when changing visual styles, color-mode selection, appearance 
 ## 2. Signatures and owners
 
 - `shared/web-preferences.ts`: `ThemePreference = "system" | "light" | "dark"`, frozen `VISUAL_STYLES = ["flat", "neumorphic", "swiss"]`, derived `VisualStylePreference`, `isVisualStylePreference(value: unknown)` and `normalizeVisualStylePreference(value: unknown)`. The normalizer defaults unrecognized values to flat. `WEB_PREFERENCES_MAX_LENGTH = 16_384` bounds stored-document parsing.
-- `WebPreferences.appearance`: `{ theme, visualStyle, conversationFontSize, wrapCode }`. Keep `version: 1` and the `kiva:web-preferences:v1` key; the new field is optional on read and defaults to flat.
-- `lib/web-preferences.ts`: `applyAppearancePreference(root, appearance: Pick<WebPreferences["appearance"], "theme" | "visualStyle">): void`. Its root needs only `setAttribute` and `removeAttribute`. The environment has one `applyAppearance(appearance: WebPreferences["appearance"]): void` callback.
+- `WebPreferences.appearance`: `{ theme, visualStyle, conversationFontSize, wrapCode, sidebarCollapsed }`. Keep `version:1` and `kiva:web-preferences:v1`; absent visualStyle defaults to flat and absent sidebarCollapsed defaults to false.
+- `lib/web-preferences.ts`: `applyAppearancePreference(root, appearance: Pick<WebPreferences["appearance"], "theme" | "visualStyle"> & Partial<Pick<WebPreferences["appearance"], "sidebarCollapsed">>): void`. Its root needs only `setAttribute` and `removeAttribute`. The environment has one `applyAppearance(appearance: WebPreferences["appearance"]): void` callback.
 - `lib/theme-bootstrap.ts`: `themeBootstrapScript` applies allowlisted appearance values before paint, embedding the build-time `VISUAL_STYLES` JSON literal and sharing the stored-document size bound. Do not add another hand-maintained non-flat allowlist or serialize helper functions into script.
 - `styles/themes.css`: sole owner of color palettes and visual-style selection. `components/ui/primitives.css` and `app/globals.css` consume its semantic values for controls and feature presentation.
 - `features/settings/preferences-panels.tsx`: the existing AppearancePanel offers separate “主题” and “视觉风格” Selects. Other feature rendering does not branch on visual style or receive a theme prop.
@@ -24,8 +24,10 @@ Use this contract when changing visual styles, color-mode selection, appearance 
 | `visualStyle: "flat"` | Remove `data-visual-style`; baseline material applies |
 | `visualStyle: "neumorphic"` | Set `data-visual-style="neumorphic"` |
 | `visualStyle: "swiss"` | Set `data-visual-style="swiss"` |
+| `sidebarCollapsed: true` | Set `data-sidebar-collapsed="true"`; desktop CSS uses 64px navigation |
+| Missing/false sidebarCollapsed | Remove `data-sidebar-collapsed`; keep expanded responsive navigation |
 
-The mode and style selections preserve one another. Initialization, changes, appearance-group reset and same-origin storage events all apply both through the existing store callback. Keep the persistent shell subscription on `/projects` as well as session routes; do not wait for a composer/settings mount. External events do not echo writes. Missing/invalid fields default independently, and loading older documents performs no migration write.
+The mode and style selections preserve one another. Initialization, changes, appearance-group reset and same-origin storage events apply theme, visual style and sidebar layout through the existing store callback. Keep the persistent shell subscription on `/projects` as well as session routes; do not wait for a composer/settings mount. External events do not echo writes. Missing/invalid fields default independently, and loading older documents performs no migration write.
 
 The shared tuple is the style-admission authority. The decoder and root helper use its normalizer; bootstrap uses the corresponding literal. When adding a style, update this owner, its CSS and the settings label while preserving all pairwise transitions and stale-root-attribute cleanup. Do not equate every non-flat choice with neumorphism.
 
@@ -67,7 +69,7 @@ The single 1px focus outline with 1px offset remains visible alongside material 
 ## 6. Required tests and browser evidence
 
 - `server/web-preferences.test.ts`: legacy/invalid values, independent updates, immutable snapshots, persistence/reload/reset, denied storage and cross-tab no-write-loop behavior.
-- `server/theme-bootstrap.test.ts`: execute actual bootstrap and compare its root attributes with actual runtime decoding/application across all mode/style pairs and malformed/versioned/oversized/denied storage.
+- `server/theme-bootstrap.test.ts`: execute actual bootstrap and compare its root attributes with actual runtime decoding/application across mode/style pairs, both sidebar choices and malformed/versioned/oversized/denied storage; assert stale sidebar attributes are removed independently.
 - Existing settings and workbench interaction suites: accessible selector, controlled updates, `/projects` subscription and retained session presentation state with no business mutation. Primitive tests preserve semantic variants and state forwarding.
 - Run repository typecheck/tests/build. Capture before/after baselines for both existing styles and verify Swiss light/dark at desktop/390px/320px, plus all-style system mode changes. Compare geometry, palette, typography, circles and shadows; inspect served computed styles, the thin keyboard cue, nested portal Escape/final focus, mobile navigation, no overflow/clipped controls, reload first-frame attributes and cross-tab synchronization. Use isolated fixtures without paid requests.
 - Confirm served composer/heading/selection rules match the current source alongside root tokens: stale production CSS can coexist with fresh imported theme tokens. Resolve source/artifact disagreements with an isolated production-cache rebuild before changing presentation code; preserve any running development service and its separate cache.

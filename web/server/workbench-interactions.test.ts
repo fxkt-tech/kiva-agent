@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { createElement, type ReactNode } from "react";
-import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
+import * as ReactDOM from "react-dom";
+import { act, create, type ReactTestInstance, type ReactTestRenderer, type TestRendererOptions } from "react-test-renderer";
 import { installUiMocks } from "./helpers/mock-ui";
 
+// DOM relocation is a presentation boundary; real portal order/focus is browser-verified.
+mock.module("react-dom", { namedExports: { ...ReactDOM, createPortal: (children: ReactNode) => children } });
 installUiMocks();
 const { WorkspaceShell } = await import("../features/workspace/shell");
 const { Dialog } = await import("../components/ui/dialog");
@@ -52,6 +55,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 
 describe("routed workspace features", () => {
   let renderer: ReactTestRenderer | undefined;
+  let rendererOptions: TestRendererOptions | undefined;
   let requests: Array<{ url: string; body?: Record<string, unknown> }>;
   let sessions: SessionResource[];
   let visibleProjects: ProjectResource[];
@@ -84,7 +88,11 @@ describe("routed workspace features", () => {
     const parsed = new URL(href, "http://localhost");
     const content = await page(href);
     const element = createElement(WorkspaceShell, { pathname: parsed.pathname, search: parsed.search.slice(1), navigate, children: content });
-    if (renderer) renderer.update(element); else renderer = create(element);
+    if (renderer) renderer.update(element); else renderer = create(element, { ...rendererOptions, createNodeMock(element) {
+      const node = rendererOptions?.createNodeMock?.(element);
+      if (node) return node;
+      return element.props && typeof element.props === "object" && "className" in element.props && element.props.className === "project-browser-slot" ? { nodeType: 1 } : null;
+    } });
     await settle();
   }
   function navigate(href: string) { pendingNavigation = renderRoute(href); }
@@ -120,6 +128,7 @@ describe("routed workspace features", () => {
   async function publish(value = currentSnapshot, socket = FakeWebSocket.sockets.at(-1)!) { await act(async () => { socket.onopen?.(); socket.publish({ type: "snapshot", snapshot: value }, { projectId: "alpha", sessionId: value.session.id }); }); }
 
   beforeEach(() => {
+    rendererOptions = undefined;
     renderer = undefined; requests = []; visibleProjects = [p]; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); defaults = undefined; preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
@@ -387,6 +396,177 @@ describe("routed workspace features", () => {
     await open(); await publish();
     assert.equal(renderer!.root.findByType("textarea").props.value, "keep this draft");
     assert.equal(commandRequests().length, 0);
+  });
+
+  it("shows one hover-enabled project browser, demands expanded projects only and keeps browsing scoped", async () => {
+    visibleProjects = [p, { ...p, id: "beta", name: "Beta", path: "/beta" }];
+    const beta = session("beta-one", { projectId: "beta", name: "Beta Needle" });
+    extraFetch = async (url) => url === "/api/projects/beta/sessions?collection=active" ? Response.json({ collection: "active", sessions: [beta] }) : undefined;
+    const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
+    webPreferences.update("appearance", { sidebarCollapsed: true });
+    await open("/projects/alpha/sessions/one?q=keep"); await publish(); await changeDraft("keep this running draft");
+    const textarea = renderer!.root.findByType("textarea"), socket = FakeWebSocket.sockets.at(-1);
+    const heading = renderer!.root.findByProps({ className: "sidebar-project-heading" });
+    assert.deepEqual(heading.findAllByType("button").map((node) => node.props["aria-label"]), ["添加项目", "项目与会话列表"]);
+    assert.equal(lists("alpha").length, 0); assert.equal(lists("beta").length, 0);
+    assert.equal(trigger("项目与会话列表").props.openOnHover, true);
+    await click(trigger("添加项目"));
+    assert.ok(trigger("关闭项目选择器"));
+    assert.ok(requests.some(({ url }) => url.startsWith("/api/project/directories")));
+    assert.equal(requests.some(({ url, body }) => body && url.endsWith("/sessions")), false, "rail plus opens project picker, never creates a session");
+    await click(trigger("关闭项目选择器"));
+    await click(trigger("项目与会话列表"));
+    assert.equal(lists("alpha").length, 1); assert.equal(lists("beta").length, 1);
+    assert.deepEqual(renderer!.root.findAllByProps({ className: "project-browser-slot" }).map((node) => node.props["data-project-id"]), ["alpha", "beta"]);
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-browser-popover").length, 1);
+    assert.equal(renderer!.root.findAllByProps({ className: "project-rail-trigger" }).length, 0);
+    await click(trigger("项目操作 Beta")); await click(button("搜索会话"));
+    await act(() => renderer!.root.findByProps({ "aria-label": "搜索 Beta 会话", placeholder: "搜索会话" }).props.onChange({ target: { value: "Needle" } }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 230)); });
+    assert.ok(renderer!.root.findAllByProps({ className: "session-item-title" }).some((node) => text(node) === "Beta Needle"));
+    assert.equal(currentHref, "/projects/alpha/sessions/one?q=keep");
+    const popup = renderer!.root.findAllByType(Popover).find((node) => node.props.open)!;
+    for (const reason of ["focus-out"]) {
+      let cancelled = false;
+      await act(() => popup.props.onOpenChange(false, { reason, cancel() { cancelled = true; } }));
+      assert.equal(cancelled, true);
+    }
+    await click(trigger("项目操作 Beta"));
+    let guarded = false;
+    await act(() => popup.props.onOpenChange(false, { reason: "trigger-hover", cancel() { guarded = true; } }));
+    assert.equal(guarded, true, "a nested menu retains its owning browser while the pointer leaves the popup");
+    let actionCancelled = false;
+    await act(() => popup.props.onOpenChange(false, { reason: "outside-press", event: { target: { closest: (selector: string) => selector.includes('[data-slot="dropdown-menu-content"]') ? {} : null } }, cancel() { actionCancelled = true; } }));
+    assert.equal(actionCancelled, true, "a press inside the owned portaled project menu is not an external dismissal");
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-browser-popover").length, 1);
+    const finalFocus = renderer!.root.findAllByProps({ className: "project-browser-popover" })[0].props.finalFocus;
+    let outsideCancelled = false;
+    await act(() => popup.props.onOpenChange(false, { reason: "outside-press", event: { target: { closest: () => null } }, cancel() { outsideCancelled = true; } }));
+    assert.equal(outsideCancelled, false, "an external click dismisses the browser even while a nested menu was open");
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-browser-popover").length, 0);
+    assert.equal(finalFocus(), false, "outside dismissal must preserve the clicked conversation focus");
+    assert.equal(renderer!.root.findByType("textarea"), textarea); assert.equal(textarea.props.value, "keep this running draft");
+    assert.equal(FakeWebSocket.sockets.at(-1), socket);
+    await click(trigger("项目与会话列表"));
+    await click(trigger("折叠项目 Beta"));
+    assert.equal(trigger("展开项目 Beta").props["aria-expanded"], false);
+    await click(trigger("关闭项目与会话列表"));
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-browser-popover").length, 0);
+    assert.equal(renderer!.root.findByType("textarea"), textarea); assert.equal(textarea.props.value, "keep this running draft");
+    assert.equal(FakeWebSocket.sockets.at(-1), socket); assert.equal(socket?.closed, false); assert.equal(commandRequests().length, 0);
+    await click(trigger("项目与会话列表"));
+    assert.equal(lists("alpha").length, 1); assert.equal(lists("beta").length, 1, "reopening shares confirmed cache and retains folded projects");
+    const selected = renderer!.root.findAllByType("a").find((node) => node.props.href === "/projects/alpha/sessions/two")!;
+    await click(selected);
+    assert.equal(currentHref, "/projects/alpha/sessions/two");
+    assert.equal(renderer!.root.findAll((node) => node.type === "div" && node.props.className === "project-browser-popover").length, 0);
+  });
+
+  it("releases in-flight summary demand when a shared-browser project folds or its browser closes", async () => {
+    visibleProjects = [p, { ...p, id: "beta", name: "Beta", path: "/beta" }];
+    const pending = deferred<Response>();
+    const signals = new Map<string, AbortSignal>();
+    extraFetch = async (url, init) => {
+      if (!url.includes("/sessions?collection=")) return undefined;
+      if (init?.signal) signals.set(url.split("/")[3], init.signal);
+      return pending.promise;
+    };
+    webPreferences.update("appearance", { sidebarCollapsed: true });
+    await open();
+    assert.equal(signals.size, 0);
+    await click(trigger("项目与会话列表"));
+    assert.equal(signals.size, 2); assert.equal(signals.get("alpha")?.aborted, false); assert.equal(signals.get("beta")?.aborted, false);
+    await click(trigger("折叠项目 Beta"));
+    assert.equal(signals.get("beta")?.aborted, true); assert.equal(signals.get("alpha")?.aborted, false);
+    await click(trigger("关闭项目与会话列表"));
+    assert.equal(signals.get("alpha")?.aborted, true);
+    pending.resolve(Response.json({ collection: "active", sessions: [] }));
+    await act(async () => { await settle(); });
+    assert.equal(currentHref, "/projects/alpha/sessions/one"); assert.equal(commandRequests().length, 0);
+  });
+
+  it("keeps row action dialogs and candidates mounted while sidebar presentation changes or the popup closes", async () => {
+    await open(); await publish();
+    await click(trigger("会话操作 Session two")); await click(button("重命名"));
+    const candidate = renderer!.root.findByProps({ "aria-label": "新的会话名称" });
+    await act(() => candidate.props.onChange({ target: { value: "Preserved candidate" } }));
+    await act(() => webPreferences.update("appearance", { sidebarCollapsed: true }));
+    assert.equal(renderer!.root.findByProps({ "aria-label": "新的会话名称" }), candidate);
+    assert.equal(candidate.props.value, "Preserved candidate");
+    await click(button("取消"));
+    await click(trigger("项目与会话列表"));
+    await click(trigger("会话操作 Session two")); await click(button("删除"));
+    const deletion = renderer!.root.findByProps({ className: "deletion-details" });
+    const previews = requests.filter(({ url }) => url.endsWith("/deletion-preview")).length;
+    const popup = renderer!.root.findAllByType(Popover).find((node) => node.props.open)!;
+    let guarded = false;
+    await act(() => popup.props.onOpenChange(false, { reason: "trigger-hover", cancel() { guarded = true; } }));
+    assert.equal(guarded, true, "row dialogs prevent hover dismissal of their presentation");
+    for (const slot of ["dialog-content", "dialog-overlay"]) {
+      let actionCancelled = false;
+      await act(() => popup.props.onOpenChange(false, { reason: "outside-press", event: { target: { closest: (selector: string) => selector.includes(`[data-slot="${slot}"]`) ? {} : null } }, cancel() { actionCancelled = true; } }));
+      assert.equal(actionCancelled, true, "the active row dialog and its backdrop retain the project browser");
+      assert.equal(renderer!.root.findByProps({ className: "deletion-details" }), deletion);
+    }
+    await click(trigger("关闭项目与会话列表"));
+    assert.equal(renderer!.root.findByProps({ className: "deletion-details" }), deletion);
+    await act(() => webPreferences.update("appearance", { sidebarCollapsed: false }));
+    assert.equal(renderer!.root.findByProps({ className: "deletion-details" }), deletion);
+    assert.equal(requests.filter(({ url }) => url.endsWith("/deletion-preview")).length, previews);
+    await click(button("取消"));
+    await click(trigger("会话操作 Session two")); await click(button("查看 JSONL"));
+    const viewer = renderer!.root.findByProps({ className: "project-dialog session-jsonl-dialog" });
+    await act(() => webPreferences.update("appearance", { sidebarCollapsed: true }));
+    assert.equal(renderer!.root.findByProps({ className: "project-dialog session-jsonl-dialog" }), viewer);
+    assert.equal(requests.filter(({ url }) => url.endsWith("/jsonl")).length, 1);
+    assert.equal(requests.filter(({ url, body }) => body && url.endsWith("/actions")).length, 0);
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("returns sidebar dialogs to mobile navigation after resizing, but keeps visible drawer and page rows as focus targets", async () => {
+    let drawerOpen = false, mobile = true, sidebarRow = true;
+    const navigation = { getClientRects: () => mobile ? [{}] : [] };
+    const ownerDocument = { querySelector: (selector: string) => selector === ".workspace-navigation-toggle" ? navigation : null };
+    const sidebar = { ownerDocument, closest: (selector: string) => selector === ".sidebar-mobile-open" && drawerOpen ? {} : null };
+    const row = { isConnected: true, closest: (selector: string) => selector === ".sidebar" && sidebarRow ? sidebar : null };
+    rendererOptions = { createNodeMock(element) {
+      const props = element.props;
+      return typeof props === "object" && props !== null && "className" in props && props.className === "session-more" ? row : null;
+    } };
+    await open(); await publish();
+    await click(trigger("会话操作 Session two")); await click(button("查看 JSONL"));
+    const viewer = renderer!.root.findByProps({ className: "project-dialog session-jsonl-dialog" });
+    const returnFocus = viewer.props.finalFocus;
+    assert.equal(returnFocus(), navigation, "closed mobile drawer must not receive focus");
+    drawerOpen = true;
+    assert.equal(returnFocus(), row, "open drawer keeps its exact row target");
+    drawerOpen = false; mobile = false;
+    assert.equal(returnFocus(), row, "desktop keeps its exact row target");
+    mobile = true; sidebarRow = false;
+    assert.equal(returnFocus(), row, "collection-page rows do not redirect into navigation");
+  });
+
+  it("mirrors header mode in appearance settings and preserves the full mobile drawer", async () => {
+    await open(); await changeDraft("unchanged draft");
+    await click(trigger("收起左侧栏"));
+    assert.equal(webPreferences.getSnapshot().preferences.appearance.sidebarCollapsed, true);
+    await click(trigger("设置"));
+    const mode = () => renderer!.root.findAllByType("button").find((node) => node.props.role === "switch" && node.props["aria-label"] === "左侧栏图标模式")!;
+    assert.equal(mode().props["aria-checked"], true);
+    await click(mode());
+    assert.equal(webPreferences.getSnapshot().preferences.appearance.sidebarCollapsed, false);
+    assert.ok(trigger("收起左侧栏"));
+    await act(() => { for (const listener of events.get("storage") ?? []) listener({ key: WEB_PREFERENCES_KEY, newValue: JSON.stringify({ ...DEFAULT_WEB_PREFERENCES, appearance: { ...DEFAULT_WEB_PREFERENCES.appearance, sidebarCollapsed: true } }) }); });
+    assert.equal(mode().props["aria-checked"], true); assert.ok(trigger("展开左侧栏"));
+    await click(button("恢复本组默认")); assert.equal(mode().props["aria-checked"], false);
+    await click(trigger("关闭设置")); assert.equal(renderer!.root.findByType("textarea").props.value, "unchanged draft");
+    await act(() => renderer!.unmount()); renderer = undefined;
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) });
+    webPreferences.update("appearance", { sidebarCollapsed: true });
+    await open();
+    assert.ok(trigger("折叠项目 Alpha")); assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 2);
+    await click(trigger("打开导航")); assert.match(renderer!.root.findByType("main").props.className, /sidebar-mobile-open/);
+    assert.equal(webPreferences.getSnapshot().preferences.appearance.sidebarCollapsed, true);
   });
 
   it("shares one collection request between sidebar and page and keeps it alive when the sidebar collapses", async () => {

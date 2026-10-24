@@ -81,9 +81,11 @@ describe("session file bubbles and independent previews", () => {
     await mount();
     const header = renderer!.root.findByProps({ className: "conversation-header" });
     const svg = () => header.findByType("svg");
-    assert.match(svg().props.className, /lucide-panel-top-open/);
+    const closedGlyph = svg().findByType("path").props.d;
+    assert.equal(control("打开会话输出").props["aria-expanded"], false);
     await openList();
-    assert.match(svg().props.className, /lucide-panel-top-close/);
+    assert.notEqual(svg().findByType("path").props.d, closedGlyph);
+    assert.equal(control("收起会话输出").props["aria-expanded"], true);
     const title = renderer!.root.findAllByType("h2").find((node) => text(node) === "输出");
     assert.ok(title);
     const popover = () => renderer!.root.findByType(Popover);

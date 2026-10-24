@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Archive, FileJson2, MoreHorizontal, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import type { SessionListItem, DeletionPreview, DeletionOutcome, SessionCollection } from "@/shared/workspace-contract";
 import { Button } from "@/components/ui/button";
@@ -23,16 +23,29 @@ function relativeTime(value: string, renderedAt: string) {
   return `${Math.floor(minutes / 1_440)} 天`;
 }
 
-export function SessionRows({ projectId, sessions, loading, refreshing, error }: { projectId: string; sessions: SessionListItem[]; loading?: boolean; refreshing?: boolean; error?: string }) {
+export function SessionRows({ projectId, sessions, loading, refreshing, error, renderRows = (rows) => rows, fallbackFocus, presentationKey, onNavigate, onInteractionChange }: { projectId: string; sessions: SessionListItem[]; loading?: boolean; refreshing?: boolean; error?: string; renderRows?(rows: ReactNode): ReactNode; fallbackFocus?(): HTMLElement | null; presentationKey?: string; onNavigate?(): void; onInteractionChange?(active: boolean): void }) {
   const { route, navigate, refreshProject, renderedAt } = useWorkspace();
   const [menu, setMenu] = useState<string>();
   const [deleting, setDeleting] = useState<SessionListItem>();
   const [renaming, setRenaming] = useState<SessionListItem>();
   const { openSessionViewer, viewingSession } = useSessionViewer();
   const sessionButtons = useRef(new Map<string, HTMLButtonElement>());
+  const interacting = Boolean(menu || deleting || renaming || viewingSession?.projectId === projectId);
+  useEffect(() => { onInteractionChange?.(interacting); }, [interacting, onInteractionChange]);
   const [actionError, setActionError] = useState<string>();
   const actionScope = useRef(0);
   useEffect(() => { actionScope.current += 1; setMenu(undefined); setDeleting(undefined); setRenaming(undefined); setActionError(undefined); }, [projectId, route.projectId, route.sessionId, route.section]);
+  useEffect(() => { setMenu(undefined); }, [presentationKey]);
+  const focusFallback = useRef(fallbackFocus); focusFallback.current = fallbackFocus;
+  const returnFocus = (id: string) => () => {
+    const row = sessionButtons.current.get(id);
+    const target = row?.isConnected ? row : focusFallback.current?.();
+    const sidebar = target?.closest(".sidebar");
+    const navigation = sidebar?.ownerDocument.querySelector<HTMLButtonElement>(".workspace-navigation-toggle");
+    // A responsive transition can leave connected row/project buttons in a closed drawer.
+    if (sidebar && !sidebar.closest(".sidebar-mobile-open") && navigation?.getClientRects().length) return navigation;
+    return target ?? false;
+  };
   async function act(session: SessionListItem, body: object) {
     const source = actionScope.current;
     setActionError(undefined);
@@ -40,16 +53,15 @@ export function SessionRows({ projectId, sessions, loading, refreshing, error }:
     catch (cause) { if (source === actionScope.current) setActionError(cause instanceof Error ? cause.message : String(cause)); }
     finally { refreshProject(session.projectId); }
   }
-  if (error) return <Alert variant="error" title="会话列表加载失败" className="sidebar-alert">{error}</Alert>;
-  return <div className="session-rows" aria-busy={Boolean(loading || refreshing)}>
+  const rows = error ? <Alert variant="error" title="会话列表加载失败" className="sidebar-alert">{error}</Alert> : <div className="session-rows" aria-busy={Boolean(loading || refreshing)}>
     {sessions.map((session) => {
       const recovering = session.deletion && session.deletion.status !== "complete";
       return <div className="session-item-wrap" key={session.id}>
-        <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, renderedAt)}</span></a>
+        <a href={sessionUrl(projectId, session.id)} title={session.preview} onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { event.preventDefault(); onNavigate?.(); navigate(sessionUrl(projectId, session.id)); } }} className={cn("session-item", route.projectId === projectId && route.sessionId === session.id && "selected")}><span className="session-item-title">{session.name}</span><span className="session-item-time">{relativeTime(session.updatedAt, renderedAt)}</span></a>
         <DropdownMenu open={menu === session.id} onOpenChange={(open) => setMenu((current) => open ? session.id : current === session.id ? undefined : current)}>
           <DropdownMenuTrigger ref={(node: HTMLButtonElement | null) => { if (node) sessionButtons.current.set(session.id, node); else sessionButtons.current.delete(session.id); }} className="session-more" aria-label={`会话操作 ${session.name}`}><MoreHorizontal size={14} /></DropdownMenuTrigger>
           <DropdownMenuContent className="session-actions-menu" align="end" aria-label={`会话操作 ${session.name}`} finalFocus={() => deleting?.id === session.id || renaming?.id === session.id || (viewingSession?.projectId === projectId && viewingSession.id === session.id) ? false : sessionButtons.current.get(session.id)}>
-            <DropdownMenuItem onClick={() => { openSessionViewer(session, sessionButtons.current.get(session.id)); setMenu(undefined); }}><FileJson2 size={12} />查看 JSONL</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { openSessionViewer(session, returnFocus(session.id)); setMenu(undefined); }}><FileJson2 size={12} />查看 JSONL</DropdownMenuItem>
             {recovering ? <DropdownMenuItem variant="destructive" onClick={() => { setDeleting(session); setMenu(undefined); }}><RotateCcw size={12} />重试删除</DropdownMenuItem> : <>
               {session.collection === "active" ? <><DropdownMenuItem onClick={() => { setRenaming(session); setMenu(undefined); }}><Pencil size={12} />重命名</DropdownMenuItem><DropdownMenuItem onClick={() => void act(session, { type: "archive" })}><Archive size={12} />归档</DropdownMenuItem></> : <DropdownMenuItem onClick={() => void act(session, { type: session.collection === "trash" ? "restore_deleted" : "restore" })}><RotateCcw size={12} />{session.collection === "trash" ? "恢复删除" : "恢复"}</DropdownMenuItem>}
               {session.collection !== "trash" && <DropdownMenuItem variant="destructive" onClick={() => { setDeleting(session); setMenu(undefined); }}><Trash2 size={12} />删除</DropdownMenuItem>}
@@ -59,9 +71,12 @@ export function SessionRows({ projectId, sessions, loading, refreshing, error }:
       </div>;
     })}
     {!sessions.length && <p className="sidebar-summary">{loading ? "正在读取会话…" : "还没有会话。"}</p>}{actionError && <Alert variant="error" title="会话操作失败" className="session-action-alert" onDismiss={() => setActionError(undefined)}>{actionError}</Alert>}
-    {deleting && <DeleteSessionDialog key={`${deleting.projectId}:${deleting.id}`} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting((current) => current?.projectId === deleting.projectId && current.id === deleting.id ? undefined : current); }} returnFocus={sessionButtons.current.get(deleting.id)} />}
-    {renaming && <RenameSessionDialog key={`${renaming.projectId}:${renaming.id}`} session={renaming} onClose={() => setRenaming(undefined)} onSettled={() => refreshProject(renaming.projectId)} returnFocus={sessionButtons.current.get(renaming.id)} />}
   </div>;
+  // The action owner stays mounted when its row presentation moves or closes.
+  return <>{renderRows(rows)}
+    {deleting && <DeleteSessionDialog key={`${deleting.projectId}:${deleting.id}`} session={deleting} onClose={() => setDeleting(undefined)} onDeleted={() => { setDeleting((current) => current?.projectId === deleting.projectId && current.id === deleting.id ? undefined : current); }} returnFocus={returnFocus(deleting.id)} />}
+    {renaming && <RenameSessionDialog key={`${renaming.projectId}:${renaming.id}`} session={renaming} onClose={() => setRenaming(undefined)} onSettled={() => refreshProject(renaming.projectId)} returnFocus={returnFocus(renaming.id)} />}
+  </>;
 }
 
 export function SessionCollectionFeature({ projectId, collection }: { projectId: string; collection: SessionCollection }) {
@@ -72,7 +87,7 @@ export function SessionCollectionFeature({ projectId, collection }: { projectId:
   return <div className="collection-page"><div className="workspace-browser-heading"><p>{collection === "archived" ? "已归档" : collection === "trash" ? "最近删除" : "会话"}</p><span>{project?.name}</span></div><SessionRows projectId={projectId} sessions={result.data} loading={result.loading} refreshing={result.refreshing} /><p className="workspace-location">恢复历史不会重建已删除的工作文件。保留的分支与工作区状态以会话详情为准。</p></div>;
 }
 
-function RenameSessionDialog({ session, onClose, onSettled, returnFocus }: { session: SessionListItem; onClose(): void; onSettled(): void; returnFocus?: HTMLElement | null }) {
+function RenameSessionDialog({ session, onClose, onSettled, returnFocus }: { session: SessionListItem; onClose(): void; onSettled(): void; returnFocus?: HTMLElement | null | (() => HTMLElement | null | false) }) {
   const [name, setName] = useState(session.name);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
@@ -91,7 +106,7 @@ function RenameSessionDialog({ session, onClose, onSettled, returnFocus }: { ses
     finally { onSettled(); pendingRef.current = false; if (mounted.current) setPending(false); }
   }
   return <Dialog open onOpenChange={(next) => { if (!next && !pendingRef.current) onClose(); }}>
-    <DialogContent className="project-dialog rename-session-dialog" initialFocus={input} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
+    <DialogContent className="project-dialog rename-session-dialog" initialFocus={input} finalFocus={typeof returnFocus === "function" ? returnFocus : returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
       <div className="project-dialog-heading"><DialogTitle>重命名会话</DialogTitle><button aria-label="取消重命名" disabled={pending} onClick={onClose}><X size={16} /></button></div>
       <DialogDescription>{session.name}</DialogDescription>
       <form className="rename-session-form" onSubmit={(event) => { event.preventDefault(); void rename(); }}>
@@ -103,7 +118,7 @@ function RenameSessionDialog({ session, onClose, onSettled, returnFocus }: { ses
   </Dialog>;
 }
 
-export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }: { session: SessionListItem; onClose(): void; onDeleted(): void; returnFocus?: HTMLElement | null }) {
+export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }: { session: SessionListItem; onClose(): void; onDeleted(): void; returnFocus?: HTMLElement | null | (() => HTMLElement | null | false) }) {
   const { refreshProject } = useWorkspace();
   const currentBranch = session.workspace?.mode === "current-branch";
   const [preview, setPreview] = useState<DeletionPreview & { deletion?: DeletionOutcome }>();
@@ -149,7 +164,7 @@ export function DeleteSessionDialog({ session, onClose, onDeleted, returnFocus }
     finally { pendingRef.current = false; if (mounted.current) setPending(false); }
   }
   return <Dialog open onOpenChange={(next) => { if (!next && !pendingRef.current) onClose(); }}>
-    <DialogContent className="project-dialog delete-dialog" initialFocus={cancel} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
+    <DialogContent className="project-dialog delete-dialog" initialFocus={cancel} finalFocus={typeof returnFocus === "function" ? returnFocus : returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false} aria-busy={pending}>
       <div className="project-dialog-heading"><DialogTitle>删除“{session.name}”</DialogTitle><button aria-label="取消删除" disabled={pending} onClick={onClose}><X size={16} /></button></div>
       <DialogDescription>会话历史将移入可恢复的回收站。{currentBranch && "当前分支的项目文件不会被删除。"}正在运行或等待输入的任务必须先结束。</DialogDescription>
       <dl className="deletion-details"><dt>会话</dt><dd>{session.id}</dd><dt>工作区</dt><dd>{preview?.workspace.treeRoot ?? (currentBranch ? session.workspace?.executionRoot : session.workspace?.treeRoot) ?? "旧会话：原项目目录不会被删除"}</dd><dt>分支</dt><dd>{preview?.workspace.branch ?? session.workspace?.branch ?? "—"}</dd><dt>状态</dt><dd>{preview ? preview.workspace.state === "dirty" ? "含本地改动" : preview.workspace.state === "clean" ? "空闲 · 工作区干净" : preview.workspace.message ?? preview.workspace.state : error ? "无法确认，删除已阻止" : "正在检查任务和工作区状态…"}</dd></dl>

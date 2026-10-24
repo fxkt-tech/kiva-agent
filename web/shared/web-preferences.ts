@@ -20,7 +20,7 @@ export function normalizeVisualStylePreference(value: unknown): VisualStylePrefe
 
 export interface WebPreferences {
   readonly version: 1;
-  readonly appearance: Readonly<{ theme: ThemePreference; visualStyle: VisualStylePreference; conversationFontSize: 14 | 16 | 18; wrapCode: boolean }>;
+  readonly appearance: Readonly<{ theme: ThemePreference; visualStyle: VisualStylePreference; conversationFontSize: 14 | 16 | 18; wrapCode: boolean; sidebarCollapsed: boolean }>;
   readonly conversation: Readonly<{ thinkingExpanded: boolean; toolsExpanded: boolean; queueMode: "steer" | "follow_up"; workspaceMode: SessionWorkspaceMode }>;
   readonly shortcuts: Readonly<{ sendMode: SendMode; bindings: Readonly<Record<ShortcutAction, ShortcutBinding | null>> }>;
 }
@@ -32,7 +32,7 @@ export type PreferencePatch<G extends PreferenceGroup> = G extends "shortcuts"
 const binding = (key: string): ShortcutBinding => Object.freeze({ key, mod: true, alt: false, shift: false });
 export const DEFAULT_WEB_PREFERENCES: WebPreferences = Object.freeze({
   version: 1,
-  appearance: Object.freeze({ theme: "system", visualStyle: "flat", conversationFontSize: 14, wrapCode: false }),
+  appearance: Object.freeze({ theme: "system", visualStyle: "flat", conversationFontSize: 14, wrapCode: false, sidebarCollapsed: false }),
   conversation: Object.freeze({ thinkingExpanded: false, toolsExpanded: false, queueMode: "steer", workspaceMode: DEFAULT_SESSION_WORKSPACE_MODE }),
   shortcuts: Object.freeze({ sendMode: "enter", bindings: Object.freeze({ newSession: binding("n"), openCommands: binding("k"), focusComposer: null, openSettings: binding(",") }) }),
 });
@@ -119,6 +119,7 @@ export function decodeWebPreferences(value: unknown): WebPreferences {
       visualStyle: normalizeVisualStylePreference(appearance.visualStyle),
       conversationFontSize: appearance.conversationFontSize === 16 || appearance.conversationFontSize === 18 ? appearance.conversationFontSize : 14,
       wrapCode: typeof appearance.wrapCode === "boolean" ? appearance.wrapCode : false,
+      sidebarCollapsed: appearance.sidebarCollapsed === true,
     }),
     conversation: Object.freeze({
       thinkingExpanded: typeof conversation.thinkingExpanded === "boolean" ? conversation.thinkingExpanded : false,

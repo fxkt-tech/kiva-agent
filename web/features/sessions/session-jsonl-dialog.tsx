@@ -19,7 +19,7 @@ function validateDocument(data: SessionJsonlDocument, session: Pick<SessionResou
   if (typeof data.content !== "string" || typeof data.truncated !== "boolean" || !Number.isFinite(data.bytes) || !Number.isFinite(data.totalBytes) || data.bytes < 0 || data.totalBytes < data.bytes || (data.fileName !== undefined && typeof data.fileName !== "string")) return "JSONL 返回格式无效";
 }
 
-export function SessionJsonlDialog({ session, onClose, returnFocus, initialSelection, linkError }: { session: Pick<SessionResource, "id" | "projectId" | "name">; onClose(): void; returnFocus?: HTMLElement | null; initialSelection?: SessionViewerSelection; linkError?: string }) {
+export function SessionJsonlDialog({ session, onClose, returnFocus, initialSelection, linkError }: { session: Pick<SessionResource, "id" | "projectId" | "name">; onClose(): void; returnFocus?: HTMLElement | null | (() => HTMLElement | null | false); initialSelection?: SessionViewerSelection; linkError?: string }) {
   const [tab, setTab] = useState<"rendered" | "raw">("rendered");
   const [version, setVersion] = useState(0);
   const result = useResource<SessionJsonlDocument>(linkError ? undefined : `${resourceApi({ projectId: session.projectId, sessionId: session.id })}/jsonl`, version);
@@ -53,7 +53,7 @@ export function SessionJsonlDialog({ session, onClose, returnFocus, initialSelec
     event.preventDefault(); event.stopPropagation(); setTab(next === 0 ? "rendered" : "raw"); tabButtons.current[next]?.focus();
   }
   return <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
-    <DialogContent className="project-dialog session-jsonl-dialog" initialFocus={closeButton} finalFocus={returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false}>
+    <DialogContent className="project-dialog session-jsonl-dialog" initialFocus={closeButton} finalFocus={typeof returnFocus === "function" ? returnFocus : returnFocus ? () => returnFocus.isConnected ? returnFocus : false : undefined} showCloseButton={false}>
       <header className="jsonl-header">
         <div className="jsonl-heading-copy"><DialogTitle>会话 JSONL</DialogTitle><DialogDescription className="jsonl-session-name" title={session.name}>{session.name}</DialogDescription></div>
         <div className="jsonl-tabs" role="tablist" aria-label="JSONL 显示方式">{(["rendered", "raw"] as const).map((value, index) => <button ref={(node) => { tabButtons.current[index] = node; }} type="button" role="tab" id={`${id}-${value}-tab`} aria-controls={`${id}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} key={value} onClick={() => setTab(value)} onKeyDown={(event) => tabKeys(event, index)}>{value === "rendered" ? "渲染视图" : "原始文本"}</button>)}</div>
