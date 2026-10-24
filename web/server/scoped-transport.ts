@@ -15,6 +15,8 @@ import { InstallationSettingsService } from "./installation-settings";
 import type { AuthorizationOptions } from "./provider-authorization";
 import { isAuthorizationId, isAuthorizationInput, isAuthorizationRevisionInput, isBeginAuthorizationInput } from "../shared/provider-authorization";
 import { parseSettingsJson } from "./settings-files";
+import { SessionArtifactReader } from "./session-artifacts";
+import { ArtifactPreviewService } from "./artifact-previews";
 
 export interface ScopedTransportOptions {
   registry: WorkspaceRegistry;
@@ -28,19 +30,39 @@ export interface ScopedTransportOptions {
 export function createScopedTransport({ registry, repository, manager, allowedOrigins, authorization }: ScopedTransportOptions) {
   const allowed = (request: IncomingMessage) => !request.headers.origin || allowedOrigins.includes(request.headers.origin);
   const parse = (request: IncomingMessage) => new URL(request.url ?? "/", "http://kiva.local");
+  const resourceOrigin = (request: IncomingMessage) => allowedOrigins.find((candidate) => new URL(candidate).host === request.headers.host) ?? allowedOrigins[0];
   const settings = new InstallationSettingsService(registry.installationRoot, manager, authorization);
   const workspace = new WorkspaceReader();
   const diffs = new ProjectDiffReader();
+  const artifacts = new SessionArtifactReader(repository);
+  const previews = new ArtifactPreviewService(artifacts, repository);
 
   return {
-    close: () => settings.close(),
+    close: () => { previews.close(); return settings.close(); },
     allowed,
     isEventPath(request: IncomingMessage) { return /^\/api\/projects\/[^/]+\/sessions\/[^/]+\/events$/.test(parse(request).pathname); },
     async handle(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
       const url = parse(request);
-      if (!url.pathname.startsWith("/api/")) return false;
       try {
-        if (request.method !== "GET" && !allowed(request)) throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
+        if (url.pathname.startsWith("/preview/")) {
+          return await previews.serve(request, response, resourceOrigin(request));
+        }
+        if (url.pathname === "/artifact-preview" || url.pathname.startsWith("/artifact-preview/")) {
+          const site = request.headers["sec-fetch-site"], destination = request.headers["sec-fetch-dest"];
+          if (!allowed(request) || site !== undefined && site !== "same-origin" && site !== "none"
+            || destination !== undefined && destination !== "document") throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
+          if (request.method !== "GET") methodNotAllowed();
+          if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "文件预览不接受查询参数。", 400);
+          const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
+          if (parts.length !== 4) throw new WorkspaceError("endpoint_not_found", "文件预览地址无效。", 404);
+          const scope = { projectId: decodeResourceId(parts[1]), sessionId: decodeResourceId(parts[2]) };
+          await previews.serveDocument(scope, parts[3], response, resourceOrigin(request));
+          return true;
+        }
+        if (!url.pathname.startsWith("/api/")) return false;
+        // Opaque HTML previews may load anonymous assets, never business resources.
+        // CORS alone blocks response access but does not prevent simple requests.
+        if (!allowed(request) || request.headers["sec-fetch-site"] === "cross-site") throw new WorkspaceError("forbidden_origin", "Origin is not allowed", 403);
         for (const name of ["path", "collection", "projectId", "sessionId", "view"]) if (url.searchParams.getAll(name).length > 1) throw new WorkspaceError("duplicate_parameter", `Duplicate ${name} parameter`, 400);
         if (url.searchParams.has("projectId") || url.searchParams.has("sessionId")) throw new WorkspaceError("invalid_identity", "Resource identity belongs in the route", 400);
         if (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/")) {
@@ -157,6 +179,24 @@ export function createScopedTransport({ registry, repository, manager, allowedOr
           return true;
         }
         const scope: RuntimeScope = { projectId, sessionId: decodeResourceId(parts[4]) };
+        if (parts[5] === "artifacts") {
+          if (url.searchParams.size) throw new WorkspaceError("invalid_parameter", "会话产物接口不接受文件路径参数。", 400, scope);
+          if (parts.length === 6 && request.method === "GET") {
+            sendJson(response, 200, (await artifacts.read(scope)).list);
+          } else if (parts.length === 8 && parts[6] === "previews" && request.method === "DELETE") {
+            previews.revoke(scope, parts[7]); sendJson(response, 200, { accepted: true });
+          } else if (parts.length === 8 && parts[7] === "content" && request.method === "GET") {
+            const file = await previews.content(scope, parts[6]);
+            response.writeHead(200, { "content-type": file.mimeType, "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff",
+              "content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'", "referrer-policy": "no-referrer" });
+            response.end(file.content);
+          } else if (parts.length === 8 && parts[7] === "preview" && request.method === "POST") {
+            const body = await readObject(request);
+            if (Object.keys(body).length) throw new WorkspaceError("invalid_preview", "文件预览不接受其他参数。", 400, scope);
+            sendJson(response, 201, await previews.create(scope, parts[6]));
+          } else throw new WorkspaceError("endpoint_not_found", "会话产物接口不存在。", 404, scope);
+          return true;
+        }
         if (parts.length === 5 && request.method === "GET") { sendJson(response, 200, await manager.read(scope)); return true; }
         if (parts.length !== 6) throw new WorkspaceError("endpoint_not_found", "API endpoint not found", 404, scope);
         const endpoint = parts[5];

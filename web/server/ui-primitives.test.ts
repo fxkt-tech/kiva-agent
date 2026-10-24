@@ -5,10 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { Combobox as BaseCombobox } from "@base-ui/react/combobox";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
+import { Menu as BaseMenu } from "@base-ui/react/menu";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Combobox } from "../components/ui/combobox";
 import { Dialog, DialogContent, DialogPortal, DialogTrigger } from "../components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { Select } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 
@@ -16,6 +18,21 @@ describe("shared UI primitive contracts", () => {
   let renderer: ReactTestRenderer | undefined;
   beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
   afterEach(async () => { if (renderer) await act(() => renderer!.unmount()); renderer = undefined; });
+
+  it("keeps the default menu portal and forwards an explicit fullscreen container only to Portal", async () => {
+    const portalContainer = createRef<HTMLElement>();
+    const menu = (container?: typeof portalContainer) => createElement(DropdownMenu, {}, createElement(DropdownMenuTrigger, {}, "Menu"), createElement(DropdownMenuContent, { portalContainer: container }, createElement(DropdownMenuItem, {}, "Action")));
+    await act(() => { renderer = create(menu()); });
+    assert.equal(renderer!.root.findByType(BaseMenu.Portal).props.container, undefined);
+    await act(() => renderer!.update(menu(portalContainer)));
+    const portal = renderer!.root.findByType(BaseMenu.Portal);
+    assert.equal(portal.props.container, portalContainer);
+    const positioner = Children.toArray(portal.props.children)[0];
+    assert.ok(isValidElement<{ children?: React.ReactNode }>(positioner));
+    const popup = Children.toArray(positioner.props.children)[0];
+    assert.ok(isValidElement<Record<string, unknown>>(popup));
+    assert.equal(popup.props.portalContainer, undefined, "portal-only options do not leak onto popup DOM");
+  });
 
   it("exposes semantic Button variants while preserving native and Slot state", () => {
     const ordinary = renderToStaticMarkup(createElement(Button, { disabled: true, "aria-pressed": true }, "Apply"));

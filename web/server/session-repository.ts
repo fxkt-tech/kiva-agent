@@ -13,6 +13,17 @@ import { parseSessionRecord, type SessionRecord } from "./session-record";
 import { SessionListReader } from "./session-list-reader";
 
 interface RepositoryOptions { installationRoot?: string; worktreeRoot?: string; workspaces?: ExecutionWorkspace; catalog?: (root: string) => SessionCatalog; sessionLists?: SessionListReader }
+export interface ArtifactContext {
+  projectRoot: string;
+  known: boolean;
+  persisted?: boolean;
+  root?: string;
+  recordedRoot?: string;
+  workspaceError?: string;
+  sourceSessionId?: string;
+  createdAt?: string;
+  generation?: number;
+}
 
 /** Passive reads never instantiate Pi, create metadata or prepare a worktree. */
 export class SessionRepository {
@@ -21,6 +32,7 @@ export class SessionRepository {
   private readonly operations = new Map<string, Promise<unknown>>();
   private readonly sessionLists: SessionListReader;
   private readonly catalogFactory: (root: string) => SessionCatalog;
+  private readonly artifactGenerations = new Map<string, number>();
 
   constructor(private readonly registry: WorkspaceRegistry, options: RepositoryOptions = {}) {
     this.installationRoot = realpathSync(options.installationRoot ?? registry.installationRoot);
@@ -50,7 +62,25 @@ export class SessionRepository {
   }
 
   /** Accepted runtime persistence events invalidate the same project snapshot generation. */
-  invalidateSessionLists(projectId: string) { this.sessionLists.invalidate(projectId); }
+  invalidateSessionLists(projectId: string) {
+    this.sessionLists.invalidate(projectId);
+    this.artifactGenerations.set(projectId, (this.artifactGenerations.get(projectId) ?? 0) + 1);
+  }
+
+  /** Artifact indexing resolves history asynchronously itself; do not project every transcript here. */
+  artifactContext(projectId: string, sessionId: string): ArtifactContext {
+    decodeResourceId(sessionId);
+    const projectRoot = this.projectRoot(projectId);
+    const record = this.records(projectId).find((entry) => entry.id === sessionId);
+    const context: ArtifactContext = { projectRoot, known: !!record, persisted: record?.persisted,
+      recordedRoot: record?.workspace?.executionRoot, sourceSessionId: record?.sourceSessionId, createdAt: record?.createdAt,
+      generation: this.artifactGenerations.get(projectId) ?? 0 };
+    if (record?.workspace) {
+      try { context.root = this.executionRoot(record.workspace); }
+      catch { context.workspaceError = "会话工作区不可用或已移除，无法预览当前文件。"; }
+    } else context.workspaceError = "旧会话没有可验证的执行工作区，无法预览当前文件。";
+    return context;
+  }
 
   read(projectId: string, sessionId: string): SessionRead {
     const session = this.resource(projectId, decodeResourceId(sessionId));

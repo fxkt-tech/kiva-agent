@@ -1,0 +1,5 @@
+# Approved amendment: external session artifacts
+
+User asked whether the workspace restriction can be lifted, was told files explicitly generated/referenced by the current session may be previewed in any directory (including HTML local dependencies), then requested implementation. The outcome is direct preview, with no import/copy step and unchanged modal/default, side and independent new-tab UX.
+
+Ownership lives in session artifact location/provenance and exact preview capabilities; project directory/files/diff readers must retain their old boundaries. Backend owns the change plus tests; main owns task/spec sync and isolated browser fixtures. Never substitute project root for unresolved session paths or set the whole filesystem as a trusted project root. APIs accept artifact IDs, not fresh client paths; each lease maps only explicit dependency URLs to authorized regular files. Preserve size/MIME limits, no-history-write semantics, opaque script isolation and business origin guards. Existing application credential filtering is not a blanket directory restriction for explicit image/HTML artifacts.

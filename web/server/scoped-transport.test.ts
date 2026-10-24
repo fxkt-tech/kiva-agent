@@ -43,7 +43,7 @@ async function fixture(capacity = 4) {
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const create = async (operationId: string, workspaceMode?: SessionWorkspaceMode) => (await request(`${api}/sessions`, { operationId, ...(workspaceMode ? { workspaceMode } : {}) })).body.session as SessionResource;
-  const close = async () => { sockets.clients.forEach((socket) => socket.terminate()); sockets.close(); await manager.stop(); await new Promise<void>((resolve) => server.close(() => resolve())); };
+  const close = async () => { sockets.clients.forEach((socket) => socket.terminate()); sockets.close(); await transport.close(); await manager.stop(); await new Promise<void>((resolve) => server.close(() => resolve())); };
   return { root, installation, registry, repository, project, manager, adapters, origin, api, request, create, close, git };
 }
 
@@ -402,6 +402,127 @@ describe("scoped HTTP/WebSocket transport", () => {
       const registered = await f.request("/api/projects", { path: nongit });
       const rejected = await f.request(`/api/projects/${registered.body.project.id}/sessions`, { operationId: "unsupported" });
       assert.equal(rejected.status, 409); assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+});
+
+describe("session artifact transport", () => {
+  it("keeps listings/content/independent preview leases passive and enforces scoped capability access", { timeout: 20_000 }, async () => {
+    const f = await fixture();
+    try {
+      const session = await f.create("artifact-one", "current-branch"), other = await f.create("artifact-other", "current-branch");
+      writeFileSync(join(f.installation, "demo.html"), '<h1>Artifact</h1><script>document.body.dataset.ready="yes"</script>');
+      const histories = join(f.installation, ".kiva", "sessions"); mkdirSync(histories, { recursive: true });
+      writeFileSync(join(histories, `${session.id}.jsonl`), [
+        { type: "session", version: 3, id: session.id, cwd: f.installation },
+        { type: "message", id: "artifact-source", parentId: null, message: { role: "assistant", content: [{ type: "text", text: "[Page](demo.html)" }] } },
+      ].map((entry) => JSON.stringify(entry)).join("\n"));
+      const api = `${f.api}/sessions/${session.id}/artifacts`, listed = await f.request(api);
+      assert.equal(listed.status, 200); assert.equal(listed.body.artifacts.length, 1);
+      assert.equal(listed.body.artifacts[0].path, "demo.html"); assert.equal(f.adapters.size, 0);
+      assert.equal((await f.request(`${f.api}/sessions/${other.id}/artifacts`)).body.artifacts.length, 0);
+      const id = listed.body.artifacts[0].id;
+      const source = await fetch(f.origin + `${api}/${id}/content`);
+      assert.match(source.headers.get("content-type")!, /text\/plain/); assert.match(await source.text(), /Artifact/);
+      assert.equal((await f.request(`${api}?path=demo.html`)).status, 400);
+      assert.equal((await f.request(`${f.api}/sessions/${other.id}/artifacts/${id}/preview`, {})).status, 404);
+      const first = await f.request(`${api}/${id}/preview`, {}), second = await f.request(`${api}/${id}/preview`, {});
+      assert.equal(first.status, 201); assert.notEqual(first.body.leaseId, second.body.leaseId);
+      const document = await fetch(f.origin + first.body.url, { headers: { origin: "null" } });
+      assert.equal(document.status, 200); assert.match(document.headers.get("content-security-policy")!, /sandbox allow-scripts/);
+      const revoked = await fetch(f.origin + `${api}/previews/${first.body.leaseId}`, { method: "DELETE", headers: { origin: f.origin } });
+      assert.equal(revoked.status, 200);
+      assert.equal((await fetch(f.origin + first.body.url)).status, 410);
+      assert.equal((await fetch(f.origin + second.body.url)).status, 200);
+      assert.equal(f.adapters.size, 0, "artifact reads and ephemeral leases must never start Pi");
+    } finally { await f.close(); }
+  });
+
+  it("denies opaque/cross-site business GET and writes while retaining same-origin and local clients", { timeout: 20_000 }, async () => {
+    const f = await fixture();
+    try {
+      assert.equal((await f.request(f.api, undefined, { origin: "null" })).status, 403);
+      assert.equal((await f.request(f.api, undefined, { "sec-fetch-site": "cross-site" })).status, 403);
+      assert.equal((await f.request(f.api, undefined, { origin: f.origin })).status, 200);
+      assert.equal((await f.request(f.api)).status, 200);
+      assert.equal((await f.request(`${f.api}/sessions`, { operationId: "forbidden" }, { origin: "null" })).status, 403);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+});
+
+describe("raw artifact tab navigation", () => {
+  it("serves only the file document/image at its stable URL with independent leases and rewritten dependencies", { timeout: 20_000 }, async (t) => {
+    const f = await fixture();
+    try {
+      const session = await f.create("raw-file-tab", "current-branch"), other = await f.create("raw-file-other", "current-branch");
+      const directory = join(f.installation, "raw-artifacts"); mkdirSync(join(directory, "scripts"), { recursive: true });
+      const original = '<!doctype html><html><head><title>Original artifact</title><link rel="stylesheet" href="theme.css"></head><body><h1 id="original">Only original file</h1><button id="counter">Count: 0</button><script type="module" src="scripts/main.js"></script></body></html>';
+      writeFileSync(join(directory, "demo.html"), original);
+      writeFileSync(join(directory, "theme.css"), 'body{color:purple}');
+      writeFileSync(join(directory, "scripts/main.js"), 'import {label} from "./helper.js"; fetch("./data.json");');
+      writeFileSync(join(directory, "scripts/helper.js"), 'export const label="raw";');
+      writeFileSync(join(directory, "data.json"), '{"ready":true}');
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><text>original image</text></svg>';
+      writeFileSync(join(directory, "chart.svg"), svg);
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l/8AAAAASUVORK5CYII=", "base64");
+      writeFileSync(join(directory, "pixel.png"), png);
+      const histories = join(f.installation, ".kiva/sessions"); mkdirSync(histories, { recursive: true });
+      writeFileSync(join(histories, `${session.id}.jsonl`), [
+        { type: "session", version: 3, id: session.id, cwd: f.installation },
+        { type: "message", id: "raw-source", parentId: null, message: { role: "assistant", content: "[Page](raw-artifacts/demo.html) ![Image](raw-artifacts/chart.svg) ![Pixel](raw-artifacts/pixel.png)" } },
+      ].map((entry) => JSON.stringify(entry)).join("\n"));
+      t.mock.method(f.manager, "read", () => { throw new Error("Raw navigation must not read or start a runtime"); });
+      const api = `${f.api}/sessions/${session.id}/artifacts`, list = await f.request(api);
+      const htmlArtifact = list.body.artifacts.find((item: { kind: string }) => item.kind === "html"), imageArtifact = list.body.artifacts.find((item: { path: string }) => item.path.endsWith("chart.svg"));
+      const pngArtifact = list.body.artifacts.find((item: { path: string }) => item.path.endsWith("pixel.png"));
+      const inApp = await f.request(`${api}/${htmlArtifact.id}/preview`, {});
+      const rawHref = `/artifact-preview/${f.project.id}/${session.id}/${htmlArtifact.id}`;
+      const raw = await fetch(f.origin + rawHref, { headers: { "sec-fetch-site": "same-origin", "sec-fetch-dest": "document" } });
+      assert.equal(raw.status, 200); assert.equal(raw.url, f.origin + rawHref); assert.equal(raw.headers.has("location"), false);
+      assert.match(raw.headers.get("content-type")!, /^text\/html/); assert.match(raw.headers.get("content-security-policy")!, /sandbox allow-scripts/);
+      assert.doesNotMatch(raw.headers.get("content-security-policy")!, /allow-same-origin/); assert.equal(raw.headers.has("access-control-allow-origin"), false);
+      const document = await raw.text();
+      assert.match(document, /id="original"/); assert.match(document, /id="counter"/);
+      assert.doesNotMatch(document, /<iframe|__next|artifact-preview-toolbar|artifact-standalone|正在准备预览/);
+      const assets = [...document.matchAll(/(?:src|href)="(\/preview\/[^\"]+)"/g)].map((match) => match[1]);
+      assert.equal(assets.length, 2); for (const asset of assets) assert.equal((await fetch(f.origin + asset)).status, 200);
+      const script = await (await fetch(f.origin + assets.find((asset) => asset.endsWith("main.js"))!)).text();
+      for (const dependency of [...script.matchAll(/["'](\/preview\/[^"']+)["']/g)].map((match) => match[1])) assert.equal((await fetch(f.origin + dependency)).status, 200);
+      writeFileSync(join(directory, "demo.html"), original.replace("Only original file", "Current file after refresh"));
+      const fresh = await fetch(f.origin + rawHref), freshDocument = await fresh.text();
+      assert.match(freshDocument, /Current file after refresh/); assert.notEqual(fresh.headers.get("content-security-policy"), raw.headers.get("content-security-policy"));
+      assert.equal((await fetch(f.origin + assets[0])).status, 200, "refresh must not revoke another existing raw-tab lease");
+      assert.equal((await fetch(f.origin + inApp.body.url)).status, 200, "raw navigation must not revoke dialog/floating leases");
+      const image = await fetch(`${f.origin}/artifact-preview/${f.project.id}/${session.id}/${imageArtifact.id}`);
+      assert.equal(image.headers.get("content-type"), "image/svg+xml"); assert.equal(await image.text(), svg);
+      assert.match(image.headers.get("content-security-policy")!, /sandbox; default-src 'none'/);
+      const nativePng = await fetch(`${f.origin}/artifact-preview/${f.project.id}/${session.id}/${pngArtifact.id}`);
+      assert.equal(nativePng.headers.get("content-type"), "image/png");
+      assert.deepEqual(Buffer.from(await nativePng.arrayBuffer()), png);
+      assert.match(nativePng.headers.get("content-security-policy")!, /sandbox; default-src 'none'; style-src 'unsafe-inline'/);
+      assert.doesNotMatch(nativePng.headers.get("content-security-policy")!, /allow-scripts|script-src|https:/);
+      assert.equal(nativePng.headers.has("access-control-allow-origin"), false);
+      assert.equal((await fetch(`${f.origin}/artifact-preview/${f.project.id}/${other.id}/${htmlArtifact.id}`)).status, 404);
+      assert.equal(f.adapters.size, 0);
+    } finally { await f.close(); }
+  });
+
+  it("rejects non-navigation embedding, foreign origins, identity spoofing, queries and unsupported methods", { timeout: 20_000 }, async () => {
+    const f = await fixture();
+    try {
+      const session = await f.create("raw-tab-validation", "current-branch"), id = "0".repeat(32);
+      const href = `${f.origin}/artifact-preview/${f.project.id}/${session.id}/${id}`;
+      const blockedHeaders: Record<string, string>[] = [{ origin: "null" }, { origin: "https://foreign.invalid" }, { "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }, { "sec-fetch-site": "same-origin", "sec-fetch-dest": "iframe" }, { "sec-fetch-dest": "image" }];
+      for (const headers of blockedHeaders) {
+        assert.equal((await fetch(href, { headers })).status, 403);
+      }
+      for (const method of ["POST", "PUT", "DELETE", "HEAD", "OPTIONS"]) assert.equal((await fetch(href, { method })).status, 405);
+      for (const query of ["?path=/tmp/secret.html", "?projectId=other", "?path=a&path=b"]) assert.equal((await fetch(href + query)).status, 400);
+      assert.equal((await fetch(href + "/extra")).status, 404);
+      assert.equal((await fetch(href.replace(id, "%2Fbad"))).status, 400);
+      assert.equal((await fetch(href.replace(f.project.id, "not-registered"))).status, 404);
+      assert.equal(f.adapters.size, 0);
     } finally { await f.close(); }
   });
 });

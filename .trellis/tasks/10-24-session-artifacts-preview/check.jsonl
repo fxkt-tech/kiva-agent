@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/kiva-web/frontend/workspace-routing.md", "reason": "Scoped identity, passive reads, workspace ownership and origin boundaries"}
+{"file": ".trellis/spec/kiva-web/frontend/workspace-files-performance.md", "reason": "Bounded async resources, pending sharing and demand-driven loading"}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Overlay, focus and controlled UI conventions"}
+{"file": ".trellis/spec/kiva-web/frontend/index.md", "reason": "Guideline discovery; visual-system.md exceeds injection limit, read it in full before UI work/review"}
+{"file": ".trellis/tasks/10-24-session-artifacts-preview/research/existing-capabilities.md", "reason": "Existing evidence, browser isolation and unresolved feasibility gates"}
+{"file": ".trellis/spec/kiva-web/frontend/session-artifacts.md", "reason": "Implemented artifact provenance, three preview modes and capability isolation contracts"}
+{"file": ".trellis/tasks/10-24-session-artifacts-preview/research/external-artifact-scope.md", "reason": "User-authorized external files and exact capability amendment supersedes directory restriction"}

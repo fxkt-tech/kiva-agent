@@ -10,14 +10,16 @@ export function DropdownMenu<Payload = unknown>(props: MenuPrimitive.Root.Props<
 export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 
 export interface DropdownMenuContentProps extends MenuPrimitive.Popup.Props,
-  Pick<MenuPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "alignOffset"> {}
+  Pick<MenuPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "alignOffset"> {
+  portalContainer?: MenuPrimitive.Portal.Props["container"];
+}
 
 export function DropdownMenuContent({
-  className, style, side = "bottom", align = "start", sideOffset = 4, alignOffset = 0, ...props
+  className, style, side = "bottom", align = "start", sideOffset = 4, alignOffset = 0, portalContainer, ...props
 }: DropdownMenuContentProps) {
   const layer = useOverlayLayer();
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={portalContainer}>
       <MenuPrimitive.Positioner side={side} align={align} sideOffset={sideOffset} alignOffset={alignOffset} className="ui-popup-positioner" style={{ zIndex: layer }}>
         <MenuPrimitive.Popup data-slot="dropdown-menu-content" className={mergeClassName("ui-dropdown-menu", className)} style={overlayStyle(layer, style)} {...props} />
       </MenuPrimitive.Positioner>

@@ -7,6 +7,7 @@ import { installUiMocks } from "./helpers/mock-ui";
 installUiMocks();
 const { WorkspaceShell } = await import("../features/workspace/shell");
 const { Dialog } = await import("../components/ui/dialog");
+const { Popover } = await import("../components/ui/popover");
 import { parseWorkspaceRoute } from "../features/workspace/route";
 const { default: SessionPage } = await import("../app/(workspace)/projects/[projectId]/sessions/[sessionId]/page");
 const { default: SessionsPage } = await import("../app/(workspace)/projects/[projectId]/sessions/page");
@@ -65,6 +66,7 @@ describe("routed workspace features", () => {
   const originalWindow = globalThis.window;
   const originalLocation = globalThis.location;
   const originalStorage = globalThis.sessionStorage;
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
   const events = new Map<string, Set<(event: unknown) => void>>();
 
   async function page(href: string): Promise<ReactNode> {
@@ -120,7 +122,7 @@ describe("routed workspace features", () => {
   beforeEach(() => {
     renderer = undefined; requests = []; visibleProjects = [p]; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); defaults = undefined; preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
     Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:9495" } });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {}, getItem() { return null; } } });
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
@@ -163,6 +165,7 @@ describe("routed workspace features", () => {
         return Response.json({ status: "complete", history: "trashed", workspace: body.removeWorktree ? "removed" : "retained" });
       }
       if (url.endsWith("/commands")) return Response.json({ accepted: true });
+      if (url.endsWith("/artifacts")) { const parts = url.split("/"); return Response.json({ projectId: parts[3], sessionId: parts[5], artifacts: [], revision: "empty", complete: true, warnings: [] }); }
       if (url.endsWith("/jsonl")) { const parts = url.split("/"); const content = `${JSON.stringify({ type: "session", id: parts[5], version: 3 })}\r\n${JSON.stringify({ type: "message", id: "entry", parentId: null, message: { role: "user", content: "JSONL 原文" } })}\n`; return Response.json({ projectId: parts[3], sessionId: parts[5], fileName: "original.jsonl", content, bytes: Buffer.byteLength(content), totalBytes: Buffer.byteLength(content), truncated: false }); }
       const id = url.split("/").at(-1)!; const found = sessions.find((item) => item.id === id) ?? session(id);
       return Response.json({ projectId: "alpha", sessionId: id, session: found, snapshot: { ...currentSnapshot, session: { ...currentSnapshot.session, id } }, lifecycle: "dormant", executable: found.executable });
@@ -172,6 +175,7 @@ describe("routed workspace features", () => {
     if (renderer) await act(() => renderer!.unmount());
     webPreferences.destroy();
     globalThis.fetch = originalFetch;
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument); else Reflect.deleteProperty(globalThis, "document");
     for (const [name, value] of [["WebSocket", originalWebSocket], ["window", originalWindow], ["location", originalLocation], ["sessionStorage", originalStorage]] as const) { if (value !== undefined) Object.defineProperty(globalThis, name, { configurable: true, value }); else Reflect.deleteProperty(globalThis, name); }
   });
 
@@ -1153,9 +1157,75 @@ describe("routed workspace features", () => {
     assert.equal(text(renderer!.root.findByProps({ "aria-label": "当前会话后端连接" })), "已连接");
   });
 
-  it("retains standalone mobile navigation and the real directory picker without a session header or right panel", async () => {
+  it("toggles the header file bubble without reserving a rail or remounting drafts, disclosures or runtime", async () => {
     await open();
-    assert.equal(renderer!.root.findAllByType("header").length, 0);
+    const message = { id: "retained", role: "assistant" as const, text: "Response", thinking: "Keep disclosure state", tools: [] };
+    await publish(snapshot("one", { status: "running", messages: [message] }));
+    await changeDraft("keep this exact draft");
+    const input = renderer!.root.findByType("textarea");
+    const thinking = renderer!.root.findByProps({ className: "thinking-block" });
+    await act(() => thinking.props.onToggle({ currentTarget: { open: true } }));
+    const sockets = [...FakeWebSocket.sockets];
+    const header = renderer!.root.findByType("header");
+    assert.equal(header.props.className, "conversation-header");
+    assert.equal(header.findAllByType("button").length, 1);
+    assert.equal(trigger("打开会话输出").props["aria-expanded"], false);
+    assert.equal(renderer!.root.findAllByType("aside").filter((node) => node.props["aria-label"] === "会话文件列表").length, 0);
+    await click(trigger("打开会话输出"));
+    assert.equal(trigger("收起会话输出").props["aria-expanded"], true);
+    const outputPopover = renderer!.root.findAllByType(Popover).find((node) => node.findAllByProps({ className: "artifact-list-popover" }).length)!;
+    for (const reason of ["outside-press", "focus-out"]) {
+      const details = { reason, isCanceled: false, cancel() { this.isCanceled = true; }, preventUnmountOnClose() {} };
+      await act(() => outputPopover.props.onOpenChange(false, details));
+      assert.equal(details.isCanceled, true);
+    }
+    await changeDraft("editing while outputs stay open");
+    assert.equal(trigger("收起会话输出").props["aria-expanded"], true);
+    assert.equal(renderer!.root.findByType("textarea"), input);
+    assert.equal(input.props.value, "editing while outputs stay open");
+    await click(trigger("收起会话输出"));
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "会话文件列表" }).length, 0, "no collapsed rail or expansion strip remains");
+    assert.equal(trigger("打开会话输出").props["aria-expanded"], false);
+    assert.equal(renderer!.root.findByType("textarea"), input);
+    assert.equal(input.props.value, "editing while outputs stay open");
+    assert.equal(renderer!.root.findByProps({ className: "thinking-block" }), thinking);
+    assert.equal(thinking.props.open, true);
+    await click(trigger("打开会话输出"));
+    assert.equal(renderer!.root.findByType("textarea"), input);
+    assert.equal(input.props.value, "editing while outputs stay open");
+    assert.equal(thinking.props.open, true);
+    assert.deepEqual(FakeWebSocket.sockets, sockets);
+    assert.equal(sockets.at(-1)!.closed, false);
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("retains the actual running conversation, draft and socket while a nonmodal preview moves and resizes", async () => {
+    extraFetch = async (url, init) => {
+      if (url.endsWith("/artifacts")) return Response.json({ projectId: "alpha", sessionId: "one", artifacts: [{ id: "demo", path: "demo.html", name: "demo.html", kind: "html", mimeType: "text/html", currentVersion: true, relations: ["referenced"], sources: [{ entryId: "entry" }], availability: "available" }], complete: true, warnings: [], revision: "r1" });
+      if (url.endsWith("/preview")) return Response.json({ projectId: "alpha", sessionId: "one", artifactId: "demo", leaseId: "floating", url: "/preview/floating/demo.html", expiresAt: new Date(Date.now() + 900_000).toISOString(), warnings: [] });
+      if (init?.method === "DELETE") return Response.json({ accepted: true });
+    };
+    await open(); await publish(snapshot("one", { status: "running", messages: [{ id: "live", role: "assistant", text: "Still running", thinking: "", tools: [] }] }));
+    await changeDraft("continue typing with bubble open");
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { addEventListener() {}, removeEventListener() {}, fullscreenElement: null } });
+    const input = renderer!.root.findByType("textarea"), sockets = [...FakeWebSocket.sockets];
+    await click(trigger("打开会话输出")); await click(trigger("气泡预览 demo.html"));
+    const frame = renderer!.root.findByType("iframe");
+    const move = renderer!.root.findAll((node) => node.type === "div" && node.props["aria-label"] === "移动气泡预览")[0];
+    await act(() => { move.props.onKeyDown({ key: "ArrowLeft", preventDefault() {}, stopPropagation() {} }); trigger("调整气泡预览大小").props.onKeyDown({ key: "ArrowUp", preventDefault() {}, stopPropagation() {} }); });
+    await click(trigger("打开会话输出")); await click(trigger("收起会话输出"));
+    assert.equal(renderer!.root.findByType("iframe"), frame);
+    assert.equal(renderer!.root.findByType("textarea"), input); assert.equal(input.props.value, "continue typing with bubble open");
+    assert.deepEqual(FakeWebSocket.sockets, sockets); assert.equal(sockets.at(-1)!.closed, false);
+    await changeDraft("editing is still available"); assert.equal(input.props.value, "editing is still available");
+    await click(trigger("关闭气泡预览"));
+    assert.equal(renderer!.root.findByType("textarea"), input); assert.equal(commandRequests().length, 0);
+  });
+
+  it("retains independent mobile navigation and the real directory picker beside the session-only header", async () => {
+    await open();
+    assert.equal(renderer!.root.findAllByType("header").length, 1);
+    assert.equal(renderer!.root.findByType("header").props.className, "conversation-header");
     assert.equal(renderer!.root.findAllByProps({ "aria-label": "切换右侧栏" }).length, 0);
     assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 0);
     assert.doesNotMatch(renderer!.root.findByProps({ "aria-label": "打开导航" }).props.className, /focus-visible:ring/);
@@ -1174,10 +1244,10 @@ describe("routed workspace features", () => {
     assert.equal(currentHref, "/projects/beta/sessions");
   });
 
-  it("omits the header and right panel on every route while keeping standalone navigation reachable", async () => {
+  it("limits the transparent conversation header to exact session routes and keeps standalone navigation reachable", async () => {
     for (const href of ["/projects/alpha/sessions/one", "/projects/alpha/sessions", "/projects/alpha/sessions/one/files", "/projects/alpha/sessions/one/changes", "/projects/alpha/files", "/projects/alpha/archive", "/projects/alpha/trash", "/projects"]) {
       await open(href);
-      assert.equal(renderer!.root.findAllByType("header").length, 0, href);
+      assert.equal(renderer!.root.findAllByType("header").length, href === "/projects/alpha/sessions/one" ? 1 : 0, href);
       assert.equal(renderer!.root.findAllByProps({ "aria-label": "切换右侧栏" }).length, 0, href);
       assert.equal(renderer!.root.findAllByProps({ id: "workspace-panel" }).length, 0, href);
       assert.equal(renderer!.root.findAllByProps({ className: "inspector" }).length, 0, href);

@@ -17,6 +17,7 @@ import { ResourceState, useWorkspace } from "@/features/workspace/shell";
 import { mutate, resourceApi, sessionUrl, useResource } from "@/features/workspace/resources";
 import { Composer } from "./composer";
 import { useMessageScroll } from "./use-message-scroll";
+import { SessionArtifacts } from "@/features/artifacts/session-artifacts";
 
 export function SessionFeature({ projectId, sessionId }: { projectId: string; sessionId?: string }) {
   // A changed identity remounts local disclosures, while the shell retains its draft store.
@@ -62,7 +63,8 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { refreshProject(projectId); setContinuing(false); }
   }
-  return <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session", preferences.appearance.wrapCode && "conversation-wrap-code")} style={{ "--conversation-font-size": `${preferences.appearance.conversationFontSize}px` } as React.CSSProperties}>
+  const artifactRefreshKey = `${version}:${runtime.sessionsVersion}:${messages.flatMap((message) => message.tools.filter((tool) => tool.status !== "running").map((tool) => `${tool.id}:${tool.status}`)).join(",")}`;
+  const conversation = <div className={cn("session-feature", empty && "is-empty", !editable && "read-only-session", preferences.appearance.wrapCode && "conversation-wrap-code")} style={{ "--conversation-font-size": `${preferences.appearance.conversationFontSize}px` } as React.CSSProperties}>
     <div className="message-timeline">
       <MessageViewport className="message-scroll" {...viewportProps}><div className="message-column" ref={setContent}>
       {session && <Alert variant={quarantined || !session.executable ? "warning" : "info"} title={quarantined ? "运行时已隔离" : session.legacy ? "旧会话 · 只读" : currentBranch ? "当前分支 · 共享项目目录" : "独立 worktree"} className="session-workspace-notice">
@@ -80,6 +82,9 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
     {editable && <Composer projectId={projectId} session={session} runtime={runtime} emptyConversation={empty} />}
     <ExtensionDialog request={runtime.uiRequest} respond={runtime.respondToUI} />
   </div>;
+  return target && session
+    ? <SessionArtifacts scope={target} refreshKey={artifactRefreshKey} onSource={(href) => navigate(href)}>{conversation}</SessionArtifacts>
+    : <div className="conversation-workspace">{conversation}</div>;
 }
 
 const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage }) {
