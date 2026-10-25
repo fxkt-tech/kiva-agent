@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Archive, Bot, ChevronLeft, ChevronRight, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { LoadingIndicator } from "@/components/shared/LoadingIndicator";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
@@ -302,5 +303,5 @@ function ProjectGroup({ project, pending, removing, onRemove, compact, ready, br
 }
 
 export function ResourceState({ error, children }: { error?: string; children?: ReactNode }) {
-  return <div className="resource-state" role={error ? undefined : "status"}>{error ? <Alert variant="error" title="无法打开此资源">{error}</Alert> : children ?? "正在读取…"}</div>;
+  return <div className="resource-state" role={!error && children != null ? "status" : undefined}>{error ? <Alert variant="error" title="无法打开此资源">{error}</Alert> : children ?? <LoadingIndicator label="正在读取…" />}</div>;
 }
