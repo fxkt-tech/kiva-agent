@@ -1,0 +1,17 @@
+/* The official rail keeps its pyramid ticks and shared-layout preview motion. */
+.conversation-preview-rail-host { position: absolute; z-index: 5; inset: 12px 12px 12px 8px; display: flex; align-items: center; pointer-events: none; min-height: 0; }
+.conversation-preview-rail { padding-block: var(--preview-rail-padding, 0px); width: 100%; min-height: 0; max-height: 100%; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; align-items: flex-start; pointer-events: none; }
+.conversation-preview-rail::-webkit-scrollbar { display: none; }
+.conversation-preview-rail-ticks { width: 24px; align-content: start; pointer-events: auto; }
+.conversation-preview-rail-ticks [data-slot="preview-rail-item"] { width: 24px; padding: 0; border: 0; border-radius: 2px; background: transparent; color: var(--muted-foreground); }
+.conversation-preview-rail-ticks [data-slot="preview-rail-item"]:focus-visible { outline: 1px solid var(--ring); outline-offset: -1px; box-shadow: none; }
+.conversation-preview-rail-ticks [data-slot="preview-rail-tick"] { width: 22px; height: 2px; }
+.conversation-preview-rail-previews { top: var(--preview-rail-padding, 0px); bottom: auto; left: 32px; right: 0; align-content: start; }
+.conversation-preview-rail-preview { width: min(280px, 100%); max-width: 100%; }
+.conversation-message-preview { max-height: var(--preview-height, 148px); overflow: hidden; transform: translateY(var(--preview-offset, 0px)); padding: 12px; border: 1px solid var(--strong-border); border-radius: var(--surface-radius, 8px); background: var(--card); box-shadow: var(--shadow); color: var(--foreground); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+.conversation-message-preview strong { font-size: 11px; font-weight: 500; }
+.conversation-message-preview p { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin: 5px 0 0; color: var(--muted-foreground); }
+@media (max-width: 720px) {
+  .has-preview-rail .message-column { width: calc(100% - 56px); margin-left: 40px; margin-right: 16px; }
+  .conversation-preview-rail-host { left: 8px; right: 12px; }
+}

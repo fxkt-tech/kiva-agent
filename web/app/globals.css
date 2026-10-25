@@ -2,6 +2,7 @@
 @import "../styles/themes.css";
 @import "../components/ui/primitives.css";
 @import "../styles/agent-feedback.css";
+@import "../styles/preview-rail.css";
 
 :root {
   --font-cjk: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC";

@@ -1,0 +1,68 @@
+{
+  "source": "beUI public component registry",
+  "retrievedAt": "2026-10-25",
+  "scope": "Complete standalone seven-file preview-rail dependency closure; existing compatible lib/ease.ts and lib/utils.ts retained.",
+  "license": {
+    "spdx": "MIT",
+    "notice": "web/components/motion/BEUI-LICENSE.txt",
+    "source": "https://github.com/starc007/ui-components/blob/main/LICENSE",
+    "sha256": "9e27b491d5691a1bd95708e79de23beb2962f33fe6c1ee31ab639f43009a0b20"
+  },
+  "registries": [
+    {
+      "name": "preview-rail",
+      "url": "https://beui.dev/r/preview-rail.json",
+      "sha256": "19dbec0439e32abe836ef9d6e46c20ee34cd4dee72fe82e20c3d9dac3c793d5a"
+    }
+  ],
+  "dependencies": {
+    "motion": "14.6.0",
+    "note": "Existing pinned dependencies reused; no package or lockfile changes."
+  },
+  "files": [
+    {
+      "path": "web/components/motion/preview-rail.tsx",
+      "originalSha256": "2f4c042402fda7498c034149d432d3b10045ede76f69c537c6a0ab549dcae468",
+      "installedSha256": "2f4c042402fda7498c034149d432d3b10045ede76f69c537c6a0ab549dcae468",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/ease.ts",
+      "originalSha256": "bdfa2814cffaa4d974a5fc8614868ddb89e0310a0ead9e7105f2e8132b219ff3",
+      "installedSha256": "bdfa2814cffaa4d974a5fc8614868ddb89e0310a0ead9e7105f2e8132b219ff3",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/hooks/use-dismiss.ts",
+      "originalSha256": "b3243c39f363c9f9b33b528a2e720d5d48370e964b8c6c80747da423a4269a2a",
+      "installedSha256": "b3243c39f363c9f9b33b528a2e720d5d48370e964b8c6c80747da423a4269a2a",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/hooks/use-hover-gesture.ts",
+      "originalSha256": "d381531c81668faf22cada58671451f4e7b53cf8d8718d6768e485139810755d",
+      "installedSha256": "d381531c81668faf22cada58671451f4e7b53cf8d8718d6768e485139810755d",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/hooks/use-tap-gesture.ts",
+      "originalSha256": "b91954bf9f1cdc1771b2a6eac815d2f4e2493cb2cde5f508b2d96509dd71aeee",
+      "installedSha256": "b91954bf9f1cdc1771b2a6eac815d2f4e2493cb2cde5f508b2d96509dd71aeee",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/utils.ts",
+      "originalSha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "installedSha256": "d1f1e0d62cb8d8d1e04c26e14de842d8a151f75812d81b046c65b5d1fe8e4b27",
+      "localChanges": [
+        "Retain existing equivalent clsx + tailwind-merge cn implementation; semicolon formatting differs."
+      ]
+    },
+    {
+      "path": "web/lib/touch.ts",
+      "originalSha256": "f2a15c243c86c8bd1abb6e2e65a423b3a4c45cc1d797ebd83997f21cd1beadb9",
+      "installedSha256": "f2a15c243c86c8bd1abb6e2e65a423b3a4c45cc1d797ebd83997f21cd1beadb9",
+      "localChanges": []
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { ResourceState, useWorkspace } from "@/features/workspace/shell";
 import { mutate, resourceApi, sessionUrl, useResource } from "@/features/workspace/resources";
 import { Composer } from "./composer";
+import { ConversationPreviewRail } from "./conversation-preview-rail";
 import { useMessageScroll } from "./use-message-scroll";
 import { SessionArtifacts } from "@/features/artifacts/session-artifacts";
 
@@ -33,7 +34,7 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
   const [continuing, setContinuing] = useState(false);
   const [error, setError] = useState<string>();
   const operation = useRef<{ operationId: string; workspaceMode: SessionWorkspaceMode } | undefined>(undefined);
-  const { setViewport, setContent, awayFromBottom, scrollToBottom } = useMessageScroll();
+  const { viewport, content, setViewport, setContent, awayFromBottom, scrollToBottom, scrollToMessage } = useMessageScroll();
   const session = detail.data?.session.projectId === projectId && detail.data.session.id === sessionId ? detail.data.session : undefined;
   const identityError = detail.data && (!session || detail.data.projectId !== projectId || detail.data.sessionId !== sessionId) ? "返回的会话标识与 URL 不匹配" : undefined;
   const messages = runtime.snapshot ? runtime.messages : detail.data?.snapshot.messages ?? [];
@@ -77,6 +78,7 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
       {(runtime.error || error) && <Alert variant="error" title={error ? "无法继续会话" : "运行时出现问题"} className="conversation-alert">{error ?? runtime.error}</Alert>}
       {session?.executable && runtime.connected && !runtime.snapshot?.models.length && <div className="runtime-initialize"><Button size="sm" variant="ghost" onClick={() => void runtime.initialize()}>加载模型与运行设置</Button><span>仅在明确操作或发送时启动此会话运行时</span></div>}
       </div></MessageViewport>
+      <ConversationPreviewRail messages={messages} viewport={viewport} content={content} onSelect={scrollToMessage} />
       {!empty && awayFromBottom && <Button type="button" variant="outline" size="icon" className="scroll-to-bottom" aria-label="回到底部" title="回到底部" onClick={scrollToBottom}><ArrowDown size={17} aria-hidden="true" /></Button>}
     </div>
     {editable && <Composer projectId={projectId} session={session} runtime={runtime} emptyConversation={empty} />}
@@ -88,7 +90,7 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
 }
 
 const MessageRow = memo(function MessageRow({ message }: { message: ChatMessage }) {
-  return message.role === "user" ? <article className="user-message"><p>{message.text}</p></article> : <article className="assistant-message"><div className="assistant-body"><div className="message-meta"><strong>KivA</strong><MessageTime value={message.timestamp} /></div><MessageContent message={message} /></div></article>;
+  return message.role === "user" ? <article className="user-message" data-message-id={message.id}><p>{message.text}</p></article> : <article className="assistant-message" data-message-id={message.id}><div className="assistant-body"><div className="message-meta"><strong>KivA</strong><MessageTime value={message.timestamp} /></div><MessageContent message={message} /></div></article>;
 });
 
 function MessageTime({ value }: { value?: number }) {

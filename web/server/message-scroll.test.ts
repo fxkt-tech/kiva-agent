@@ -10,6 +10,7 @@ class Viewport extends EventTarget {
   clientHeight = 400;
   focused = false;
   focus() { this.focused = true; }
+  getBoundingClientRect() { return { top: 40 }; }
   moveTo(top: number) { this.scrollTop = top; this.dispatchEvent(new Event("scroll")); }
   input(type: string, fields: object) { this.dispatchEvent(Object.assign(new Event(type), fields)); }
 }
@@ -141,6 +142,96 @@ describe("conversation scroll following", () => {
     viewport.scrollHeight += 300; await act(() => resize()); await settle();
     assert.equal(viewport.scrollTop, 1_500, "tool collapse or viewport resize must not silently detach following");
     assert.equal(controls.awayFromBottom, false);
+  });
+
+  function messageAt(top: number): HTMLElement {
+    return { getBoundingClientRect: () => ({ top: 40 + top - viewport.scrollTop }) } as HTMLElement;
+  }
+
+  it("cancels pending follow immediately when seeking an old message and stays detached on streaming", async () => {
+    await mount();
+    viewport.scrollHeight += 500;
+    await act(() => resize());
+    assert.equal(frames.size, 1);
+    await act(() => controls.scrollToMessage(messageAt(500)));
+    assert.equal(frames.size, 1, "seek replaces the pending follow frame");
+    await tick();
+    assert.ok(viewport.scrollTop < 1_600, "the first frame moves toward the old message");
+    viewport.scrollHeight += 300;
+    await act(() => resize());
+    await settle();
+    assert.equal(viewport.scrollTop, 484);
+    assert.equal(controls.awayFromBottom, true);
+    viewport.scrollHeight += 400;
+    await act(() => resize()); await settle();
+    assert.equal(viewport.scrollTop, 484, "stream output cannot restart bottom following");
+    await act(() => controls.scrollToBottom()); await settle();
+    assert.equal(viewport.scrollTop, 2_800);
+    assert.equal(controls.awayFromBottom, false);
+    viewport.scrollHeight += 100;
+    await act(() => resize()); await settle();
+    assert.equal(viewport.scrollTop, 2_900, "return-to-bottom resumes ongoing follow");
+  });
+
+  it("interrupts seeks in either direction with wheel, touch or keyboard input", async () => {
+    await mount();
+    for (const input of [
+      () => viewport.input("wheel", { deltaY: 100 }),
+      () => viewport.input("keydown", { key: "PageDown" }),
+      () => { viewport.input("touchstart", { touches: [{ clientY: 100 }] }); viewport.input("touchmove", { touches: [{ clientY: 80 }] }); },
+    ]) {
+      await act(() => controls.scrollToBottom()); await settle();
+      await act(() => controls.scrollToMessage(messageAt(500)));
+      await tick();
+      const before = viewport.scrollTop;
+      await act(() => input());
+      assert.equal(frames.size, 0);
+      viewport.scrollHeight += 100;
+      await act(() => resize()); await settle();
+      assert.equal(viewport.scrollTop, before);
+    }
+  });
+
+  it("cancels a seek immediately when the scrollbar moves manually", async () => {
+    await mount();
+    await act(() => controls.scrollToMessage(messageAt(500)));
+    await tick();
+    await act(() => viewport.moveTo(900));
+    assert.equal(frames.size, 0);
+    viewport.scrollHeight += 100;
+    await act(() => resize()); await settle();
+    assert.equal(viewport.scrollTop, 900);
+    assert.equal(controls.awayFromBottom, true);
+  });
+
+  it("settles a seek when layout changes move the target beyond the new bottom", async () => {
+    await mount();
+    await act(() => viewport.moveTo(0));
+    await act(() => controls.scrollToMessage(messageAt(1_500)));
+    await tick();
+    viewport.scrollHeight = 800;
+    await act(() => resize()); await settle();
+    assert.equal(viewport.scrollTop, 400);
+    assert.equal(frames.size, 0);
+    viewport.scrollHeight += 100;
+    await act(() => resize()); await settle();
+    assert.equal(viewport.scrollTop, 400, "layout clamp does not implicitly resume follow");
+  });
+
+  it("clamps seeks, honors reduced motion, and cancels a seek on disposal", async () => {
+    reducedMotion = true;
+    await mount();
+    await act(() => controls.scrollToMessage(messageAt(-100))); await tick();
+    assert.equal(viewport.scrollTop, 0);
+    await act(() => controls.scrollToMessage(messageAt(99_000))); await tick();
+    assert.equal(viewport.scrollTop, 1_600);
+    reducedMotion = false;
+    await act(() => controls.scrollToMessage(messageAt(200)));
+    assert.equal(frames.size, 1);
+    await act(() => renderer!.unmount()); renderer = undefined;
+    assert.equal(frames.size, 0);
+    controls.scrollToMessage(messageAt(400));
+    assert.equal(frames.size, 0);
   });
 
   it("disconnects observers, listeners and frames on unmount", async () => {

@@ -4,7 +4,7 @@ import { createElement, type ReactNode } from "react";
 type MotionTestProps = Record<string, unknown> & { children?: ReactNode };
 
 const motionProps = new Set([
-  "animate", "custom", "exit", "initial", "layout", "layoutId", "transition",
+  "animate", "custom", "exit", "initial", "layout", "layoutId", "layoutRoot", "transition",
   "variants", "whileFocus", "whileHover", "whileInView", "whileTap",
   "onAnimationComplete", "onAnimationStart", "onUpdate",
 ]);
