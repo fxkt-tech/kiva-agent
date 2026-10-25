@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from "react";
-import { ArrowUp, Clock3, Command, FileCode2, GitBranch, Paperclip, Square, SquareTerminal, Wrench, X } from "lucide-react";
+import { ArrowUp, Clock3, Command, FileCode2, GitBranch, Plus, Square, SquareTerminal, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Toast } from "@/components/ui/toast";
@@ -163,7 +163,7 @@ export function Composer({ projectId, session, runtime, emptyConversation }: { p
             <div className="composer-actions">
               <div className="composer-input-actions">
                 <input ref={fileInput} className="sr-only" type="file" accept={ATTACHMENT_ACCEPT} multiple onChange={attachImages} />
-                <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Paperclip size={17} /></Button>
+                <Button type="button" variant="ghost" size="icon" onClick={() => fileInput.current?.click()} disabled={attachments.length >= 5} aria-label="添加附件"><Plus size={17} /></Button>
               </div>
               <div className="composer-settings">
                 {hasContextUsage && <div className="composer-context"><Popover open={contextOpen} onOpenChange={setContextOpen}>
