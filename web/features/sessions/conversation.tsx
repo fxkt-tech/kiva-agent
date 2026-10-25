@@ -76,7 +76,6 @@ function Conversation({ projectId, sessionId }: { projectId: string; sessionId?:
       {project.capability.state !== "ready" && <Alert variant="warning" title="项目尚未准备好" className="session-workspace-notice"><p>{project.capability.message}。请先在项目中准备 Git 仓库和首次提交，再刷新此页。</p><Button size="sm" variant="ghost" onClick={refresh}>重新检查</Button></Alert>}
       {messages.length ? messages.map((message) => <MessageRow key={message.id} message={message} />) : <div className="empty-state"><h2>今天想构建什么？</h2><button className="empty-project" title={project.path} onClick={openProjectPicker}><FolderOpen size={15} /><span>{project.name}</span><ChevronDown size={13} /></button></div>}
       {(runtime.error || error) && <Alert variant="error" title={error ? "无法继续会话" : "运行时出现问题"} className="conversation-alert">{error ?? runtime.error}</Alert>}
-      {session?.executable && runtime.connected && !runtime.snapshot?.models.length && <div className="runtime-initialize"><Button size="sm" variant="ghost" onClick={() => void runtime.initialize()}>加载模型与运行设置</Button><span>仅在明确操作或发送时启动此会话运行时</span></div>}
       </div></MessageViewport>
       <ConversationPreviewRail messages={messages} viewport={viewport} content={content} onSelect={scrollToMessage} />
       {!empty && awayFromBottom && <Button type="button" variant="outline" size="icon" className="scroll-to-bottom" aria-label="回到底部" title="回到底部" onClick={scrollToBottom}><ArrowDown size={17} aria-hidden="true" /></Button>}

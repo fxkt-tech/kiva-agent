@@ -257,7 +257,6 @@ a.brand-home { color: inherit; }
 .preview-alert { margin: 16px; }
 .session-workspace-notice { margin-bottom: 24px; }
 .session-workspace-notice code, .workspace-location, .workspace-preview-placeholder > code { font-family: var(--font-code); overflow-wrap: anywhere; }
-.runtime-initialize { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; color: var(--muted-foreground); font-size: 11px; }
 .workspace-location { margin: 16px 24px; color: var(--muted-foreground); font-size: 11px; line-height: 1.8; }
 .projects-page, .collection-page { min-width: 0; min-height: 0; grid-row: 1 / -1; overflow: auto; }
 .projects-page { padding: 32px; }
@@ -278,6 +277,8 @@ a.brand-home { color: inherit; }
 .message-timeline { position: relative; display: grid; min-width: 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .message-scroll { min-width: 0; min-height: 0; }
 .message-scroll [data-radix-scroll-area-viewport] { overscroll-behavior-y: contain; }
+/* Keep Radix's content table from expanding the message column's containing block. */
+.message-scroll [data-radix-scroll-area-viewport] > div { width: 100%; table-layout: fixed; }
 .scroll-to-bottom { position: absolute; z-index: 5; bottom: 16px; left: 50%; transform: translateX(-50%); border-radius: 50%; background: var(--card); box-shadow: var(--shadow); }
 .is-empty .message-scroll { display: flex; flex-direction: column; justify-content: flex-end; }
 .message-column { width: min(768px, calc(100% - 64px)); min-height: 100%; margin: 0 auto; padding: 24px 0; }

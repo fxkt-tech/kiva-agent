@@ -1904,14 +1904,14 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findAllByProps({ className: "assistant-message" }).length, 2, "A later assistant start still gets its own row");
   });
 
-  it("loads cold runtime controls only by explicit action and scopes extension responses", async () => {
+  it("keeps cold runtimes passive and scopes extension responses", async () => {
     currentSnapshot = snapshot("one", { models: [], thinkingLevels: [] });
     await open(); await publish(); assert.equal(commandRequests().length, 0);
-    await click(button("加载模型与运行设置"));
+    assert.doesNotMatch(text(renderer!.root), /加载模型与运行设置|仅在明确操作或发送时启动此会话运行时/);
     await publish(snapshot("one", { uiRequest: { id: "extension-one", method: "confirm", title: "Extension confirmation" } }));
     await click(button("取消"));
-    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["initialize", "extension_ui_response"]);
-    assert.equal(commandRequests()[1].body?.id, "extension-one"); assert.equal(commandRequests()[1].body?.cancelled, true);
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["extension_ui_response"]);
+    assert.equal(commandRequests()[0].body?.id, "extension-one"); assert.equal(commandRequests()[0].body?.cancelled, true);
   });
 
   it("rejects duplicate selected paths and missing resources without showing another preview", async () => {
