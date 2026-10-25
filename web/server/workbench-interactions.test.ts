@@ -49,6 +49,9 @@ class FakeWebSocket {
   close() { this.closed = true; }
   publish(event: unknown, scope = { projectId: "alpha", sessionId: "one" }) { this.onmessage?.({ data: JSON.stringify({ protocol: 1, ...scope, streamId: "stream", seq: ++this.seq, event }) }); }
 }
+function thinkingDisclosure(root: ReactTestInstance) {
+  return root.findAll((node) => node.type === "button" && typeof node.props["aria-controls"] === "string" && text(node).includes("思考过程"))[0]!;
+}
 function text(node: ReactTestInstance): string { return node.children.map((child) => typeof child === "string" ? child : text(child)).join(""); }
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
@@ -71,6 +74,7 @@ describe("routed workspace features", () => {
   const originalLocation = globalThis.location;
   const originalStorage = globalThis.sessionStorage;
   const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const originalAnimationFrame = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
   const events = new Map<string, Set<(event: unknown) => void>>();
 
   async function page(href: string): Promise<ReactNode> {
@@ -136,7 +140,8 @@ describe("routed workspace features", () => {
     rendererOptions = undefined;
     renderer = undefined; requests = []; visibleProjects = [p]; sessions = [session("one"), session("two")]; currentSnapshot = snapshot(); defaults = undefined; preview = { projectId: "alpha", sessionId: "one", sessionName: "Session one", collection: "active", confirmation: "target-state-token", workspace: { state: "clean", treeRoot: "/worktrees/one", branch: "kiva/session/one", revision: "revision", localChanges: [] }, removeWorktree: true, recovery: "恢复历史不会重建工作文件" }; extraFetch = undefined; FakeWebSocket.sockets = []; events.clear(); pendingNavigation = Promise.resolve();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 1440, innerHeight: 900, setInterval(callback: () => void, delay: number) { return globalThis.setInterval(callback, delay); }, clearInterval(timer: ReturnType<typeof setInterval>) { globalThis.clearInterval(timer); }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener(name: string, callback: (event: unknown) => void) { const listeners = events.get(name) ?? new Set(); listeners.add(callback); events.set(name, listeners); }, removeEventListener(name: string, callback: (event: unknown) => void) { events.get(name)?.delete(callback); } } });
+    Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: (callback: FrameRequestCallback) => { callback(0); return 1; } });
     Object.defineProperty(globalThis, "location", { configurable: true, value: { protocol: "http:", host: "localhost:9495" } });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() {}, getItem() { return null; } } });
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket });
@@ -190,6 +195,7 @@ describe("routed workspace features", () => {
     webPreferences.destroy();
     globalThis.fetch = originalFetch;
     if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument); else Reflect.deleteProperty(globalThis, "document");
+    if (originalAnimationFrame) Object.defineProperty(globalThis, "requestAnimationFrame", originalAnimationFrame); else Reflect.deleteProperty(globalThis, "requestAnimationFrame");
     for (const [name, value] of [["WebSocket", originalWebSocket], ["window", originalWindow], ["location", originalLocation], ["sessionStorage", originalStorage]] as const) { if (value !== undefined) Object.defineProperty(globalThis, name, { configurable: true, value }); else Reflect.deleteProperty(globalThis, name); }
   });
 
@@ -1265,10 +1271,10 @@ describe("routed workspace features", () => {
     await open();
     await publish(snapshot("one", { messages: [{ id: "material-history", role: "assistant", text: "History", thinking: "Keep this open", tools: [{ id: "material-tool", name: "read", status: "done", args: { path: "a" } }] }] }));
     const textarea = renderer!.root.findByType("textarea");
-    const thinking = renderer!.root.findByProps({ className: "thinking-block" });
+    const thinking = thinkingDisclosure(renderer!.root);
     const tool = renderer!.root.findByProps({ className: "tool-card tool-details" });
     await act(() => textarea.props.onChange({ target: { value: "draft survives material changes" } }));
-    await act(() => { thinking.props.onToggle({ currentTarget: { open: true } }); tool.props.onToggle({ currentTarget: { open: true } }); });
+    await act(() => { thinking.props.onClick(); tool.props.onToggle({ currentTarget: { open: true } }); });
     const attachment = { name: "material-note.md", type: "text/plain", size: 3, text: async () => "abc" };
     await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [attachment], value: "file" } }));
     const sockets = FakeWebSocket.sockets.length;
@@ -1280,17 +1286,17 @@ describe("routed workspace features", () => {
       assert.equal(field("主题").props.value, "dark");
       assert.equal(renderer!.root.findByType("textarea"), textarea);
       assert.equal(textarea.props.value, "draft survives material changes");
-      assert.equal(renderer!.root.findByProps({ className: "thinking-block" }), thinking);
+      assert.equal(thinkingDisclosure(renderer!.root), thinking);
       assert.equal(renderer!.root.findByProps({ className: "tool-card tool-details" }), tool);
-      assert.equal(thinking.props.open, true); assert.equal(tool.props.open, true);
+      assert.equal(thinking.props["aria-expanded"], true); assert.equal(tool.props.open, true);
       assert.match(text(renderer!.root.findByProps({ className: "attachment-list" })), /material-note\.md/);
     }
     await click(renderer!.root.findByProps({ "aria-label": "关闭设置" }));
     assert.equal(currentHref, "/projects/alpha/sessions/one");
     assert.equal(renderer!.root.findByType("textarea"), textarea);
     assert.equal(textarea.props.value, "draft survives material changes");
-    assert.equal(renderer!.root.findByProps({ className: "thinking-block" }), thinking);
-    assert.equal(thinking.props.open, true); assert.equal(tool.props.open, true);
+    assert.equal(thinkingDisclosure(renderer!.root), thinking);
+    assert.equal(thinking.props["aria-expanded"], true); assert.equal(tool.props.open, true);
     assert.match(text(renderer!.root.findByProps({ className: "attachment-list" })), /material-note\.md/);
     assert.equal(FakeWebSocket.sockets.length, sockets);
     assert.equal(requests.filter((entry) => entry.body).length, 0);
@@ -1324,14 +1330,14 @@ describe("routed workspace features", () => {
     await open();
     const message = { id: "with-details", role: "assistant" as const, text: "Response", thinking: "Reason", streaming: true, tools: [{ id: "tool", name: "read", status: "running" as const, args: { path: "a" } }] };
     await publish(snapshot("one", { messages: [message] }));
-    const thinking = () => renderer!.root.findByProps({ className: "thinking-block" });
+    const thinking = () => thinkingDisclosure(renderer!.root);
     const tool = () => renderer!.root.findByProps({ className: "tool-card tool-details" });
-    assert.equal(thinking().props.open, true); assert.equal(tool().props.open, true);
-    await act(() => { thinking().props.onToggle({ currentTarget: { open: false } }); tool().props.onToggle({ currentTarget: { open: false } }); });
+    assert.equal(thinking().props["aria-expanded"], true); assert.equal(tool().props.open, true);
+    await act(() => { thinking().props.onClick(); tool().props.onToggle({ currentTarget: { open: false } }); });
     await publish(snapshot("one", { messages: [{ ...message, thinking: "Reason continues", text: "Response continues" }] }));
-    assert.equal(thinking().props.open, false); assert.equal(tool().props.open, false);
+    assert.equal(thinking().props["aria-expanded"], false); assert.equal(tool().props.open, false);
     await act(() => webPreferences.update("conversation", { thinkingExpanded: true, toolsExpanded: true }));
-    assert.equal(thinking().props.open, false); assert.equal(tool().props.open, false);
+    assert.equal(thinking().props["aria-expanded"], false); assert.equal(tool().props.open, false);
     assert.equal(commandRequests().length, 0);
   });
 
@@ -1352,8 +1358,8 @@ describe("routed workspace features", () => {
     await publish(snapshot("one", { status: "running", messages: [message] }));
     await changeDraft("keep this exact draft");
     const input = renderer!.root.findByType("textarea");
-    const thinking = renderer!.root.findByProps({ className: "thinking-block" });
-    await act(() => thinking.props.onToggle({ currentTarget: { open: true } }));
+    const thinking = thinkingDisclosure(renderer!.root);
+    await act(() => thinking.props.onClick());
     const sockets = [...FakeWebSocket.sockets];
     const header = renderer!.root.findByType("header");
     assert.equal(header.props.className, "conversation-header");
@@ -1377,12 +1383,12 @@ describe("routed workspace features", () => {
     assert.equal(trigger("打开会话输出").props["aria-expanded"], false);
     assert.equal(renderer!.root.findByType("textarea"), input);
     assert.equal(input.props.value, "editing while outputs stay open");
-    assert.equal(renderer!.root.findByProps({ className: "thinking-block" }), thinking);
-    assert.equal(thinking.props.open, true);
+    assert.equal(thinkingDisclosure(renderer!.root), thinking);
+    assert.equal(thinking.props["aria-expanded"], true);
     await click(trigger("打开会话输出"));
     assert.equal(renderer!.root.findByType("textarea"), input);
     assert.equal(input.props.value, "editing while outputs stay open");
-    assert.equal(thinking.props.open, true);
+    assert.equal(thinking.props["aria-expanded"], true);
     assert.deepEqual(FakeWebSocket.sockets, sockets);
     assert.equal(sockets.at(-1)!.closed, false);
     assert.equal(commandRequests().length, 0);

@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { MessageContent } from "../components/message-content";
+import { installMotionMocks } from "./helpers/mock-motion";
 import type { ChatMessage } from "../lib/use-runtime";
+
+installMotionMocks();
+const { MessageContent } = await import("../components/message-content");
 
 const message: ChatMessage = {
   id: "tool-message", role: "assistant", text: "", thinking: "",
@@ -39,7 +42,7 @@ describe("compact tool messages", () => {
     }
   });
 
-  it("renders a one-line summary without redundant tool placeholders or a Markdown spacer", () => {
+  it("renders native one-line tool summaries inside the real activity disclosure without a waiting placeholder or Markdown spacer", () => {
     const html = renderToStaticMarkup(createElement(MessageContent, { message }));
     assert.doesNotMatch(html, /正在使用工具|正在思考|markdown-body|执行完成/);
     assert.match(html, /<span class="tool-summary"[^>]*>read<\/span>/);
@@ -53,6 +56,8 @@ describe("compact tool messages", () => {
     assert.match(html, /输出/);
     assert.match(html, /复制/);
     assert.match(html, /# README/);
+    assert.match(html, /工具记录 · 1 项/);
+    assert.doesNotMatch(html, /Thought for|\d+s<\/span>/);
   });
 
   it("retains running and failure statuses without duplicating a second status line", () => {
@@ -98,6 +103,8 @@ describe("compact tool messages", () => {
     const streaming = renderToStaticMarkup(createElement(MessageContent, { message: { ...message, tools: [], streaming: true } }));
     const complete = renderToStaticMarkup(createElement(MessageContent, { message: { ...message, tools: [] } }));
     assert.match(streaming, /正在思考/);
+    assert.match(streaming, /正在处理请求，请稍候/);
+    assert.doesNotMatch(streaming, /markdown-body|streaming-text/);
     assert.equal(complete, "");
   });
 });

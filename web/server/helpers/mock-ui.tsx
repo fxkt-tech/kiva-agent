@@ -1,4 +1,5 @@
 import { mock } from "node:test";
+import { installMotionMocks } from "./mock-motion";
 import {
   cloneElement, createContext, createElement, isValidElement, useContext, useState,
   type ComponentProps, type Context, type ReactElement, type ReactNode,
@@ -131,5 +132,8 @@ export function installUiMocks() {
     ["switch", { Switch: ({ checked, onCheckedChange, size: _size, ...props }: ComponentProps<"button"> & { checked: boolean; onCheckedChange(value: boolean): void; size?: string }) => <button type="button" role="switch" aria-checked={checked} {...props} onClick={() => onCheckedChange(!checked)} /> }],
     ["checkbox", { Checkbox: ({ checked, onCheckedChange, indeterminate: _indeterminate, ...props }: ComponentProps<"input"> & { onCheckedChange(value: boolean): void; indeterminate?: boolean }) => <input type="checkbox" checked={checked} {...props} onChange={(event) => onCheckedChange(event.target.checked)} /> }],
   ] as const;
-  return controls.map(([name, namedExports]) => mock.module(new URL(`../../components/ui/${name}.tsx`, import.meta.url).href, { namedExports }));
+  return [
+    installMotionMocks(),
+    ...controls.map(([name, namedExports]) => mock.module(new URL(`../../components/ui/${name}.tsx`, import.meta.url).href, { namedExports })),
+  ];
 }

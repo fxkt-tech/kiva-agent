@@ -1,0 +1,151 @@
+{
+  "source": "beUI public component registry",
+  "retrievedAt": "2026-10-25",
+  "scope": "Complete 12-file dependency closure of reasoning-text and agent-activity only; lib/utils.ts uses the existing compatible implementation.",
+  "license": {
+    "spdx": "MIT",
+    "notice": "web/components/agents/BEUI-LICENSE.txt",
+    "source": "https://github.com/starc007/ui-components/blob/main/LICENSE",
+    "sha256": "9e27b491d5691a1bd95708e79de23beb2962f33fe6c1ee31ab639f43009a0b20"
+  },
+  "registries": [
+    {
+      "name": "reasoning-text",
+      "url": "https://beui.dev/r/reasoning-text.json",
+      "sha256": "ad31ec80f9617134a99f327fa404f70286fdfc8312f3aba20b913f44a0b1c47b"
+    },
+    {
+      "name": "agent-activity",
+      "url": "https://beui.dev/r/agent-activity.json",
+      "sha256": "d61dede51dab6de77eda2e3615a9f4b7aef5bc7bacb5e473225937bfd60df901"
+    }
+  ],
+  "dependency": {
+    "motion": "14.6.0",
+    "reason": "Only missing runtime package declared by these registry items; exact pin is recorded in web/package.json and pnpm-lock.yaml."
+  },
+  "files": [
+    {
+      "path": "web/components/agents/loading-states/reasoning-text.tsx",
+      "registries": [
+        "reasoning-text"
+      ],
+      "originalSha256": "55f1de6aa7fdf3ffbec7cf5da7d33081ca0e56c9fd15094933a571aed397d3b7",
+      "installedSha256": "a9ed86127c6e410b0e00fc9c0bf4cb60158f680d7695a921ece40f9f5a7bd5c4",
+      "localChanges": [
+        "Add optional statusLabel; the accessible live status can stay constant while decorative phrases cycle. Omission keeps the upstream phrase announcement."
+      ]
+    },
+    {
+      "path": "web/components/motion/loader.tsx",
+      "registries": [
+        "reasoning-text"
+      ],
+      "originalSha256": "24a3255b7a9b106cd60c246853864b541d9dd665c9fda99d314b74c98a01d66c",
+      "installedSha256": "24a3255b7a9b106cd60c246853864b541d9dd665c9fda99d314b74c98a01d66c",
+      "localChanges": []
+    },
+    {
+      "path": "web/components/motion/text-scramble.tsx",
+      "registries": [
+        "reasoning-text"
+      ],
+      "originalSha256": "398bdea1bb7ec795068cc0ab7fd55d6775721a7ab42fc9504c15bf47aa1c7617",
+      "installedSha256": "398bdea1bb7ec795068cc0ab7fd55d6775721a7ab42fc9504c15bf47aa1c7617",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/ease.ts",
+      "registries": [
+        "reasoning-text",
+        "agent-activity"
+      ],
+      "originalSha256": "bdfa2814cffaa4d974a5fc8614868ddb89e0310a0ead9e7105f2e8132b219ff3",
+      "installedSha256": "bdfa2814cffaa4d974a5fc8614868ddb89e0310a0ead9e7105f2e8132b219ff3",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/text-shimmer.ts",
+      "registries": [
+        "reasoning-text",
+        "agent-activity"
+      ],
+      "originalSha256": "b997e94846a75326464408132a569c9f33f26ba7373fe5f8f9c2214fec8e9fbd",
+      "installedSha256": "b997e94846a75326464408132a569c9f33f26ba7373fe5f8f9c2214fec8e9fbd",
+      "localChanges": []
+    },
+    {
+      "path": "web/lib/utils.ts",
+      "registries": [
+        "reasoning-text",
+        "agent-activity"
+      ],
+      "originalSha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "installedSha256": "d1f1e0d62cb8d8d1e04c26e14de842d8a151f75812d81b046c65b5d1fe8e4b27",
+      "localChanges": [
+        "Retain the pre-existing equivalent cn implementation (clsx + tailwind-merge); only semicolon formatting differs from the registry."
+      ]
+    },
+    {
+      "path": "web/components/agents/agent-activity/index.tsx",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "6bf800ed0c5e2262a8f8ced52bc175e426958b827a559cddb86c9d9ea1382ab7",
+      "installedSha256": "d88542a851296a2a58c41b4c38595363ab95c5e2c2873ed94b8ff667094226fd",
+      "localChanges": [
+        "Add expandWhileWorking=true; false uses the existing disclosure button and working label, honoring open/defaultOpen/onOpenChange during work.",
+        "When expandWhileWorking=false and collapseOnComplete=false, preserve the current disclosure on completion instead of forcing open. Upstream completion behavior remains the default.",
+        "Add reserveWorkingHeight=true; false uses measured capped content height during work for compact chat.",
+        "Add followWhileWorking=true; false keeps the stream unshifted and permits overflow scrolling while active, so embedded interactive content stays readable."
+      ]
+    },
+    {
+      "path": "web/components/agents/agent-activity/activity-row.tsx",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "81eca79e4a921ab1862ff930a4177ba9098bb9f83b7356196cc1094dca2fa511",
+      "installedSha256": "81eca79e4a921ab1862ff930a4177ba9098bb9f83b7356196cc1094dca2fa511",
+      "localChanges": []
+    },
+    {
+      "path": "web/components/agents/agent-activity/types.ts",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "4e0038a255aead2d9d6aaf9dd9544346570d099928e7d361149ee8ab17ae39d3",
+      "installedSha256": "09bc73e998f148b42737aa2ca73cd109f3b44e71978c2feabae382219c271047",
+      "localChanges": [
+        "Declare the three optional activity controls and clarify existing disclosure documentation for their additive behavior."
+      ]
+    },
+    {
+      "path": "web/components/agents/agent-disclosure.tsx",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "5113ab48b4ff542edda92ace14d0c4de89e3e3f06fca9e354b133fec93ce4265",
+      "installedSha256": "5113ab48b4ff542edda92ace14d0c4de89e3e3f06fca9e354b133fec93ce4265",
+      "localChanges": []
+    },
+    {
+      "path": "web/components/agents/loading-states/thinking-shimmer.tsx",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "2879bd5fd406c014610be6f304bb4b71e1aac0ac6eec531de4cd3eba4827b7bf",
+      "installedSha256": "2879bd5fd406c014610be6f304bb4b71e1aac0ac6eec531de4cd3eba4827b7bf",
+      "localChanges": []
+    },
+    {
+      "path": "web/components/motion/text-shimmer.tsx",
+      "registries": [
+        "agent-activity"
+      ],
+      "originalSha256": "a8ae8ca2966009a4c9d14085985cb2e571af1b5c75e8e64cb1f4dd99f3fb3236",
+      "installedSha256": "a8ae8ca2966009a4c9d14085985cb2e571af1b5c75e8e64cb1f4dd99f3fb3236",
+      "localChanges": []
+    }
+  ]
+}

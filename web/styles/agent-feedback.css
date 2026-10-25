@@ -1,0 +1,74 @@
+/* beUI feedback keeps its source motion and Kiva's compact conversation geometry. */
+.agent-waiting {
+  max-width: 100%;
+  margin: 8px 0 18px;
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.agent-activity {
+  min-width: 0;
+  max-width: 100%;
+  margin: 8px 0 12px;
+  color: var(--muted-foreground);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.agent-activity > button {
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 3px 0;
+  border-radius: var(--action-radius, 4px);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* The source ring utilities yield to the shared single thin keyboard cue. */
+.agent-activity > button:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.agent-activity [role="region"],
+.agent-activity [role="region"] > div,
+.agent-activity [role="list"],
+.agent-activity [role="listitem"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.agent-activity [role="region"] > div {
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--strong-border) transparent;
+}
+
+.agent-activity [role="list"] {
+  padding: 2px 0 4px;
+}
+
+.agent-activity [role="listitem"] > div {
+  padding: 0;
+}
+
+.agent-reasoning .thinking-copy {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.agent-tools .tool-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.agent-tools .tool-detail-body,
+.agent-tools .tool-detail-body > div {
+  min-width: 0;
+}
