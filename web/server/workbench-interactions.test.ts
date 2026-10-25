@@ -105,6 +105,11 @@ describe("routed workspace features", () => {
   const commandRequests = () => requests.filter((entry) => entry.url.endsWith("/commands"));
   const composerAction = () => renderer!.root.findByProps({ className: "composer-send-actions" }).findByType("button");
   async function changeDraft(value: string) { await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value } })); }
+  async function composerKey(key: string, options: { shiftKey?: boolean; repeat?: boolean; isComposing?: boolean; keyCode?: number } = {}) {
+    let prevented = false;
+    await act(() => renderer!.root.findByType("textarea").props.onKeyDown({ key, metaKey: false, ctrlKey: false, altKey: false, ...options, nativeEvent: { isComposing: options.isComposing ?? false, keyCode: options.keyCode ?? 0 }, preventDefault() { prevented = true; }, stopPropagation() {} }));
+    return prevented;
+  }
   async function attachNote(name = "note.md") { await act(async () => renderer!.root.findByProps({ type: "file" }).props.onChange({ target: { files: [{ name, type: "text/plain", size: 3, text: async () => "abc" }], value: "file" } })); }
   async function activateComposerAction() {
     const action = composerAction();
@@ -950,18 +955,18 @@ describe("routed workspace features", () => {
     assert.equal(commandRequests().at(-1)?.body?.type, "prompt");
     await publish(snapshot("one", { status: "running" }));
     assert.equal(composerAction(), action); assert.equal(action.props.type, "button"); assert.equal(action.props["aria-label"], "停止"); assert.equal(action.props.disabled, false);
+    assert.equal(field("消息队列模式"), undefined);
     assert.equal(action.findByType("svg").props.fill, "currentColor");
     await changeDraft(" \n ");
     assert.equal(action.props["aria-label"], "停止");
     await attachNote();
     assert.equal(composerAction(), action); assert.equal(action.props.type, "submit"); assert.equal(action.props["aria-label"], "发送消息"); assert.equal(action.props.disabled, false);
-    await act(() => field("消息队列模式").props.onValueChange("follow_up"));
     await activateComposerAction();
-    assert.deepEqual(commandRequests().at(-1)?.body, { type: "follow_up", message: " \n ", images: [], files: [{ kind: "text", name: "note.md", mimeType: "text/plain", data: "abc" }] });
+    assert.deepEqual(commandRequests().at(-1)?.body, { type: "steer", message: " \n ", images: [], files: [{ kind: "text", name: "note.md", mimeType: "text/plain", data: "abc" }] });
     assert.equal(renderer!.root.findAllByProps({ className: "composer-queue" }).length, 0, "enqueue acceptance does not create a local queue projection");
     assert.equal(action.props["aria-label"], "停止");
     await activateComposerAction();
-    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["prompt", "follow_up", "abort"]);
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["prompt", "steer", "abort"]);
     assert.ok(commandRequests().every((entry) => entry.url === "/api/projects/alpha/sessions/one/commands"));
     await publish();
     assert.equal(composerAction(), action); assert.equal(renderer!.root.findByType("textarea"), input);
@@ -1295,10 +1300,9 @@ describe("routed workspace features", () => {
     webPreferences.update("shortcuts", { sendMode: "mod-enter" });
     webPreferences.update("conversation", { queueMode: "follow_up" });
     await open(); await publish(snapshot("one", { status: "running" }));
-    assert.equal(field("消息队列模式").props.value, "follow_up");
-    await act(() => field("消息队列模式").props.onValueChange("steer"));
-    await act(() => webPreferences.update("conversation", { queueMode: "follow_up" }));
-    assert.equal(field("消息队列模式").props.value, "steer", "preference updates must not overwrite current composer selection");
+    assert.equal(field("消息队列模式"), undefined);
+    await act(() => webPreferences.update("conversation", { queueMode: "steer" }));
+    assert.equal(renderer!.root.findByType("textarea").props.placeholder, "添加任务完成后的后续消息…", "preference updates must not overwrite the mounted composer's initialized queue mode");
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "mod-enter message" } }));
     async function key(mod = false, shiftKey = false, isComposing = false) {
       let prevented = false;
@@ -1311,7 +1315,7 @@ describe("routed workspace features", () => {
     }
     assert.equal(await key(), false); assert.equal(await key(true, true), false); assert.equal(await key(true, false, true), false);
     assert.equal(commandRequests().length, 0); assert.equal(await key(true), true);
-    assert.equal(commandRequests().at(-1)?.body?.type, "steer");
+    assert.equal(commandRequests().at(-1)?.body?.type, "follow_up");
     assert.match(text(renderer!.root.findByProps({ className: "composer-keyboard-hint" })), /(Command|Ctrl)\+Enter 发送 · Enter 换行/);
   });
 
@@ -1488,6 +1492,7 @@ describe("routed workspace features", () => {
     const inputActions = renderer!.root.findByProps({ className: "composer-input-actions" });
     assert.deepEqual(inputActions.findAllByType("button").map((node) => node.props["aria-label"]), ["添加附件"]);
     assert.equal(renderer!.root.findAllByProps({ className: "composer-command" }).length, 0);
+    assert.equal(renderer!.root.findAllByProps({ "aria-label": "搜索命令、技能和模板" }).length, 0, "the composer remains the only command query input");
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "/rev" } }));
     const command = renderer!.root.findByProps({ className: "command-list" }).findByType("button");
     assert.match(text(command), /\/review.*Review code/);
@@ -1497,6 +1502,215 @@ describe("routed workspace features", () => {
     assert.equal(commandRequests().length, 0, "selecting a command only edits the draft");
     await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "k", metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), shiftKey: false, altKey: false, preventDefault() {} }); });
     assert.equal(renderer!.root.findAllByProps({ className: "command-palette" }).length, 1, "keyboard command access remains available");
+  });
+
+  it("browses every real command with arrows and completes with Enter or Tab before sending", async () => {
+    const commands = Array.from({ length: 18 }, (_, index) => ({ name: `review-${index}`, description: `Review ${index}`, source: "skill" as const }));
+    await open(); await publish(snapshot("one", { commands })); await changeDraft("/");
+    const input = renderer!.root.findByType("textarea");
+    const options = () => renderer!.root.findAllByProps({ role: "option" });
+    assert.equal(options().length, 18, "commands after the old twelve-row cut-off remain reachable");
+    assert.equal(input.props["aria-controls"], renderer!.root.findByProps({ role: "listbox" }).props.id);
+    for (let index = 0; index < 14; index++) assert.equal(await composerKey("ArrowDown"), true);
+    assert.equal(options()[14].props["aria-selected"], true);
+    assert.equal(input.props["aria-activedescendant"], options()[14].props.id);
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 });
+    assert.equal(input.props.value, "/review-14 ");
+    assert.equal(commandRequests().length, 0);
+    await changeDraft("/review-17"); assert.equal(await composerKey("Tab"), true);
+    assert.equal(input.props.value, "/review-17 ");
+    assert.equal(commandRequests().length, 0);
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 1 });
+    assert.equal(commandRequests().at(-1)?.body?.message, "/review-17");
+  });
+
+  it("replaces a slash token at the caret without losing arguments, prefixes or attachments", async () => {
+    await open(); await publish(snapshot("one", { commands: [{ name: "skill:tools/review", source: "skill" }] }));
+    await attachNote("retained.md");
+    const input = renderer!.root.findByType("textarea");
+    await act(() => input.props.onChange({ target: { value: "前文 /skill:tools/rev  参数\n后文", selectionStart: 19, selectionEnd: 19 } }));
+    assert.equal(renderer!.root.findAllByProps({ role: "option" }).length, 1);
+    await composerKey("Tab");
+    assert.equal(input.props.value, "前文 /skill:tools/review  参数\n后文");
+    assert.ok(trigger("移除 retained.md"));
+    assert.equal(commandRequests().length, 0);
+    await changeDraft("https://example.invalid/path"); assert.equal(input.props["aria-expanded"], false);
+    await changeDraft("/skill:tools/review args"); assert.equal(input.props["aria-expanded"], false);
+    await act(() => input.props.onSelect({ currentTarget: { selectionStart: 4, selectionEnd: 10 } }));
+    assert.equal(input.props["aria-expanded"], false, "selected text is not a completion token");
+  });
+
+  it("moves the native caret past a completed command even when the draft text is unchanged", async () => {
+    const selectedRanges: number[][] = [];
+    rendererOptions = { createNodeMock(element) { return element.type === "textarea" ? { style: {}, scrollHeight: 30, clientWidth: 500, focus() {}, setSelectionRange(start: number, end: number) { selectedRanges.push([start, end]); } } : null; } };
+    await open(); await publish(snapshot("one", { commands: [{ name: "review", source: "skill" }] }));
+    const input = renderer!.root.findByType("textarea");
+    await act(() => input.props.onChange({ target: { value: "/review arg", selectionStart: 3, selectionEnd: 3 } }));
+    await composerKey("Tab");
+    assert.equal(input.props.value, "/review arg");
+    assert.deepEqual(selectedRanges.at(-1), [8, 8]);
+    assert.equal(input.props["aria-expanded"], false);
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("dismisses stale suggestions and keeps active ARIA valid when the scoped catalog changes", async () => {
+    const commands = [{ name: "review", source: "skill" as const }, { name: "read", source: "extension" as const }];
+    await open(); await publish(snapshot("one", { commands })); await changeDraft("/re");
+    const input = renderer!.root.findByType("textarea");
+    await composerKey("ArrowDown");
+    const selectedId = input.props["aria-activedescendant"];
+    await publish(snapshot("one", { commands: commands.map((command) => ({ ...command })) }));
+    assert.equal(input.props["aria-activedescendant"], selectedId, "an equivalent catalog must retain keyboard selection");
+    await act(() => {
+      const socket = FakeWebSocket.sockets.at(-1)!;
+      socket.publish({ type: "pi_event", event: { type: "message_start", message: { role: "assistant" } } });
+      socket.publish({ type: "pi_event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "runtime keeps streaming" } } });
+      socket.publish({ type: "pi_event", event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "runtime keeps streaming" }] } } });
+    });
+    assert.equal(input.props["aria-activedescendant"], selectedId, "ordinary runtime messages must not reset the active command");
+    await publish(snapshot("one", { commands: [commands[0]] }));
+    assert.equal(input.props["aria-activedescendant"], renderer!.root.findByProps({ role: "option" }).props.id);
+    await composerKey("Escape"); assert.equal(input.props.value, "/re"); assert.equal(input.props["aria-expanded"], false);
+    await publish(snapshot("one", { commands })); assert.equal(input.props["aria-expanded"], false);
+    await changeDraft("/rev"); assert.equal(input.props["aria-expanded"], true);
+    await changeDraft("plain text"); assert.equal(input.props["aria-expanded"], false); assert.equal(input.props["aria-activedescendant"], undefined);
+    await changeDraft("/re"); await open("/projects/alpha/sessions/two");
+    assert.equal(renderer!.root.findByType("textarea").props["aria-expanded"], false);
+    assert.equal(renderer!.root.findByType("textarea").props.value, "");
+    assert.equal(commandRequests().length, 0);
+  });
+
+  it("measures upward menu space from its stable anchor and the visual viewport", async () => {
+    let top = 240;
+    const writes: Array<[string, string]> = [];
+    const anchorNode = { getBoundingClientRect() { return { top }; } };
+    const inputNode = { style: {}, scrollHeight: 30, clientWidth: 500, focus() {}, setSelectionRange() {} };
+    const menuNode = { style: { setProperty(name: string, value: string) { writes.push([name, value]); } } };
+    const viewportEvents = new Map<string, Set<() => void>>();
+    const viewport = {
+      offsetTop: 0,
+      addEventListener(name: string, listener: () => void) { const handlers = viewportEvents.get(name) ?? new Set(); handlers.add(listener); viewportEvents.set(name, handlers); },
+      removeEventListener(name: string, listener: () => void) { viewportEvents.get(name)?.delete(listener); },
+    };
+    const observers: Array<{ targets: Set<object>; callback(): void; disconnected: boolean }> = [];
+    const previousObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+    Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: class {
+      targets = new Set<object>(); disconnected = false;
+      constructor(readonly callback: () => void) { observers.push(this); }
+      observe(target: object) { this.targets.add(target); }
+      disconnect() { this.disconnected = true; }
+    } });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+    rendererOptions = { createNodeMock(element) {
+      if (element.type === "textarea") return inputNode;
+      const props = element.props;
+      if (props && typeof props === "object" && "className" in props) {
+        if (props.className === "composer-command-anchor") return anchorNode;
+        if (props.className === "command-palette") return menuNode;
+      }
+      return null;
+    } };
+    try {
+      await open(); await publish(snapshot("one", { commands: [{ name: "review", source: "skill" }] })); await changeDraft("/");
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "224px"]);
+      const geometry = observers.findLast((observer) => observer.targets.has(anchorNode));
+      assert.ok(geometry); assert.ok(geometry.targets.has(inputNode), "input growth/shrink must be observed");
+      top = 160; await act(() => geometry.callback());
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "144px"]);
+      const count = writes.length; await act(() => geometry.callback()); assert.equal(writes.length, count, "unchanged measurements must not cause repeated style writes");
+      viewport.offsetTop = 40; await act(() => { for (const listener of viewportEvents.get("resize") ?? []) listener(); });
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "104px"]);
+      top = 210; await act(() => { for (const listener of viewportEvents.get("scroll") ?? []) listener(); });
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "154px"]);
+      top = 300; await act(() => { for (const listener of events.get("resize") ?? []) listener({}); });
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "244px"]);
+      top = 10; await act(() => geometry.callback());
+      assert.deepEqual(writes.at(-1), ["--command-menu-space", "0px"]);
+      await composerKey("Escape");
+      assert.equal(geometry.disconnected, true);
+      assert.equal(viewportEvents.get("resize")?.size, 0); assert.equal(viewportEvents.get("scroll")?.size, 0);
+      assert.equal(commandRequests().length, 0);
+    } finally {
+      if (previousObserver) Object.defineProperty(globalThis, "ResizeObserver", previousObserver); else Reflect.deleteProperty(globalThis, "ResizeObserver");
+    }
+  });
+
+  it("does not complete or send IME confirmation, Safari229, repeats or Shift+Enter", async () => {
+    webPreferences.update("shortcuts", { sendMode: "mod-enter" });
+    await open(); await publish(snapshot("one", { commands: [{ name: "review", source: "skill" }] })); await changeDraft("/rev");
+    const input = renderer!.root.findByType("textarea");
+    for (const options of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }]) {
+      assert.deepEqual(await composerEnter(options), { prevented: false, submissions: 0 }); assert.equal(input.props.value, "/rev");
+    }
+    await act(() => input.props.onCompositionStart()); assert.equal(input.props["aria-expanded"], false);
+    assert.deepEqual(await composerEnter(), { prevented: false, submissions: 0 });
+    await act(() => input.props.onCompositionEnd());
+    assert.deepEqual(await composerEnter({ repeat: true }), { prevented: true, submissions: 0 }); assert.equal(input.props.value, "/rev");
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 }); assert.equal(input.props.value, "/review ");
+    assert.deepEqual(await composerEnter({ mod: true }), { prevented: true, submissions: 1 });
+    assert.equal(commandRequests().at(-1)?.body?.message, "/review");
+  });
+
+  it("opens an unloaded command query without starting execution until explicitly requested", async () => {
+    let loadFocus = 0;
+    rendererOptions = { createNodeMock(element) { return element.type === "button" && element.props && typeof element.props === "object" && "data-command-load" in element.props && element.props["data-command-load"] ? { disabled: false, focus() { loadFocus++; } } : null; } };
+    await open(); await publish(snapshot("one", { models: [], commands: [] }));
+    await act(() => { for (const listener of events.get("keydown") ?? []) listener({ key: "k", metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), shiftKey: false, altKey: false, preventDefault() {} }); });
+    const input = renderer!.root.findByType("textarea");
+    assert.equal(input.props.value, "/"); assert.equal(input.props["aria-expanded"], true);
+    assert.equal(commandRequests().length, 0);
+    assert.match(text(renderer!.root.findByProps({ className: "command-empty" })), /命令尚未加载/);
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 });
+    assert.equal(commandRequests().length, 0, "an unloaded slash query is not a prompt");
+    assert.equal(await composerKey("Tab"), true);
+    assert.equal(loadFocus, 1, "Tab explicitly reaches the load action before the textarea in DOM order");
+    assert.equal(input.props["aria-expanded"], true);
+    await click(button("加载命令"));
+    assert.deepEqual(commandRequests().map((entry) => entry.body?.type), ["initialize"]);
+    await publish(snapshot("one", { commands: [{ name: "ready", source: "extension" }] }));
+    assert.equal(renderer!.root.findByProps({ role: "option" }).props["aria-selected"], true);
+    assert.equal(commandRequests().length, 1);
+  });
+
+  it("does not send a zero-match query on Enter, while explicit send and dismissed-query send remain available", async () => {
+    await open(); await publish(snapshot("one", { commands: [{ name: "review", source: "skill" }] })); await changeDraft("/unknown");
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 0 });
+    assert.equal(commandRequests().length, 0);
+    await activateComposerAction();
+    assert.equal(commandRequests().at(-1)?.body?.message, "/unknown");
+    await changeDraft("/unknown"); await composerKey("Escape");
+    assert.deepEqual(await composerEnter(), { prevented: true, submissions: 1 });
+    assert.equal(commandRequests().at(-1)?.body?.message, "/unknown");
+    assert.equal(commandRequests().length, 2);
+  });
+
+  it("leaves path-like slashes as ordinary text while completing exact nested command prefixes", async () => {
+    await open(); await publish(snapshot("one", { commands: [{ name: "team/review", source: "skill" }, { name: "check", source: "extension", description: "Inspect /usr/local/bin" }] }));
+    const input = renderer!.root.findByType("textarea");
+    for (const value of ["/usr/local/bin", "//host/share"]) {
+      await changeDraft(value);
+      assert.equal(input.props["aria-expanded"], false);
+      assert.deepEqual(await composerEnter(), { prevented: true, submissions: 1 });
+      assert.equal(commandRequests().at(-1)?.body?.message, value);
+    }
+    await changeDraft("/team/re"); assert.equal(input.props["aria-expanded"], true);
+    await composerKey("Tab"); assert.equal(input.props.value, "/team/review ");
+    assert.equal(commandRequests().length, 2);
+  });
+
+  it("does not mislabel a loaded zero-model command catalog as unloaded", async () => {
+    await open(); await publish(snapshot("one", { provenance: "live", models: [], commands: [] })); await changeDraft("/");
+    const empty = () => text(renderer!.root.findByProps({ className: "command-empty" }));
+    assert.match(empty(), /没有可用的命令/); assert.equal(button("加载命令"), undefined);
+    await publish(snapshot("one", { provenance: "cached", lifecycle: "starting", models: [], commands: [] }));
+    assert.match(empty(), /没有可用的命令/); assert.equal(button("加载命令"), undefined);
+    await publish(snapshot("one", { provenance: "persisted", lifecycle: "idle", commands: [] }));
+    assert.ok(button("加载命令"), "persisted metadata stays unloaded despite a remembered model");
+    await publish(snapshot("one", { lifecycle: "idle", models: [], commands: [] }));
+    assert.match(empty(), /没有可用的命令/); assert.equal(button("加载命令"), undefined);
+    await publish(snapshot("one", { lifecycle: "starting", models: [], commands: [] }));
+    assert.equal(button("正在加载…").props.disabled, true);
+    assert.equal(commandRequests().length, 0);
   });
 
   it("preserves model/thinking/context controls and queue/abort in the composer", async () => {

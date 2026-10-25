@@ -34,7 +34,7 @@ export function ConversationPanel() {
     <SettingRow title="默认工作区" description="仅用于新建和继续会话。当前分支直接使用项目文件，包含未提交改动，多个会话共享同一目录；独立 worktree 从创建时的已提交版本开始。此设置仅保存在此浏览器。"><Select aria-label="默认工作区" value={conversation.workspaceMode} options={[{ value: "current-branch", label: "当前分支" }, { value: "worktree", label: "独立 worktree" }]} onValueChange={(workspaceMode) => { if (workspaceMode) webPreferences.update("conversation", { workspaceMode }); }} /></SettingRow>
     <SettingRow title="默认展开思考过程"><SettingToggle label="默认展开思考过程" checked={conversation.thinkingExpanded} onChange={(thinkingExpanded) => webPreferences.update("conversation", { thinkingExpanded })} /></SettingRow>
     <SettingRow title="默认展开工具详情"><SettingToggle label="默认展开工具详情" checked={conversation.toolsExpanded} onChange={(toolsExpanded) => webPreferences.update("conversation", { toolsExpanded })} /></SettingRow>
-    <SettingRow title="运行中追加消息" description="作为新输入框的默认选项，不修改现有队列或手动选择。"><Select aria-label="默认消息队列模式" value={conversation.queueMode} options={[{ value: "steer", label: "立即纠正" }, { value: "follow_up", label: "完成后追加" }]} onValueChange={(queueMode) => { if (queueMode) webPreferences.update("conversation", { queueMode }); }} /></SettingRow><GroupReset group="conversation" />
+    <SettingRow title="运行中追加消息" description="作为新输入框的默认选项，不修改当前输入框或现有队列。"><Select aria-label="默认消息队列模式" value={conversation.queueMode} options={[{ value: "steer", label: "立即纠正" }, { value: "follow_up", label: "完成后追加" }]} onValueChange={(queueMode) => { if (queueMode) webPreferences.update("conversation", { queueMode }); }} /></SettingRow><GroupReset group="conversation" />
   </>;
 }
 const actions: { id: ShortcutAction; name: string; description: string }[] = [
