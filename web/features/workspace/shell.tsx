@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bot, ChevronLeft, ChevronRight, FileCode2, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Archive, Bot, ChevronLeft, ChevronRight, FileCode2, Folder, FolderMinus, FolderOpen, GitBranch, MoreHorizontal, PanelLeft, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { LoadingIndicator } from "@/components/shared/LoadingIndicator";
@@ -292,7 +292,7 @@ function ProjectGroup({ project, pending, removing, onRemove, compact, ready, br
   const searchField = searchOpen && <div className="session-search"><Search size={13} /><Input ref={input} aria-label={`搜索 ${project.name} 会话`} value={visibleFilter} onChange={(event) => compact ? setPopupFilter(event.target.value) : setFilter(event.target.value)} placeholder="搜索会话" /></div>;
   const renderGroup = (rows: ReactNode) => <>
     <div className="project-card" onClick={(event) => { if (event.target === event.currentTarget) setExpanded((value) => !value); }}>
-      <button ref={expandedTrigger} className="project-toggle" aria-label={`${expanded ? "折叠" : "展开"}项目 ${project.name}`} aria-expanded={expanded} aria-controls={groupId} title={project.path} onClick={() => setExpanded((value) => !value)}><span className="project-icon"><FolderOpen size={16} /></span><span className="project-name">{project.name}</span></button>{actions}
+      <button ref={expandedTrigger} className="project-toggle" aria-label={`${expanded ? "折叠" : "展开"}项目 ${project.name}`} aria-expanded={expanded} aria-controls={groupId} title={project.path} onClick={() => setExpanded((value) => !value)}><span className="project-icon">{expanded ? <FolderOpen size={16} /> : <Folder size={16} />}</span><span className="project-name">{project.name}</span></button>{actions}
     </div>
     {compact && collection !== "active" && <p className="project-popup-collection">{collection === "archived" ? "已归档" : "最近删除"}</p>}
     <div id={groupId} className="project-sessions" hidden={!expanded}>{searchField}{rows}</div>
