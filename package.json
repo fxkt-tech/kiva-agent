@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node ./bin/kiva.mjs",
     "web": "pnpm --dir web dev",
-    "clear-web": "node ./bin/clear-web.mjs",
+    "webkill": "node ./bin/clear-web.mjs",
     "web:build": "pnpm --dir web build",
     "web:start": "pnpm --dir web start",
     "kiva": "node ./bin/kiva.mjs",
