@@ -9,6 +9,7 @@ import type { ResourceTarget } from "@/shared/workspace-contract";
 import { ResourceState, useWorkspace } from "@/features/workspace/shell";
 import { resourceApi, sessionUrl, projectUrl, useResource } from "@/features/workspace/resources";
 import { selectedQuery } from "@/features/workspace/route";
+import { WorkspaceDiff, diffTotals, parseUnifiedDiff } from "./workspace-diff";
 import { WorkspaceTree } from "./workspace-tree";
 
 export function WorkspaceBrowser({ target, kind }: { target: ResourceTarget; kind: "files" | "changes" }) {
@@ -25,6 +26,8 @@ export function WorkspaceBrowser({ target, kind }: { target: ResourceTarget; kin
   const changes = workspace.data?.project.changes;
   const statuses = useMemo(() => new Map(changes?.map((change) => [change.path, change.status])), [changes]);
   const entries = useMemo(() => kind === "files" ? files?.map((file) => ({ path: file, status: statuses.get(file) })) ?? [] : changes ?? [], [kind, files, changes, statuses]);
+  const diff = useMemo(() => kind === "changes" && preview.data ? parseUnifiedDiff(preview.data.content) : undefined, [kind, preview.data]);
+  const totals = useMemo(() => diff ? diffTotals(diff) : undefined, [diff]);
   if (projectError || workspace.error || detail.error || queryError) return <ResourceState error={projectError ?? workspace.error ?? detail.error ?? queryError} />;
   if (!workspace.data || !project || (target.sessionId && !session)) return <ResourceState />;
   const branch = workspace.data.project.branch;
@@ -39,8 +42,8 @@ export function WorkspaceBrowser({ target, kind }: { target: ResourceTarget; kin
     <div className="workspace-browser-grid">
       <WorkspaceTree key={`${api}/${kind}`} entries={entries} selectedPath={path} onSelect={select} rootName={project.name} scope={target.sessionId ? session?.workspace?.mode === "current-branch" ? "当前分支 · 共享项目目录" : "会话工作区" : "原项目目录"} rootTitle={`${session?.workspace?.executionRoot ?? project.path} · ${branch}`} label={kind === "files" ? "文件" : "代码变更"} emptyMessage={kind === "files" ? "此工作区没有可显示的文件" : "工作区没有未提交变更"} unavailable={unavailableDiff ? <Alert variant="warning" title="暂时无法查看变更" className="workspace-tree-alert">{project.capability.state !== "ready" && project.capability.message}。准备 Git 和首次提交后刷新以查看变更。</Alert> : undefined} />
       <div className="workspace-preview">{path !== undefined ? <>
-        <div className="workspace-preview-header"><span>{path}</span>{(!session || session.executable) && <button onClick={ask}>交给 KivA</button>}</div>
-        {preview.loading || preview.refreshing ? <p className="workspace-preview-state" role="status">{preview.refreshing ? "正在刷新…" : "正在读取…"}</p> : preview.error ? <Alert variant="error" title={kind === "files" ? "文件读取失败" : "差异读取失败"} className="preview-alert">{preview.error}</Alert> : <>{preview.data?.truncated && <Alert variant="warning" title="预览内容已截断" className="preview-alert">文件较大，这里仅显示部分内容。</Alert>}<pre>{preview.data?.content}</pre></>}
+        <div className="workspace-preview-header"><span className="workspace-preview-path" title={path}>{path}</span><div className="workspace-preview-actions">{totals && (totals.added > 0 || totals.removed > 0) && <span className="workspace-diff-totals" aria-label={`新增 ${totals.added} 行，删除 ${totals.removed} 行`}>{totals.added > 0 && <span data-kind="added">+{totals.added}</span>}{totals.removed > 0 && <span data-kind="removed">−{totals.removed}</span>}</span>}{(!session || session.executable) && <button onClick={ask}>交给 KivA</button>}</div></div>
+        {preview.loading || preview.refreshing ? <p className="workspace-preview-state" role="status">{preview.refreshing ? "正在刷新…" : "正在读取…"}</p> : preview.error ? <Alert variant="error" title={kind === "files" ? "文件读取失败" : "差异读取失败"} className="preview-alert">{preview.error}</Alert> : <>{preview.data?.truncated && <Alert variant="warning" title="预览内容已截断" className="preview-alert">文件较大，这里仅显示部分内容。</Alert>}{kind === "changes" && preview.data ? <WorkspaceDiff content={preview.data.content}/> : <pre>{preview.data?.content}</pre>}</>}
       </> : <div className="workspace-preview-placeholder"><FileCode2 size={25} /><p>选择一个{kind === "files" ? "文件进行预览" : "变更查看差异"}</p><code>{session?.workspace?.executionRoot ?? project.path}</code></div>}</div>
     </div>
   </div>;
