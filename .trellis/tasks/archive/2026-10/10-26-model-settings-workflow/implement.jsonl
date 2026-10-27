@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/kiva-web/frontend/index.md", "reason": "Package/layer scope and relevant guidelines"}
+{"file": ".trellis/spec/kiva-web/frontend/component-guidelines.md", "reason": "Feature state ownership, shared controls, overlays and test seam"}
+{"file": ".trellis/spec/kiva-web/frontend/global-settings.md", "reason": "Independent default/provider/key actions, revision recovery and passive reads"}
+{"file": ".trellis/spec/kiva-web/frontend/openai-authorization.md", "reason": "Single authorization owner, capability checks, pending/cancel lifecycle"}
+{"file": ".trellis/tasks/archive/2026-10/10-26-model-settings-workflow/research/visual-contract.md", "reason": "Bounded summary of the existing settings visual contract with source anchors; full visual-system spec is available on demand"}
+{"file": ".trellis/spec/kiva-web/frontend/theme-system.md", "reason": "Semantic theme roles and unchanged typography/geometry"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Extract existing provider/model controllers rather than copy them"}
+{"file": ".trellis/tasks/archive/2026-10/10-26-model-settings-workflow/research/configuration-flow.md", "reason": "Code anchors, capability/save invariants, lifecycle pitfalls and test coverage"}

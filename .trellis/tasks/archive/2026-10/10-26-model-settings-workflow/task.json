@@ -1,0 +1,41 @@
+{
+  "id": "model-settings-workflow",
+  "name": "model-settings-workflow",
+  "title": "Redesign model settings workflow",
+  "description": "Separate usable models from provider configuration and make adding a model an explicit guided flow.",
+  "status": "completed",
+  "dev_type": "frontend",
+  "scope": "web/features/settings",
+  "package": "kiva-web",
+  "priority": "P2",
+  "creator": "Justyer",
+  "assignee": "Justyer",
+  "createdAt": "2026-10-26",
+  "completedAt": "2026-10-27",
+  "branch": "feat/model-settings-workflow",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "bf2d5d9",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "web/features/settings/dialog.tsx",
+    "web/features/settings/models-panel.tsx",
+    "web/features/settings/models-settings.tsx",
+    "web/features/settings/provider-editor.tsx",
+    "web/features/settings/openai-authorization.tsx",
+    "web/app/globals.css",
+    "web/server/settings-dialog.test.ts",
+    ".trellis/spec/kiva-web/frontend/global-settings.md",
+    ".trellis/spec/kiva-web/frontend/openai-authorization.md"
+  ],
+  "notes": "",
+  "meta": {
+    "implementation_approval": "User approved the final PRD/design/implementation summary with “开始实现” on 2026-10-26. Browser tests remain explicitly forbidden.",
+    "verification": "Home composition corrected to actual Appearance/Conversation structure; 50 settings tests, web typecheck and diff check passed; independent review and actual HTTP-delivered CSS/JS verification passed. No browser tests.",
+    "finish_state": "User-approved work commit bf2d5d9 completed; task archived as completed on 2026-10-27. Journal and feature-branch push are part of the same authorized wrap-up.",
+    "publication_approval": "提交&推送 — user, 2026-10-27"
+  }
+}
