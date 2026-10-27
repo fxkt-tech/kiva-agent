@@ -490,3 +490,40 @@ Implemented persistent desktop icon navigation, a centered logo with separate ed
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: Redesign model settings and setup flow
+<!-- trellis-session: v=2 fp=3bcb3b7fe462b108 -->
+
+**Date**: 2026-10-27
+**Task**: Redesign model settings and setup flow
+**Package**: kiva-web
+**Branch**: `feat/model-settings-workflow`
+
+### Summary
+
+Reorganized model home, staged model/provider setup and independent authentication; restored direct subscription login and aligned the page with other settings categories.
+
+### Main Changes
+
+- Reuse one provider editor and authorization owner across explicit model/provider/subscription views; preserve dirty, pending, conflict and partial-save behavior.
+- Use the same heading and continuous settings rows as Appearance/Conversation; retain a discoverable ChatGPT/Codex subscription entry.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bf2d5d9` | feat(web): streamline model setup and provider management |
+
+### Testing
+
+- [OK] Final settings composition tests: 50/50, web typecheck and diff check passed. Earlier full web suite: 536/536 and production build passed before the final presentation-only correction.
+- [OK] Confirmed actual project-linked CSS/JS through passive HTTP asset reads. No browser testing, screenshots, real credentials or paid model calls.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Earlier first-send/session-shell changes and user/generated files remain uncommitted outside this task.
