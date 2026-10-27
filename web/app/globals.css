@@ -60,7 +60,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
 .settings-section-heading h4 { font-size: 13px; }
 .settings-section-heading p, .settings-muted { margin: 7px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .settings-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 0; border-bottom: 1px solid var(--border); }
-.settings-row-copy { min-width: 0; }
+.settings-row-copy { min-width: 0; overflow-wrap: anywhere; }
 .settings-row-copy strong { font-size: 13px; font-weight: 500; }
 .settings-row-copy p { max-width: 320px; margin: 5px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
 .settings-row-control { min-width: 0; flex: none; }
@@ -75,6 +75,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
 .settings-section + .settings-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
 .settings-section-heading-action { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .settings-section-heading-action > button { flex: none; }
+.settings-models-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.settings-models-navigation h3 { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: var(--heading-weight, 600); overflow-wrap: anywhere; }
+.settings-model-view[hidden] { display: none; }
+.settings-default-editor { padding: 16px 0; }
+.settings-default-editor > .settings-muted { margin-bottom: 16px; }
+.settings-authorization-progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
 .model-configuration-fields { display: grid; min-width: 0; gap: 16px; }
 .model-configuration-field { display: grid; min-width: 0; gap: 7px; font-size: 12px; }
 .settings-form-grid { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
