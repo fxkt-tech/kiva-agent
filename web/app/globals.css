@@ -169,7 +169,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
 .brand-row > .brand-home { display: flex; min-width: 0; align-items: center; gap: 9px; }
 .sidebar-collapse-toggle { display: grid; width: 24px; height: 26px; flex: none; margin-left: auto; padding: 0; place-items: center; border: 0; border-radius: var(--action-radius, 5px); color: var(--muted-foreground); background: transparent; }
 .sidebar-collapse-toggle:hover, .project-popup-close:hover { color: var(--foreground); background: var(--hover); }
-.sidebar-expand-icon, .sidebar-project-heading .sidebar-project-browser-trigger { display: none; }
+.sidebar-expand-toggle, .sidebar-project-heading .sidebar-project-browser-trigger { display: none; }
 .project-browser-popover { display: flex; width: min(340px, calc(100vw - 90px)); max-height: min(560px, calc(100dvh - 24px)); min-height: 0; flex-direction: column; padding: 0; overflow: hidden; }
 .project-browser-heading { display: flex; min-width: 0; flex: none; align-items: center; gap: 4px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--border); }
 .project-browser-heading .ui-dialog-title { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,7 +185,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
 .project-browser-popover .session-item-time { margin-right: 26px; }
 
 @media (min-width: 721px) {
-  .workbench { --sidebar-transition: 220ms cubic-bezier(.22, 1, .36, 1); transition: grid-template-columns var(--sidebar-transition); }
+  .workbench { --sidebar-transition: 260ms cubic-bezier(.16, 1, .3, 1); transition: grid-template-columns var(--sidebar-transition); }
   .brand-row { transition: padding var(--sidebar-transition), gap var(--sidebar-transition); }
   .brand-row > .brand-home { margin-right: 33px; transition: margin var(--sidebar-transition), padding var(--sidebar-transition), gap var(--sidebar-transition); }
   .brand-name, .sidebar .nav-item > span, .sidebar-settings > span { min-width: 0; overflow: hidden; white-space: nowrap; }
@@ -193,19 +193,22 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
   .sidebar .nav-item { justify-content: flex-start; transition: padding var(--sidebar-transition); }
   .sidebar-settings { min-height: 32px; justify-content: flex-start; transition: padding var(--sidebar-transition), min-height var(--sidebar-transition); }
   .sidebar-collapse-toggle { position: absolute; top: 17px; right: 18px; margin: 0; transition: top var(--sidebar-transition), right var(--sidebar-transition), height var(--sidebar-transition); }
+  .sidebar-expand-toggle { position: absolute; z-index: 20; top: 8px; left: 8px; display: inline-flex; color: var(--muted-foreground); }
+  .sidebar-expand-toggle:hover { color: var(--foreground); }
   :root[data-sidebar-collapsed="true"] .workbench { grid-template-columns: 64px minmax(0, 1fr); }
   :root[data-sidebar-collapsed="true"] .brand-row { justify-content: flex-start; gap: 0; padding: 0; }
   :root[data-sidebar-collapsed="true"] .brand-row > .brand-home { width: 40px; height: 40px; justify-content: flex-start; gap: 0; margin: 0 0 0 11.5px; padding-inline: 7.5px; }
-  :root[data-sidebar-collapsed="true"] .sidebar-collapse-toggle { position: absolute; top: 46px; right: -13px; width: 24px; height: 28px; margin: 0; border: 1px solid var(--border); border-radius: var(--action-radius, 6px); background: var(--sidebar); }
-  :root[data-sidebar-collapsed="true"] .sidebar-collapse-toggle:hover { border-color: var(--strong-border); background: var(--hover); }
+  /* Expanding moves into the content header, so content heads reserve its left gutter. */
+  :root[data-sidebar-collapsed="true"] .workspace-browser-heading { padding-left: 52px; }
+  :root[data-sidebar-collapsed="true"] .workspace-tree-toolbar { padding-left: 48px; }
+  :root[data-sidebar-collapsed="true"] .projects-page h2 { padding-left: 36px; }
+  :root[data-sidebar-collapsed="true"] .conversation-workspace > .session-feature .message-column { padding-top: 44px; }
   :root[data-sidebar-collapsed="true"] .brand-name,
   :root[data-sidebar-collapsed="true"] .sidebar .nav-item > span,
   :root[data-sidebar-collapsed="true"] .sidebar-project-heading > span,
   :root[data-sidebar-collapsed="true"] .sidebar-settings > span,
   :root[data-sidebar-collapsed="true"] .sidebar .project-card,
-  :root[data-sidebar-collapsed="true"] .sidebar .project-sessions,
-  :root[data-sidebar-collapsed="true"] .sidebar-collapse-icon { display: none; }
-  :root[data-sidebar-collapsed="true"] .sidebar-expand-icon { display: block; }
+  :root[data-sidebar-collapsed="true"] .sidebar .project-sessions { display: none; }
   :root[data-sidebar-collapsed="true"] .nav-list { padding: 16px 10px 10px; }
   :root[data-sidebar-collapsed="true"] .nav-item { justify-content: flex-start; padding: 9px 13.5px; }
   :root[data-sidebar-collapsed="true"] .sidebar-project-heading { flex-direction: column; justify-content: center; gap: 4px; padding: 10px 10px 6px; }
