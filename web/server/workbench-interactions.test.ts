@@ -695,7 +695,10 @@ describe("routed workspace features", () => {
     extraFetch = async (url, init) => url === endpoint && init?.method === "POST" ? pending.promise : undefined;
     const lists = (projectId: string) => requests.filter(({ url }) => url.startsWith(`/api/projects/${projectId}/sessions?collection=`));
     await open(operation === "create" ? "/projects/alpha/sessions" : "/projects/alpha/sessions/one");
-    await click(operation === "create" ? trigger("在 Alpha 中新建会话") : button("在当前分支继续"));
+    if (operation === "create") {
+      await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "first message" } }));
+      await act(async () => { void renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await settle(); });
+    } else await click(button("在当前分支继续"));
     await open("/projects/beta/sessions");
     sessions = [...sessions, session("failed", { name: "Failed workspace setup", executable: false, workspace: { ...session("failed").workspace!, state: "failed", error: "Fixture setup failed" } })];
     await act(async () => { pending.resolve(Response.json({ error: "Workspace setup failed after metadata save" }, { status: 409 })); await settle(); });
@@ -747,6 +750,10 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findAllByProps({ className: "session-item-title" }).length, 1);
     assert.equal(renderer!.root.findByProps({ className: "project-new-session" }).props.disabled, false);
     await click(renderer!.root.findByProps({ className: "project-new-session" }));
+    assert.equal(currentHref, "/projects/alpha/sessions");
+    assert.equal(requests.filter((entry) => entry.body).length, 0);
+    await changeDraft("first message while another session runs");
+    await activateComposerAction();
     assert.equal(currentHref, "/projects/alpha/sessions/created");
     assert.ok(requests.some((entry) => entry.url === "/api/projects/alpha/sessions" && typeof entry.body?.operationId === "string"));
     assert.ok(commandRequests().every((entry) => entry.body?.type !== "new_session" && entry.body?.type !== "switch_session"));
@@ -888,7 +895,8 @@ describe("routed workspace features", () => {
   it("uses dismissible Alerts for failed actions and preserves picker retry", async () => {
     extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" || url.startsWith("/api/project/directories") ? Response.json({ error: "operation failed" }, { status: 409 }) : undefined;
     await open("/projects/alpha/sessions");
-    await click(renderer!.root.findByProps({ className: "project-new-session" }));
+    await changeDraft("first message");
+    await activateComposerAction();
     assert.match(text(renderer!.root.findByProps({ "data-slot": "alert" })), /创建会话失败.*operation failed/);
     await click(renderer!.root.findByProps({ "aria-label": "关闭提示：创建会话失败" }));
     assert.equal(renderer!.root.findAllByProps({ "data-slot": "alert" }).length, 0);
@@ -1115,15 +1123,19 @@ describe("routed workspace features", () => {
 
   it("preserves confirmed identity and ignores cancelled or late create navigation", async () => {
     const result = deferred<Response>(); extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? result.promise : undefined;
-    await open(); let action!: Promise<void>;
-    await act(() => { action = renderer!.root.findByProps({ className: "project-new-session" }).props.onClick(); });
+    await open("/projects/alpha/sessions"); let action!: Promise<void>;
+    await changeDraft("late first message");
+    await act(async () => { action = renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await settle(); });
     await open("/projects/alpha/files");
     result.resolve(Response.json({ projectId: "alpha", sessionId: "late", session: session("late") }));
     await act(async () => { await settle(); await action; });
     assert.equal(currentHref, "/projects/alpha/files");
     extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? Response.json({ cancelled: true }) : undefined;
-    await click(renderer!.root.findByProps({ className: "project-new-session" }));
-    assert.equal(currentHref, "/projects/alpha/files");
+    await open("/projects/alpha/sessions");
+    await changeDraft("cancelled first message");
+    await activateComposerAction();
+    assert.equal(currentHref, "/projects/alpha/sessions");
+    assert.equal(renderer!.root.findByType("textarea").props.value, "cancelled first message");
   });
 
   it("sends with Enter, keeps Shift+Enter and IME input native, and ignores key repeats", async () => {
@@ -1230,7 +1242,8 @@ describe("routed workspace features", () => {
     assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
     extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" ? Response.json({ error: "creation failed fixture" }, { status: 500 }) : undefined;
     await open("/projects/alpha/sessions");
-    await click(renderer!.root.findByProps({ "aria-label": "在 Alpha 中新建会话" }));
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "first message" } }));
+    await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
     assert.match(text(renderer!.root.findByProps({ className: "workspace-feedback" })), /创建会话失败creation failed fixture/);
     await open("/projects"); assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
     await open("/projects/beta/sessions"); assert.equal(renderer!.root.findAllByProps({ className: "workspace-feedback" }).length, 0);
@@ -1812,22 +1825,24 @@ describe("routed workspace features", () => {
 
   for (const mode of ["current-branch", "worktree"] as const) it(`passes ${mode} through sidebar, shortcut and first-send creation`, async () => {
     if (mode === "worktree") webPreferences.update("conversation", { workspaceMode: mode });
-    await open("/projects/alpha/sessions");
+    await open();
     await click(trigger("在 Alpha 中新建会话"));
-    assert.equal(currentHref, "/projects/alpha/sessions/created");
+    assert.equal(currentHref, "/projects/alpha/sessions");
+    assert.equal(requests.filter((entry) => entry.body).length, 0);
+    assert.equal(renderer!.root.findByType("textarea").props.value, "");
     await open("/projects/alpha/sessions");
     await act(async () => {
       for (const listener of events.get("keydown") ?? []) listener({ key: "n", metaKey: isMacPlatform(), ctrlKey: !isMacPlatform(), altKey: false, shiftKey: false, preventDefault() {} });
       await settle(); await pendingNavigation;
     });
-    assert.equal(currentHref, "/projects/alpha/sessions/created");
-    await open("/projects/alpha/sessions");
+    assert.equal(currentHref, "/projects/alpha/sessions");
+    assert.equal(requests.filter((entry) => entry.body).length, 0);
     await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "first message" } }));
     await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await pendingNavigation; });
     const creations = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body);
-    assert.equal(creations.length, 3);
+    assert.equal(creations.length, 1);
     assert.ok(creations.every((entry) => entry.body?.workspaceMode === mode && typeof entry.body.operationId === "string"));
-    assert.equal(new Set(creations.map((entry) => entry.body!.operationId)).size, 3);
+    assert.equal(currentHref, "/projects/alpha/sessions/created");
     assert.ok(commandRequests().some((entry) => entry.body?.type === "prompt" && entry.body.message === "first message"));
   });
 
@@ -1836,14 +1851,17 @@ describe("routed workspace features", () => {
     let attempts = 0;
     extraFetch = async (url, init) => url === "/api/projects/alpha/sessions" && init?.method === "POST" && ++attempts === 1 ? pending.promise : undefined;
     await open("/projects/alpha/sessions");
-    await act(async () => { trigger("在 Alpha 中新建会话").props.onClick(); await settle(); });
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "retry first message" } }));
+    await act(async () => { void renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await settle(); });
     await act(() => webPreferences.update("conversation", { workspaceMode: "worktree" }));
     await act(async () => { pending.resolve(Response.json({ error: "retry fixture" }, { status: 500 })); await settle(); });
-    await click(trigger("在 Alpha 中新建会话"));
+    await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await pendingNavigation; });
     const creations = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body);
     assert.equal(creations.length, 2); assert.deepEqual(creations[1].body, creations[0].body);
     assert.equal(creations[1].body?.workspaceMode, "current-branch");
-    await open("/projects/alpha/sessions"); await click(trigger("在 Alpha 中新建会话"));
+    await open("/projects/alpha/sessions");
+    await act(() => renderer!.root.findByType("textarea").props.onChange({ target: { value: "next first message" } }));
+    await act(async () => { await renderer!.root.findByType("form").props.onSubmit({ preventDefault() {} }); await pendingNavigation; });
     const next = requests.filter((entry) => entry.url === "/api/projects/alpha/sessions" && entry.body).at(-1)!;
     assert.equal(next.body?.workspaceMode, "worktree"); assert.notEqual(next.body?.operationId, creations[0].body?.operationId);
   });

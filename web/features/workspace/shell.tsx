@@ -146,7 +146,7 @@ export function WorkspaceShell({ children, pathname, search = "", navigate }: { 
   }, []);
   useEffect(() => shortcutRegistry.attach(window), []);
   useEffect(() => shortcutRegistry.register("openSettings", { run: openSettings }), [openSettings]);
-  useEffect(() => shortcutRegistry.register("newSession", { run: () => { if (route.projectId) void createSession(route.projectId); }, available: () => Boolean(route.projectId && project?.capability.state === "ready" && !removingProject && !pickerOpen && !settingsOpen && !creating.current.has(route.projectId) && !removing.current.has(route.projectId)) }), [route.projectId, project?.capability.state, removingProject, pickerOpen, settingsOpen, createSession]);
+  useEffect(() => shortcutRegistry.register("newSession", { run: () => { if (route.projectId) { setMobileSidebarOpen(false); navigate(`${projectUrl(route.projectId)}/sessions`); } }, available: () => Boolean(route.projectId && project?.capability.state === "ready" && !removingProject && !pickerOpen && !settingsOpen && !creating.current.has(route.projectId) && !removing.current.has(route.projectId)) }), [route.projectId, project?.capability.state, removingProject, pickerOpen, settingsOpen, navigate]);
   const base = route.projectId ? projectUrl(route.projectId) : "/projects";
   const scoped = route.projectId && route.sessionId ? sessionUrl(route.projectId, route.sessionId) : base;
   const context: WorkspaceContextValue = { route, query, project, projects, renderedAt, navigate, drafts, version, refresh, refreshProject, createSession, openProjectPicker, projectLoading: current.loading, projectError, modelCatalog: modelCatalog.data, modelsLoading: modelCatalog.loading, modelsError: modelCatalog.error, updateModelCatalog: modelCatalog.replace, navigationCurrent, locationKey };
@@ -231,7 +231,7 @@ function SidebarProjects({ projects, pending, pendingRemovals, compact, ready, d
 }
 
 function ProjectGroup({ project, pending, removing, onRemove, compact, ready, browserOpen, portalTarget, browserTrigger, onInteractionChange, onNavigate }: { project: ProjectResource; pending: boolean; removing: boolean; onRemove(): void; compact: boolean; ready: boolean; browserOpen: boolean; portalTarget?: HTMLDivElement; browserTrigger: React.RefObject<HTMLButtonElement | null>; onInteractionChange(projectId: string, active: boolean): void; onNavigate(): void }) {
-  const { route, query: params, navigate, createSession } = useWorkspace();
+  const { route, query: params, navigate } = useWorkspace();
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -279,7 +279,7 @@ function ProjectGroup({ project, pending, removing, onRemove, compact, ready, br
     return () => clearTimeout(timer);
   }, [compact, filter, query, searchOpen, active, project.id, navigate]);
   const actions = <>
-    <button className="project-new-session" aria-label={`在 ${project.name} 中新建会话`} title={project.capability.state === "ready" ? `新建会话 · ${project.name}` : project.capability.message} disabled={pending || removing || project.capability.state !== "ready"} onClick={() => { setExpanded(true); setSearchOpen(false); setFilter(""); setPopupFilter(""); void createSession(project.id); }}><Plus size={13} /></button>
+    <button className="project-new-session" aria-label={`在 ${project.name} 中新建会话`} title={project.capability.state === "ready" ? `新建会话 · ${project.name}` : project.capability.message} disabled={pending || removing || project.capability.state !== "ready"} onClick={() => { setExpanded(true); setSearchOpen(false); setFilter(""); setPopupFilter(""); onNavigate(); navigate(`${projectUrl(project.id)}/sessions`); }}><Plus size={13} /></button>
     <div className="project-menu-anchor">
       <DropdownMenu open={menuOpen} onOpenChange={(open) => { if (open) menuFocus.current = "trigger"; setMenuOpen(open); }}>
         <DropdownMenuTrigger ref={menuTrigger} className="project-more" aria-label={`项目操作 ${project.name}`} title="项目操作" disabled={removing}><MoreHorizontal size={13} /></DropdownMenuTrigger>
