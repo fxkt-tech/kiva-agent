@@ -42,7 +42,25 @@ describe("global settings dialog", () => {
   const button = (label: string) => root().findAllByType("button").find((node) => text(node) === label)!;
   const field = (label: string) => root().findAll((node) => (node.type === "input" || node.type === Select || node.type === Combobox) && (node.props["aria-label"] === label || node.props.label === label))[0];
   async function click(node: ReactTestInstance) { assert.ok(node, "expected control exists"); await act(async () => { node.props.onClick({ preventDefault() {}, stopPropagation() {} }); await settle(); }); }
-  async function change(label: string, value: string) { await act(async () => {
+  async function editDefaults() {
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    if (!field("默认思考强度")) await click(button("修改默认模型"));
+  }
+  async function providers() {
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    const back = root().findAllByProps({ "aria-label": "返回模型首页" })[0];
+    if (back) await click(back);
+    await click(button("管理提供方"));
+  }
+  async function manageProvider(id: string) {
+    await providers();
+    await click(root().findByProps({ "aria-label": `管理提供方 ${id}` }));
+  }
+  async function startNewProvider() { await providers(); await click(button("新增提供方")); }
+  async function change(label: string, value: string) {
+    if (label === "选择提供方") { await manageProvider(value); return; }
+    if (label === "默认模型" || label === "默认思考强度") await editDefaults();
+    await act(async () => {
     const control = field(label);
     if (control.props.onValueChange) {
       const option = control.props.options.find((option: { value: string | number }) => String(option.value) === value);
@@ -71,7 +89,7 @@ describe("global settings dialog", () => {
       if (path === "/api/settings/models") return Response.json(catalog);
       if (path === "/api/settings/defaults") return Response.json({ ...catalog, revision: "catalog_confirmed_1234", defaults: { provider: body.provider, modelId: body.modelId, thinkingLevel: body.thinkingLevel } });
       if (path === "/api/settings/providers") {
-        const definition = body.definition; settings = { ...settings, revision: "settings_confirmed_1234", providers: [...settings.providers.filter((item) => item.id !== definition.id), { id: definition.id, name: definition.id, kind: "configured", editable: true, definition, credential: { source: "none", configured: false, editable: true, revision: "credential_new_1234" } }] };
+        const definition = body.definition; const existing = settings.providers.find((provider) => provider.id === definition.id); settings = { ...settings, revision: "settings_confirmed_1234", providers: [...settings.providers.filter((item) => item.id !== definition.id), { id: definition.id, name: definition.id, kind: "configured", editable: true, definition, credential: existing?.credential ?? { source: "none", configured: false, editable: true, revision: "credential_new_1234" } }] };
         return Response.json({ settings, catalog });
       }
       if (path.endsWith("/credential")) {
@@ -94,13 +112,327 @@ describe("global settings dialog", () => {
   const authRoute = "/api/settings/providers/openai/oauth";
   const authAttempt = (id = "auth_attempt_first_123456") => ({ id, status: "awaiting_authorization", expiresAt: "2027-01-01T00:00:00.000Z", authorizationUrl: "https://auth.openai.com/api/accounts/authorize?state=fixture", promptId: "auth_prompt_first_123456" });
 
+  it("lists every available model with its provider, marks the default and searches without changing configuration", async () => {
+    const models = [...catalog.models, { ...catalog.models[0], provider: "another-provider" }, ...["third", "fourth", "fifth"].map((id) => ({ ...catalog.models[0], id }))];
+    extra = async (path) => path === "/api/settings/models" ? Response.json({ ...catalog, models }) : undefined;
+    await openWithCatalogReads(); await click(root().findByProps({ id: "settings-tab-models" }));
+    const list = () => root().findByProps({ "aria-label": "可用模型列表" });
+    const rows = () => list().findAllByProps({ className: "settings-row" }).map((row) => ({ id: text(row.findByType("strong")), provider: text(row.findByType("p")), status: text(row.findByProps({ className: "settings-row-control" })) }));
+    assert.deepEqual(rows().map(({ id, provider }) => ({ id, provider })), models.map((model) => ({ id: model.id, provider: `提供方 · ${model.provider}` })));
+    assert.deepEqual(rows().filter((row) => row.status === "默认").map(({ id, provider }) => ({ id, provider })), [{ id: "smart", provider: "提供方 · fixture" }]);
+    await act(() => root().findByProps({ "aria-label": "搜索可用模型" }).props.onChange({ target: { value: "ANOTHER-provider" } }));
+    assert.deepEqual(rows(), [{ id: "smart", provider: "提供方 · another-provider", status: "" }]);
+    await act(() => root().findByProps({ "aria-label": "搜索可用模型" }).props.onChange({ target: { value: "missing" } }));
+    assert.match(text(list()), /没有匹配的模型/);
+    const reads = requests.filter((request) => request.path === "/api/settings/models").length;
+    await click(button("刷新列表"));
+    assert.equal(requests.filter((request) => request.path === "/api/settings/models").length, reads + 1);
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("opens a passive model home with explicit setup entries and no visible connection or login forms", async () => {
+    openAIMetadata(); await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    const panel = root().findByProps({ id: "settings-panel-models" });
+    assert.ok(button("添加模型")); assert.ok(button("管理提供方")); assert.ok(button("修改默认模型"));
+    assert.match(text(panel), /fixture \/ smart · medium/);
+    assert.equal(field("API Key"), undefined); assert.equal(field("API 地址"), undefined);
+    assert.equal(button("使用 ChatGPT 登录"), undefined); assert.equal(field("默认模型"), undefined);
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("添加模型"));
+    assert.deepEqual(field("添加到提供方").props.options.map((option: { value: string }) => option.value), ["fixture", "__new"]);
+    assert.ok(button("管理提供方认证")); assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("uses the same single heading and continuous setting-row composition as the other settings categories", async () => {
+    await open();
+    for (const id of ["appearance", "conversation"]) {
+      const panel = root().findByProps({ id: `settings-panel-${id}` });
+      assert.equal(panel.findAllByProps({ className: "settings-section-heading" }).length, 1);
+      assert.ok(panel.findByProps({ className: "settings-section-heading" }).findByType("p"));
+      assert.ok(panel.findAllByProps({ className: "settings-row" }).length > 0);
+    }
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    const home = root().findByProps({ className: "settings-model-view" });
+    const headings = home.findAllByProps({ className: "settings-section-heading" });
+    assert.equal(headings.length, 1); assert.equal(text(headings[0].findByType("h3")), "模型"); assert.ok(headings[0].findByType("p"));
+    assert.equal(home.findAllByProps({ className: "settings-section" }).length, 0);
+    assert.equal(root().findAllByProps({ className: "settings-models-navigation" }).length, 0);
+    const rows = home.findAllByProps({ className: "settings-row" });
+    assert.deepEqual(rows.map((row) => text(row.findByType("strong"))), ["默认模型", "ChatGPT / Codex 订阅", "提供方", "可用模型", "smart", "plain"]);
+    const catalogActions = rows[3].findByProps({ className: "settings-row-control" }).findByProps({ className: "settings-shortcut-actions" });
+    assert.deepEqual(catalogActions.findAllByType("button").map(text), ["添加模型", "刷新列表"]);
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("keeps category focus on its tab and focuses headings only for inner model navigation", async () => {
+    let headingFocus = 0;
+    await act(async () => {
+      renderer = create(createElement(SettingsDialog, { catalog, modelsLoading: false, onCatalog() {}, onReloadCatalog() {}, onClose() {} }), {
+        createNodeMock: (element) => element.type === "h3" ? { focus() { headingFocus++; } } : null,
+      });
+      await settle();
+    });
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.equal(headingFocus, 0, "entering Models must preserve the category tab's focus");
+    await click(button("管理提供方"));
+    assert.equal(headingFocus, 1, "inner navigation announces its new context through the heading");
+    await click(root().findByProps({ id: "settings-tab-about" }));
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.equal(headingFocus, 1, "returning to the category must not steal tab focus");
+    await click(root().findByProps({ "aria-label": "管理提供方 fixture" }));
+    assert.equal(headingFocus, 2);
+  });
+
+  it("adds one model to the complete existing definition without changing connection, old models or defaults", async () => {
+    settings.providers[0] = { ...settings.providers[0], credential: { ...settings.providers[0].credential, configured: true, source: "stored" } };
+    const baseline = structuredClone(settings.providers[0].definition!);
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("添加模型"));
+    await change("添加到提供方", "fixture"); await click(button("下一步"));
+    assert.equal(field("API 地址"), undefined); assert.equal(field("API Key"), undefined);
+    await change("模型 2 ID", "smart"); assert.equal(button("保存模型").props.disabled, true);
+    await click(button("保存模型")); assert.equal(requests.filter((request) => request.body).length, 0);
+    await change("模型 2 ID", "new-model"); await change("模型 2 名称", "New model"); await click(button("保存模型"));
+    assert.deepEqual(requests.find((request) => request.path === "/api/settings/providers")?.body, { revision: "settings_revision_1234", definition: { ...baseline, models: [...baseline.models, { id: "new-model", name: "New model" }] } });
+    assert.equal(requests.filter((request) => request.path === "/api/settings/defaults").length, 0);
+    assert.equal(requests.filter((request) => request.path.endsWith("/credential")).length, 0);
+    assert.equal(field("API Key"), undefined); assert.ok(button("完成"));
+  });
+
+  it("keeps a saved new provider and retries only credential persistence after a key failure", async () => {
+    let keyAttempts = 0;
+    extra = async (path) => {
+      if (path === "/api/settings/providers/new-provider/credential") {
+        if (++keyAttempts === 1) return Response.json({ code: "configuration_conflict" }, { status: 409 });
+        settings = { ...settings, providers: settings.providers.map((provider) => provider.id === "new-provider" ? { ...provider, credential: { ...provider.credential, configured: true, source: "stored" } } : provider) };
+        return Response.json({ settings, catalog });
+      }
+    };
+    await open(); await startNewProvider();
+    await change("提供方 ID", "new-provider"); await change("API 地址", "https://new.test/v1"); await change("模型 1 ID", "first-model");
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("保存模型")); assert.match(text(root()), /已保存，待配置认证/);
+    await change("API Key", "NEW_KEY_SENTINEL"); await click(button("保存 API Key"));
+    assert.equal(field("API Key").props.value, "NEW_KEY_SENTINEL"); assert.match(text(root()), /配置已在其他位置更改/);
+    await click(button("保存 API Key"));
+    assert.equal(field("API Key"), undefined); assert.ok(button("完成"));
+    assert.equal(requests.filter((request) => request.path === "/api/settings/providers").length, 1);
+    assert.equal(requests.filter((request) => request.path.endsWith("/credential")).length, 2);
+    assert.equal(requests.filter((request) => request.path.endsWith("/credential"))[0].body?.revision, "credential_new_1234");
+    assert.equal(requests.filter((request) => request.path === "/api/settings/defaults").length, 0);
+  });
+
+  it("exposes immutable built-in definitions and editable authentication as separate capabilities", async () => {
+    openAIMetadata(); await open(); await manageProvider("openai");
+    assert.equal(field("API 地址"), undefined); assert.equal(button("保存提供方"), undefined);
+    assert.ok(field("API Key")); assert.ok(button("使用 ChatGPT 登录"));
+    await change("API Key", "UNSAVED_BUILTIN_KEY");
+    await click(root().findByProps({ "aria-label": "返回模型首页" }));
+    assert.match(text(root().findByProps({ role: "alertdialog" })), /放弃当前修改/);
+    await click(button("继续编辑")); assert.equal(field("API Key").props.value, "UNSAVED_BUILTIN_KEY");
+    await click(root().findByProps({ "aria-label": "返回模型首页" })); await click(button("放弃当前修改"));
+    assert.equal(field("API Key"), undefined); await manageProvider("openai"); assert.equal(field("API Key").props.value, "");
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("retains a single authorization attempt and reachable cancellation across inner and category navigation", async () => {
+    openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined }) : undefined;
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录"));
+    await click(root().findByProps({ "aria-label": "返回模型首页" }));
+    assert.equal(button("取消授权"), undefined); assert.ok(button("返回授权"));
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, true);
+    await click(root().findByProps({ id: "settings-tab-about" })); await click(root().findByProps({ id: "settings-tab-models" }));
+    await click(button("返回授权")); assert.ok(button("取消授权"));
+    assert.equal(requests.filter((request) => request.path === authRoute).length, 1);
+    await click(button("取消授权")); assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+    assert.equal(requests.filter((request) => request.path.endsWith("/cancel")).length, 1);
+  });
+
+  it("retains dirty defaults while visiting provider management and only saves defaults explicitly", async () => {
+    await open(); await change("默认思考强度", "high");
+    await click(button("管理提供方")); await click(root().findByProps({ "aria-label": "管理提供方 fixture" }));
+    await click(root().findByProps({ "aria-label": "返回模型首页" }));
+    assert.equal(field("默认思考强度").props.value, "high");
+    await click(root().findByProps({ "aria-label": "关闭设置" })); assert.ok(root().findByProps({ role: "alertdialog" })); await click(button("继续编辑"));
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("取消修改")); assert.equal(field("默认思考强度"), undefined);
+    assert.match(text(root().findByProps({ "aria-label": "默认模型设置" })), /fixture \/ smart · medium/);
+  });
+
+  it("can cancel a retained default edit after its available catalog becomes empty", async () => {
+    await openWithCatalogReads(); await change("默认思考强度", "high");
+    extra = async (path) => path === "/api/settings/models" ? Response.json({ ...catalog, revision: "catalog_empty_revision", models: [] }) : undefined;
+    await click(button("刷新列表"));
+    assert.equal(field("默认模型"), undefined);
+    assert.equal(button("保存默认模型").props.disabled, true);
+    await click(button("取消修改"));
+    assert.ok(button("修改默认模型"));
+    await click(root().findByProps({ "aria-label": "关闭设置" }));
+    assert.equal(closes, 1, "the unavailable-model candidate must not leave a stale dirty close guard");
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("blocks definitions that lose edit capability during a staged add, while retaining the candidate", async () => {
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("添加模型"));
+    await change("添加到提供方", "fixture"); await click(button("下一步")); await change("模型 2 ID", "candidate");
+    extra = async (path) => {
+      if (path === "/api/settings/providers") return Response.json({ code: "configuration_conflict" }, { status: 409 });
+      if (path === "/api/settings") { settings = { ...settings, providers: settings.providers.map((provider) => provider.id === "fixture" ? { ...provider, editable: false, readOnlyReason: "高级配置只读" } : provider) }; return Response.json(settings); }
+    };
+    await click(button("保存模型")); await click(button("重新加载配置"));
+    assert.equal(field("模型 2 ID").props.value, "candidate"); assert.equal(button("保存模型").props.disabled, true);
+    assert.match(text(root()), /高级配置只读/);
+    await click(button("保存模型")); assert.equal(requests.filter((request) => request.path === "/api/settings/providers").length, 1);
+  });
+
+  it("keeps definition saved-with-warning distinct from unsaved model setup", async () => {
+    extra = async (path, body) => {
+      if (path === "/api/settings/providers" && body) {
+        const definition = body.definition as NonNullable<InstallationSettings["providers"][number]["definition"]>;
+        settings = { ...settings, providers: [...settings.providers, { id: definition.id, name: definition.id, kind: "configured", editable: true, definition, credential: { source: "none", configured: false, editable: true, revision: "credential_warning_1234" } }] };
+        return Response.json({ settings, warning: "模型配置已保存，但列表需要重新加载。" });
+      }
+    };
+    await open(); await startNewProvider(); await change("提供方 ID", "warning-provider"); await change("API 地址", "https://warning.test/v1"); await change("模型 1 ID", "warning-model");
+    await click(button("保存模型"));
+    assert.ok(root().findByProps({ "aria-label": "模型认证步骤" })); assert.match(text(root()), /已保存，状态待确认.*模型配置已保存/);
+    assert.equal(field("提供方 ID"), undefined); await change("API Key", "WARNING_KEY_SENTINEL");
+    assert.equal(requests.filter((request) => request.path === "/api/settings/providers").length, 1);
+  });
+
+  it("rejects a full provider even when the disabled selection is invoked programmatically", async () => {
+    const provider = settings.providers[0];
+    settings.providers[0] = { ...provider, definition: { ...provider.definition!, models: Array.from({ length: 200 }, (_, index) => ({ id: `model-${index}` })) } };
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("添加模型"));
+    assert.equal(field("添加到提供方").props.options.find((option: { value: string }) => option.value === "fixture").disabled, true);
+    await change("添加到提供方", "fixture"); await click(button("下一步"));
+    assert.equal(root().findAllByProps({ "aria-label": "添加模型表单" }).length, 0);
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("checks the merged model limit after reloading a concurrently expanded provider", async () => {
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("添加模型"));
+    await change("添加到提供方", "fixture"); await click(button("下一步")); await change("模型 2 ID", "candidate");
+    extra = async (path) => {
+      if (path === "/api/settings/providers") return Response.json({ code: "configuration_conflict" }, { status: 409 });
+      if (path === "/api/settings") {
+        const provider = settings.providers[0];
+        settings = { ...settings, revision: "settings_expanded_1234", providers: [{ ...provider, definition: { ...provider.definition!, models: [{ id: "smart" }, ...Array.from({ length: 199 }, (_, index) => ({ id: `external-${index}` }))] } }, ...settings.providers.slice(1)] };
+        return Response.json(settings);
+      }
+    };
+    await click(button("保存模型")); await click(button("重新加载配置"));
+    assert.equal(field("模型 2 ID").props.value, "candidate");
+    assert.equal(button("保存模型").props.disabled, true, "the preserved candidate would merge into 201 models");
+    await click(button("保存模型"));
+    assert.equal(requests.filter((request) => request.path === "/api/settings/providers").length, 1);
+  });
+
+  it("guards pending model saves from duplicate writes and leaving the staged form", async () => {
+    const gate = deferred<Response>();
+    extra = async (path) => path === "/api/settings/providers" ? gate.promise : undefined;
+    await open(); await startNewProvider(); await change("提供方 ID", "pending-provider"); await change("API 地址", "https://pending.test/v1"); await change("模型 1 ID", "pending-model");
+    await click(button("保存模型"));
+    assert.equal(root().findByProps({ "aria-label": "返回模型首页" }).props.disabled, true);
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, true);
+    await click(button("正在保存…")); assert.equal(requests.filter((request) => request.body).length, 1);
+    const definition = { id: "pending-provider", api: "openai-completions" as const, baseUrl: "https://pending.test/v1", models: [{ id: "pending-model" }] };
+    settings = { ...settings, providers: [...settings.providers, { id: definition.id, name: definition.id, kind: "configured", editable: true, definition, credential: { source: "none", configured: false, editable: true, revision: "credential_pending_1234" } }] };
+    await act(async () => { gate.resolve(Response.json({ settings, catalog })); await settle(); });
+    assert.ok(root().findByProps({ "aria-label": "模型认证步骤" }));
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+    assert.equal(requests.filter((request) => request.body).length, 1);
+  });
+
+  it("keeps setup reachable when the available catalog fails to load", async () => {
+    await act(async () => { renderer = create(createElement(SettingsDialog, { modelsLoading: false, modelsError: "无法读取模型列表，请重新加载。", onCatalog() {}, onReloadCatalog() {}, onClose() { closes++; } })); await settle(); });
+    await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.match(text(root().findByProps({ "aria-label": "可用模型列表" })), /模型列表加载失败/);
+    assert.equal(button("修改默认模型").props.disabled, true);
+    await click(button("添加模型")); assert.ok(field("添加到提供方"));
+    assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("makes Codex subscription login discoverable from model home without exposing a generic key form", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined }) : undefined;
+    await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    const home = root().findByProps({ className: "settings-model-view" });
+    assert.match(text(home), /ChatGPT \/ Codex 订阅/);
+    await click(button("连接订阅"));
+    assert.ok(root().findByProps({ "aria-label": "OpenAI ChatGPT 授权" }));
+    assert.equal(field("API Key"), undefined); assert.equal(field("API 地址"), undefined);
+    assert.ok(button("使用 ChatGPT 登录"));
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("使用 ChatGPT 登录"));
+    assert.deepEqual(requests.filter((request) => request.body).map((request) => request.path), [authRoute]);
+    await click(button("取消授权"));
+  });
+
+  it("keeps subscription state and disabled-login reasons visible without hiding the subscription entry", async () => {
+    openAIMetadata("oauth");
+    settings = { ...settings, providers: settings.providers.map((provider) => provider.id === "openai" ? { ...provider, authorization: { canLogin: false, canLogout: true, reason: "当前提供方使用受保护配置，不能重新登录。" } } : provider) };
+    await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.match(text(root().findByProps({ "aria-label": "ChatGPT Codex 订阅" })), /已连接 ChatGPT.*当前提供方使用受保护配置，不能重新登录/);
+    await click(button("管理登录"));
+    assert.equal(button("重新授权").props.disabled, true); assert.ok(button("退出登录"));
+    assert.match(text(root().findByProps({ "aria-label": "OpenAI ChatGPT 授权" })), /当前提供方使用受保护配置，不能重新登录/);
+    assert.equal(field("API Key"), undefined); assert.equal(requests.filter((request) => request.body).length, 0);
+  });
+
+  it("keeps an unsupported subscription entry actionable without inventing a legacy login capability", async () => {
+    settings = { ...settings, providers: [...settings.providers, { id: "openai-codex", name: "Legacy Codex", kind: "builtin", editable: false, credential: { source: "oauth", configured: true, editable: false, revision: "legacy_codex_revision" } }] };
+    await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    const entry = root().findByProps({ "aria-label": "ChatGPT Codex 订阅" });
+    assert.match(text(entry), /当前提供方配置不支持订阅登录/);
+    await click(button("查看订阅设置"));
+    assert.match(text(root().findByProps({ "aria-label": "订阅登录说明" })), /订阅登录暂不可用/);
+    assert.equal(button("使用 ChatGPT 登录"), undefined);
+    assert.equal(field("API Key"), undefined);
+    assert.equal(requests.filter((request) => request.body).length, 0);
+    await click(button("管理提供方"));
+    assert.ok(root().findByProps({ "aria-label": "管理提供方 openai-codex" }));
+    assert.equal(requests.some((request) => request.path.includes("/openai-codex/oauth")), false);
+  });
+
+  it("retains one subscription authorization across home, provider detail and category navigation", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined }) : undefined;
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("连接订阅")); await click(button("使用 ChatGPT 登录"));
+    await click(root().findByProps({ "aria-label": "返回模型首页" }));
+    assert.ok(button("返回授权")); assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, true);
+    await manageProvider("openai"); assert.ok(button("取消授权"));
+    await click(root().findByProps({ "aria-label": "返回模型首页" })); await click(button("返回授权"));
+    assert.equal(field("API Key"), undefined); assert.equal(root().findAllByProps({ "aria-label": "提供方设置" }).length, 0);
+    await click(root().findByProps({ id: "settings-tab-about" })); await click(root().findByProps({ id: "settings-tab-models" }));
+    assert.ok(button("取消授权")); assert.equal(requests.filter((request) => request.path === authRoute).length, 1);
+    await click(button("取消授权"));
+    assert.equal(requests.filter((request) => request.path.endsWith("/cancel")).length, 1);
+    assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
+  });
+
+  it("guards returning to a pending subscription authorization from a dirty model form", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    openAIMetadata();
+    extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined }) : undefined;
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("连接订阅")); await click(button("使用 ChatGPT 登录"));
+    await click(root().findByProps({ "aria-label": "返回模型首页" })); await startNewProvider(); await change("提供方 ID", "unsaved-subscription-switch");
+    await click(button("返回授权")); assert.ok(root().findByProps({ role: "alertdialog" }));
+    await click(button("继续编辑")); assert.equal(field("提供方 ID").props.value, "unsaved-subscription-switch");
+    await click(button("返回授权")); await click(button("放弃当前修改"));
+    assert.equal(field("提供方 ID"), undefined); assert.equal(field("API Key"), undefined); assert.ok(button("取消授权"));
+    await click(button("取消授权")); assert.equal(requests.filter((request) => request.path === authRoute).length, 1);
+  });
+
   it("connects ChatGPT from Models, confirms replacement and local logout, and leaves model defaults explicit", async () => {
     openAIMetadata("stored");
     extra = async (path) => {
       if (path === authRoute) { openAIMetadata("oauth"); return Response.json({ ...authAttempt(), status: "succeeded", authorizationUrl: undefined, promptId: undefined, result: { settings, catalog: { ...catalog, revision: "catalog_auth_confirmed" } } }); }
       if (path === `${authRoute}/logout`) { openAIMetadata(); return Response.json({ settings, catalog }); }
     };
-    await open(); await click(root().findByProps({ id: "settings-tab-models" }));
+    await open(); await manageProvider("openai");
     assert.equal(requests.filter((request) => request.body).length, 0);
     await click(button("使用 ChatGPT 登录")); assert.equal(requests.filter((request) => request.body).length, 0);
     assert.match(text(root()), /替换 OpenAI 认证/);
@@ -119,7 +451,7 @@ describe("global settings dialog", () => {
       if (path === `${authRoute}/auth_attempt_first_123456`) return delayed.promise;
       if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(path.includes("second") ? "auth_attempt_second_123456" : undefined), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
     };
-    await open(); await click(button("使用 ChatGPT 登录"));
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录"));
     await act(async () => { t.mock.timers.tick(250); await settle(); });
     await click(button("取消授权")); assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
     await click(button("使用 ChatGPT 登录"));
@@ -137,7 +469,7 @@ describe("global settings dialog", () => {
       }
       if (path === `${authRoute}/logout`) { openAIMetadata(); return Response.json({ refreshRequired: true }); }
     };
-    await open(); await click(button("使用 ChatGPT 登录"));
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录"));
     assert.match(text(root()), /已连接 ChatGPT/);
     assert.match(text(root()), /授权设置已保存，但状态暂时无法刷新/);
     assert.equal(text(root()).includes("ChatGPT 授权未确认"), false);
@@ -154,7 +486,7 @@ describe("global settings dialog", () => {
   it("recovers missing authorization records after a server restart so Settings can close and login can restart", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] }); openAIMetadata();
     extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.startsWith(authRoute + "/") ? Response.json({ code: "authorization_not_found", error: "SECRET_NOT_FOR_UI" }, { status: 404 }) : undefined;
-    await open(); await click(button("使用 ChatGPT 登录"));
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录"));
     await act(async () => { t.mock.timers.tick(250); await settle(); });
     assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false);
     assert.ok(button("使用 ChatGPT 登录")); assert.equal(text(root()).includes("SECRET_NOT_FOR_UI"), false);
@@ -164,7 +496,7 @@ describe("global settings dialog", () => {
   it("recovers a cancel response that no longer has a server-side attempt", async () => {
     openAIMetadata();
     extra = async (path) => path === authRoute ? Response.json(authAttempt()) : path.endsWith("/cancel") ? Response.json({ code: "authorization_not_found" }, { status: 404 }) : undefined;
-    await open(); await click(button("使用 ChatGPT 登录")); await click(button("取消授权"));
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录")); await click(button("取消授权"));
     assert.equal(root().findByProps({ "aria-label": "关闭设置" }).props.disabled, false); assert.ok(button("使用 ChatGPT 登录"));
   });
 
@@ -176,7 +508,7 @@ describe("global settings dialog", () => {
       if (path === `${authRoute}/auth_attempt_first_123456`) return ++polls === 1 ? Response.json({ code: "authorization_failed", error: "SECRET_NOT_FOR_UI" }, { status: 503 }) : Response.json(authAttempt());
       if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
     };
-    await open(); await click(button("使用 ChatGPT 登录"));
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录"));
     await act(async () => { t.mock.timers.tick(250); await settle(); }); assert.match(text(root()), /ChatGPT 授权未确认/);
     await act(async () => { t.mock.timers.tick(750); await settle(); }); assert.equal(text(root()).includes("ChatGPT 授权未确认"), false);
     await change("ChatGPT 授权回调地址", "http://127.0.0.1:1455/auth/callback?code=CALLBACK_PRIVATE&state=fixture");
@@ -192,7 +524,7 @@ describe("global settings dialog", () => {
       if (path === authRoute) { ids.push(String(body?.operationId)); if (ids.length === 1) throw new Error("SECRET_NOT_FOR_UI"); return Response.json(authAttempt()); }
       if (path.endsWith("/cancel")) return Response.json({ ...authAttempt(), status: "cancelled", authorizationUrl: undefined, promptId: undefined });
     };
-    await open(); await click(button("使用 ChatGPT 登录")); assert.equal(text(root()).includes("SECRET_NOT_FOR_UI"), false);
+    await open(); await manageProvider("openai"); await click(button("使用 ChatGPT 登录")); assert.equal(text(root()).includes("SECRET_NOT_FOR_UI"), false);
     await click(button("重试授权")); assert.equal(ids.length, 2); assert.equal(ids[0], ids[1]); await click(button("取消授权"));
   });
 
@@ -315,34 +647,35 @@ describe("global settings dialog", () => {
   });
 
   it("saves provider definition before offering a separate key action and retains drafts across categories", async () => {
-    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await click(button("新增提供方"));
+    await open(); await click(root().findByProps({ id: "settings-tab-models" })); await startNewProvider();
     await change("提供方 ID", "new-provider"); await change("API 地址", "https://example.test/v1"); await change("模型 1 ID", "new-model");
     await click(root().findByProps({ id: "settings-tab-about" })); await click(root().findByProps({ id: "settings-tab-models" })); assert.equal(field("API 地址").props.value, "https://example.test/v1");
-    assert.equal(field("API Key"), undefined); await click(button("保存提供方"));
+    assert.equal(field("API Key"), undefined); await click(button("保存模型"));
     assert.equal(requests.filter((item) => item.body).length, 1); assert.equal(requests.find((item) => item.body)?.path, "/api/settings/providers");
-    assert.equal(field("提供方 ID").props.disabled, true); assert.equal(field("API Key").props.value, "");
-    assert.match(text(root()), /未配置认证/); assert.equal(button("保存 API Key").props.disabled, true);
+    assert.ok(root().findByProps({ "aria-label": "模型认证步骤" })); assert.equal(field("API Key").props.value, "");
+    assert.match(text(root()), /待配置认证/); assert.equal(button("保存 API Key").props.disabled, true);
   });
 
   it("rejects an existing provider ID in the add form instead of silently updating that provider", async () => {
-    await open(); await click(button("新增提供方"));
+    await open(); await startNewProvider();
     await change("提供方 ID", "fixture"); await change("API 地址", "https://replacement.test/v1"); await change("模型 1 ID", "different-model");
     assert.equal(field("提供方 ID").props["aria-invalid"], true);
     assert.match(text(root()), /提供方 ID 已存在.*请使用不同 ID，或选择现有提供方进行编辑/);
-    assert.equal(button("保存提供方").props.disabled, true);
-    await click(button("保存提供方"));
+    assert.equal(button("保存模型").props.disabled, true);
+    await click(button("保存模型"));
     assert.equal(requests.filter((item) => item.body).length, 0, "the submit handler must also reject a duplicate add candidate");
     assert.equal(settings.providers[0].definition?.baseUrl, "https://api.example.com/v1");
-    await change("提供方 ID", "oauth-only"); assert.equal(button("保存提供方").props.disabled, true);
-    await change("提供方 ID", "Fixture"); assert.equal(button("保存提供方").props.disabled, false, "identity is case-sensitive; do not invent lower-case normalization");
+    await change("提供方 ID", "oauth-only"); assert.equal(button("保存模型").props.disabled, true);
+    await change("提供方 ID", "Fixture"); assert.equal(button("保存模型").props.disabled, false, "identity is case-sensitive; do not invent lower-case normalization");
     assert.equal(field("提供方 ID").props["aria-invalid"], undefined);
     assert.equal(requests.filter((item) => item.body).length, 0);
   });
 
-  it("keeps the new model editor open while typing and respects manual collapse", async () => {
-    await open(); await click(button("新增提供方"));
+  it("keeps advanced model fields collapsed until explicitly opened and retains manual disclosure while typing", async () => {
+    await open(); await startNewProvider();
     const editor = () => root().findByProps({ className: "settings-model-editor" });
-    assert.equal(editor().props.open, true);
+    assert.equal(editor().props.open, false);
+    await act(() => editor().props.onToggle({ currentTarget: { open: true } }));
     await change("模型 1 ID", "m"); assert.equal(editor().props.open, true);
     await change("模型 1 ID", "model-complete"); assert.equal(editor().props.open, true);
     await act(() => editor().props.onToggle({ currentTarget: { open: false } }));
@@ -440,7 +773,7 @@ describe("global settings dialog", () => {
     await click(button("重新加载配置") ?? button("检查后端"));
     await click(button("保存提供方")); assert.equal(field("API 地址").props.value, "https://changed.test/v1");
     await act(async () => { gate.resolve(Response.json(metadata())); await settle(); });
-    assert.equal(field("API 地址").props.value, "https://changed.test/v1"); assert.equal(field("选择提供方").props.options.find((option: { value: string }) => option.value === "fixture")?.label, "fixture · 已配置");
+    assert.equal(field("API 地址").props.value, "https://changed.test/v1"); assert.match(text(root().findByProps({ className: "settings-provider-meta" })), /fixture.*自定义提供方/);
   });
 });
 

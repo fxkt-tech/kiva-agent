@@ -11,8 +11,7 @@ import { shortcutRegistry } from "@/lib/shortcuts";
 import { useWebPreferences } from "@/lib/web-preferences";
 import type { InstallationModelCatalog, InstallationSettings, ProviderSaveResult } from "@/shared/installation-settings";
 import { AppearancePanel, ConversationPanel, SettingRow, ShortcutsPanel } from "./preferences-panels";
-import { OpenAIAuthorization } from "./openai-authorization";
-import { DefaultsEditor, ProvidersEditor } from "./models-panel";
+import { ModelsSettings } from "./models-settings";
 import { settingsApi } from "./api";
 import { restoreSettingsFocus } from "./focus";
 
@@ -75,7 +74,7 @@ export function SettingsDialog({ onClose, catalog, modelsLoading, modelsError, o
           {persistenceError && <Alert title="偏好未持久保存" variant="warning"><p>{persistenceError}</p></Alert>}
           <section role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" hidden={category !== "appearance"}><AppearancePanel /></section>
           <section role="tabpanel" id="settings-panel-shortcuts" aria-labelledby="settings-tab-shortcuts" hidden={category !== "shortcuts"}><ShortcutsPanel /></section>
-          <section role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" hidden={category !== "models"}><OpenAIAuthorization settings={settings} loading={loading} onSaved={saved} onReload={reload} onState={onState} onNotice={showNotice} /><DefaultsEditor catalog={catalog} loading={modelsLoading} error={modelsError} onReload={onReloadCatalog} onCatalog={onCatalog} onState={onState} onNotice={showNotice} /><ProvidersEditor settings={settings} loading={loading} error={error} onReload={reload} onSaved={saved} onState={onState} onNotice={showNotice} /></section>
+          <section role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" hidden={category !== "models"}><ModelsSettings active={category === "models"} settings={settings} loading={loading} error={error} onReload={reload} catalog={catalog} modelsLoading={modelsLoading} modelsError={modelsError} onReloadCatalog={onReloadCatalog} onCatalog={onCatalog} onSaved={saved} onState={onState} onNotice={showNotice} /></section>
           <section role="tabpanel" id="settings-panel-conversation" aria-labelledby="settings-tab-conversation" hidden={category !== "conversation"}><ConversationPanel /></section>
           <section role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" hidden={category !== "about"}><AboutPanel settings={settings} loading={loading} error={error} onReload={reload} onNotice={showNotice} /></section>
         </div>

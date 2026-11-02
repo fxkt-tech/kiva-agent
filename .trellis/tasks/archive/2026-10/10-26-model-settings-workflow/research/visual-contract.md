@@ -1,0 +1,12 @@
+# Relevant existing settings visual contract
+
+This is a bounded research summary, not a new design system. The complete authority is `.trellis/spec/kiva-web/frontend/visual-system.md` (large enough to exceed automatic context injection); consult that source on demand rather than relying on a truncated injection.
+
+- Scope/palette/typography sections: Kiva follows the Codex desktop workspace direction. Reuse semantic background/sidebar/card/subtle, hover/selected/border/ring tokens. Retain local Geist fonts, existing type scale, and dense content presentation. Theme geometry and materials are already owned by styles/themes.css and shared primitive CSS.
+- Existing settings composition in `web/app/globals.css:44` onward: one quiet Settings dialog, 156px category sidebar, content padding 24px, and one outer scrolling settings-content surface. Existing mobile rules own the narrow layout. Do not add a second inner list scroll.
+- Reuse `settings-section-heading` (14px primary heading; muted 12px supporting paragraph), `settings-section-heading-action` for a heading/action composition, `settings-row`/`SettingRow` (17px vertical padding, thin bottom divider, primary title and muted secondary description), and existing form-grid/field/actions classes.
+- Models home is a flat setting/list surface. No tables, nested provider cards, custom badges/shadows, font substitution, or provider-specific colors are needed. Exact model ID is primary text, provider is secondary text. Header/Back navigation may use narrow feature layout rules while retaining shared controls.
+- `web/features/settings/preferences-panels.tsx:12` exports SettingRow. `ModelConfigurationFields` owns complete model/effort controlled fields. Reuse feature-local editors/state rather than introducing unrelated shared business logic.
+- `web/components/ui/primitives.css` owns 32px controls, compact 28px controls, shared popup surfaces and one thin focus treatment. Base UI owns overlays/focus/keyboard behavior; hiding a view is not sufficient to dismiss already-portaled popups.
+- Feedback contract: contextual errors/warnings use shared Alert; confirmed actions use concise Toast. Do not add red error paragraphs or duplicate notifications for one failure. A provider/credential save is not a connection test.
+- The task's user explicitly forbids browser testing and computer/browser automation. This overrides visual-system browser-QA recommendations. Validate semantic component reuse and state behavior through code/tests/typecheck/build without claiming rendered-browser inspection.

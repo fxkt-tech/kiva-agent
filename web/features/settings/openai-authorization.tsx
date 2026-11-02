@@ -22,8 +22,8 @@ const statusText = {
 };
 const refreshWarning = "授权设置已保存，但状态暂时无法刷新，请重新加载。";
 
-export function OpenAIAuthorization({ settings, loading, onSaved, onReload, onState, onNotice }: {
-  settings?: InstallationSettings; loading: boolean; onSaved(result: ProviderSaveResult): void; onReload(): void; onState: FormStateChange; onNotice(message: string): void;
+export function OpenAIAuthorization({ settings, loading, onSaved, onReload, onState, onNotice, visible = true, onReturn, navigationDisabled = false }: {
+  visible?: boolean; navigationDisabled?: boolean; onReturn?(): void; settings?: InstallationSettings; loading: boolean; onSaved(result: ProviderSaveResult): void; onReload(): void; onState: FormStateChange; onNotice(message: string): void;
 }) {
   const provider = settings?.providers.find((entry) => entry.id === "openai");
   const [attempt, setAttempt] = useState<AuthorizationAttempt>();
@@ -122,10 +122,12 @@ export function OpenAIAuthorization({ settings, loading, onSaved, onReload, onSt
     catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "退出登录未确认，请重试。"); }
     finally { busy.current = false; if (mounted.current) setRequestPending(false); }
   }
+  useEffect(() => { if (!visible) setConfirm(undefined); }, [visible]);
   if (!provider?.authorization) return null;
+  if (!visible) return pending ? <div className="settings-authorization-progress" role="status"><span>ChatGPT 授权进行中</span><Button size="sm" variant="ghost" disabled={navigationDisabled} onClick={onReturn}>返回授权</Button></div> : null;
   const connected = provider.credential.source === "oauth" && provider.credential.configured;
   return <section className="settings-section settings-openai-authorization" aria-label="OpenAI ChatGPT 授权">
-    <div className="settings-section-heading"><h3>OpenAI / ChatGPT</h3><p>使用 ChatGPT 账号授权，连接后在下方选择模型。可用模型取决于账号权限。</p></div>
+    <div className="settings-section-heading"><h3>OpenAI / ChatGPT</h3><p>使用 ChatGPT 账号授权。完成后返回模型首页选择模型，可用模型取决于账号权限。</p></div>
     <p className="settings-muted">{connected ? "已连接 ChatGPT" : provider.credential.configured ? "当前使用 API Key 或已有认证。" : "尚未连接 ChatGPT"}</p>
     {!provider.authorization.canLogin && <p className="settings-muted">{provider.authorization.reason}</p>}
     {!pending && <div className="settings-form-actions"><Button size="sm" disabled={loading || !provider.authorization.canLogin} onClick={() => { if (provider.credential.configured) setConfirm("login"); else void start(); }}>{connected ? "重新授权" : operation.current ? "重试授权" : "使用 ChatGPT 登录"}</Button>{provider.authorization.canLogout && <Button size="sm" variant="outline" disabled={loading} onClick={() => setConfirm("logout")}>退出登录</Button>}</div>}
