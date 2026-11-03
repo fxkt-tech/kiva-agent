@@ -195,7 +195,6 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
   .brand-row { transition: padding var(--sidebar-transition), gap var(--sidebar-transition); }
   .brand-row > .brand-home { margin-right: 33px; transition: margin var(--sidebar-transition), padding var(--sidebar-transition), gap var(--sidebar-transition); }
   .brand-name, .sidebar .nav-item > span, .sidebar-settings > span { min-width: 0; overflow: hidden; white-space: nowrap; }
-  .sidebar .nav-list { transition: padding-top var(--sidebar-transition); }
   .sidebar .nav-item { justify-content: flex-start; transition: padding var(--sidebar-transition); }
   .sidebar-settings { min-height: 32px; justify-content: flex-start; transition: padding var(--sidebar-transition), min-height var(--sidebar-transition); }
   .sidebar-collapse-toggle { position: absolute; top: 17px; right: 18px; margin: 0; transition: top var(--sidebar-transition), right var(--sidebar-transition), height var(--sidebar-transition); }
@@ -215,7 +214,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px
   :root[data-sidebar-collapsed="true"] .sidebar-settings > span,
   :root[data-sidebar-collapsed="true"] .sidebar .project-card,
   :root[data-sidebar-collapsed="true"] .sidebar .project-sessions { display: none; }
-  :root[data-sidebar-collapsed="true"] .nav-list { padding: 16px 10px 10px; }
+  :root[data-sidebar-collapsed="true"] .nav-list { padding: 0 10px 10px; }
   :root[data-sidebar-collapsed="true"] .nav-item { justify-content: flex-start; padding: 9px 13.5px; }
   :root[data-sidebar-collapsed="true"] .sidebar-project-heading { flex-direction: column; justify-content: center; gap: 4px; padding: 10px 10px 6px; }
   :root[data-sidebar-collapsed="true"] .sidebar-project-heading button { width: 34px; height: 30px; }
